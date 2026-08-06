@@ -1,5 +1,7 @@
 /* MyAthanor — フロントエンド（ビルドなしの ES モジュール） */
 
+import { icon, KIND_ICON } from './icons.js';
+
 const viewEl = document.getElementById('view');
 const topbarEl = document.getElementById('topbar');
 const tabsEl = document.getElementById('tabs');
@@ -70,7 +72,11 @@ const KIND_LABEL = { idea: 'アイデア', log: 'ログ' };
 
 function setTopbar({ title, sub = '', back = null, action = '' }) {
   topbarEl.innerHTML = `
-    ${back ? `<a class="icon-btn" href="${esc(back)}" aria-label="戻る">‹</a>` : ''}
+    ${
+      back
+        ? `<a class="icon-btn" href="${esc(back)}" aria-label="戻る">${icon('chevron')}</a>`
+        : ''
+    }
     <h1>${esc(title)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</h1>
     ${action}
   `;
@@ -82,6 +88,11 @@ function setActiveTab(tab) {
   }
 }
 
+// タブのドット絵は起動時に一度だけ流し込む。
+for (const el of tabsEl.querySelectorAll('.tab-mark')) {
+  el.innerHTML = icon(el.dataset.icon);
+}
+
 function missionCard(mission, { showSource = true } = {}) {
   const sourceHref = `#/${mission.source_type}/${mission.source_id}`;
   const done = mission.status === 'done';
@@ -91,18 +102,20 @@ function missionCard(mission, { showSource = true } = {}) {
          <button data-act="abandon" data-id="${mission.id}" class="ghost danger">断念</button>`
       : mission.status === 'abandoned'
         ? `<button data-act="reopen" data-id="${mission.id}" class="ghost">進行中に戻す</button>`
-        : '';
+        : legacyButton('mission', mission.id, mission.is_legacy);
   return `
-    <div class="card status-${esc(mission.status)}" data-mission="${mission.id}">
+    <div class="card status-${esc(mission.status)} ${mission.is_legacy ? 'is-legacy' : ''}"
+         data-mission="${mission.id}">
       <div class="card-top">
         <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
+        ${mission.is_legacy ? `<span class="badge now">${icon('chest')}レガシー</span>` : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
-      <div class="card-title">${esc(mission.title)}</div>
+      <div class="card-title">${icon('parchment')}<span>${esc(mission.title)}</span></div>
       <div class="card-meta">
-        <span>${done ? '実消費' : '見積'} TIME ${esc(fmtTime(mission.estimated_time))}</span>
-        <span>WALLET ${esc(fmtMoney(mission.estimated_money))}</span>
+        <span>${done ? '実消費' : '見積'} タイム ${esc(fmtTime(mission.estimated_time))}</span>
+        <span>ウォレット ${esc(fmtMoney(mission.estimated_money))}</span>
       </div>
       ${
         showSource && mission.source_title
@@ -139,24 +152,29 @@ function wireMissionActions(container, onChanged) {
 
 /* ---------- ホーム ---------- */
 
-function tankCard({ name, period, data, format }) {
+// リソースは2色の試験管で示す。下から 消費済み（薬草色）、消費予定（琥珀）。
+function tubeCard({ name, period, data, format }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
 
   return `
-    <div class="tank-card">
-      <div class="tank-head">
-        <span class="tank-name">${esc(name)}</span>
-        <span class="tank-period">${esc(period)}</span>
+    <div class="tube-card">
+      <div class="tube-head">
+        <span class="tube-name">${esc(name)}</span>
+        <span class="tube-period">${esc(period)}</span>
       </div>
-      <div class="tank-wrap">
-        <div class="tank ${data.over ? 'is-over' : ''}">
-          <div class="seg seg-consumed" style="height:${pct(data.consumed)}%"></div>
-          <div class="seg seg-planned" style="height:${pct(data.planned)}%"></div>
-          <div class="tank-grid"></div>
+      <div class="tube-wrap">
+        <div class="tube ${data.over ? 'is-over' : ''}">
+          <div class="tube-neck"></div>
+          <div class="tube-body">
+            <div class="liquid liquid-consumed" style="height:${pct(data.consumed)}%"></div>
+            <div class="liquid liquid-planned" style="height:${pct(data.planned)}%"></div>
+            <div class="tube-ticks"></div>
+            <div class="tube-shine"></div>
+          </div>
         </div>
-        <div class="tank-readout">
+        <div class="tube-readout">
           <div class="readout-row">
             <span class="k"><i class="swatch consumed"></i>消費済</span>
             <span class="v">${esc(format(data.consumed))}</span>
@@ -187,7 +205,7 @@ async function renderHome() {
   setActiveTab('home');
   setTopbar({
     title: 'MyAthanor',
-    action: '<a class="icon-btn" href="#/settings" aria-label="設定">⚙</a>',
+    action: `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
@@ -199,30 +217,40 @@ async function renderHome() {
   const upcoming = active.slice(0, 5);
 
   viewEl.innerHTML = `
-    <div class="section-title">Resource Status</div>
-    <div class="tanks">
-      ${tankCard({
-        name: 'TIME',
+    <div class="section-title">リソース</div>
+    <div class="tubes">
+      ${tubeCard({
+        name: 'タイム',
         period: `週 ${summary.time.period.label}`,
         data: summary.time,
         format: fmtTime,
       })}
-      ${tankCard({
-        name: 'WALLET',
+      ${tubeCard({
+        name: 'ウォレット',
         period: `月 ${summary.money.period.label}`,
         data: summary.money,
         format: fmtMoney,
       })}
     </div>
 
-    <div class="section-title">Overview</div>
+    <div class="section-title">現況</div>
     <div class="panel">
       <div class="stat-line"><span>進行中ミッション</span><span class="v">${summary.active_mission_count}</span></div>
+      ${
+        summary.time.planned_recurring || summary.money.planned_recurring
+          ? `<div class="stat-line">
+               <span><a class="link" href="#/recurrences">うち定期イベント →</a></span>
+               <span class="v">${esc(fmtTime(summary.time.planned_recurring))} · ${esc(
+                 fmtMoney(summary.money.planned_recurring),
+               )}</span>
+             </div>`
+          : ''
+      }
       <div class="stat-line"><span>全完了時タイム残</span><span class="v">${esc(fmtTime(summary.time.remaining))}</span></div>
       <div class="stat-line"><span>全完了時ウォレット残</span><span class="v">${esc(fmtMoney(summary.money.remaining))}</span></div>
     </div>
 
-    <div class="section-title">Active Missions</div>
+    <div class="section-title">進行中のミッション</div>
     <div class="list" id="home-missions">
       ${
         upcoming.length
@@ -238,6 +266,7 @@ async function renderHome() {
   `;
 
   wireMissionActions(document.getElementById('home-missions'), renderHome);
+  wireLegacy(document.getElementById('home-missions'), renderHome);
 }
 
 /* ---------- ストリーム ---------- */
@@ -270,16 +299,17 @@ async function renderStream() {
         <a class="card kind-${esc(item.kind)}" href="#/${esc(item.kind)}/${item.id}">
           <div class="card-top">
             <span class="badge ${esc(item.kind)}">${esc(KIND_LABEL[item.kind])}</span>
-            ${item.from_mission ? '<span>MISSION由来</span>' : ''}
+            ${item.from_mission ? '<span>ミッション由来</span>' : ''}
+            ${item.from_recurrence ? '<span>定期</span>' : ''}
             <span class="spacer"></span>
             <span>${esc(fmtDate(item.at))}</span>
           </div>
-          <div class="card-title">${esc(item.title)}</div>
+          <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
           <div class="card-meta">
             ${
               item.kind === 'log'
-                ? `<span>TIME ${esc(fmtTime(item.time_spent))}</span>
-                   <span>WALLET ${esc(fmtMoney(item.money_spent))}</span>`
+                ? `<span>タイム ${esc(fmtTime(item.time_spent))}</span>
+                   <span>ウォレット ${esc(fmtMoney(item.money_spent))}</span>`
                 : ''
             }
             ${
@@ -296,7 +326,7 @@ async function renderStream() {
           : '<div class="empty">まだ記録がありません。＋から追加してください。</div>'
       }
     </div>
-    <button class="fab" id="fab" aria-label="新規追加">＋</button>
+    <button class="fab" id="fab" aria-label="新規追加">${icon('plus')}</button>
   `;
 
   for (const button of viewEl.querySelectorAll('.filter')) {
@@ -318,8 +348,8 @@ function openNewEntryModal() {
       <div class="field">
         <label>種別</label>
         <div class="seg-toggle" id="kind-toggle">
-          <button type="button" data-kind="idea" aria-pressed="true">アイデア</button>
-          <button type="button" data-kind="log" aria-pressed="false">ログ</button>
+          <button type="button" data-kind="idea" aria-pressed="true">${icon('stone')}アイデア</button>
+          <button type="button" data-kind="log" aria-pressed="false">${icon('sword')}ログ</button>
         </div>
       </div>
       <div class="field">
@@ -378,7 +408,7 @@ async function renderEntry(kind, entryId) {
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
 
   viewEl.innerHTML = `
-    <div class="section-title">${kind === 'idea' ? 'Idea' : 'Log'} #${entryId}</div>
+    <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
     <form class="panel" id="entry-form">
       <div class="field">
         <label for="title">タイトル</label>
@@ -406,10 +436,20 @@ async function renderEntry(kind, entryId) {
           ? `<div class="stat-line"><span>由来</span><span class="v">ミッション完了「${esc(entry.source_mission.title)}」</span></div>`
           : ''
       }
-      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
+      ${
+        entry.source_recurrence
+          ? `<div class="stat-line"><span>由来</span><span class="v"><a class="link" href="#/recurrence/${
+              entry.source_recurrence.id
+            }">定期イベント「${esc(entry.source_recurrence.title)}」</a></span></div>`
+          : ''
+      }
+      <div class="btn-row">
+        <button type="submit" class="primary">保存</button>
+        ${kind === 'log' ? legacyButton('log', entry.id, entry.is_legacy) : ''}
+      </div>
     </form>
 
-    <div class="section-title">Missions</div>
+    <div class="section-title">切り出したミッション</div>
     <div class="list" id="entry-missions">
       ${
         entry.missions.length
@@ -476,6 +516,7 @@ async function renderEntry(kind, entryId) {
   });
 
   wireMissionActions(document.getElementById('entry-missions'), () => renderEntry(kind, entryId));
+  wireLegacy(viewEl, () => renderEntry(kind, entryId));
 }
 
 /* ---------- ミッション ---------- */
@@ -526,6 +567,7 @@ async function renderMissions() {
     });
   }
   wireMissionActions(document.getElementById('mission-list'), renderMissions);
+  wireLegacy(document.getElementById('mission-list'), renderMissions);
 }
 
 /* ---------- 設定 ---------- */
@@ -615,6 +657,12 @@ async function renderSettings() {
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
+    <div class="section-title">定期イベント</div>
+    <a class="card nav-card" href="#/recurrences">
+      <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
+      <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
+    </a>
+
     ${budgetSection('time', timeBudgets)}
     ${budgetSection('money', moneyBudgets)}
   `;
@@ -680,6 +728,512 @@ async function renderSettings() {
   }
 }
 
+/* ---------- 定期イベント ---------- */
+
+const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+const FREQ_LABEL = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
+
+function scheduleText(recurrence) {
+  if (recurrence.freq === 'daily') return '毎日';
+  if (recurrence.freq === 'weekly') return `毎週 ${WEEKDAYS[recurrence.weekday]}曜`;
+  return `毎月 ${recurrence.month_day}日`;
+}
+
+function fmtDay(key) {
+  const date = new Date(`${key}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return key;
+  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAYS[(date.getDay() + 6) % 7]})`;
+}
+
+// 定義の入力欄。新規登録と編集で同じものを使う。
+function recurrenceFields(recurrence = null) {
+  const freq = recurrence?.freq ?? 'weekly';
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const todayKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+  return `
+    <div class="field">
+      <label for="r-title">出来事</label>
+      <input id="r-title" autocomplete="off" placeholder="定期的に起きること"
+             value="${esc(recurrence?.title ?? '')}" />
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="r-freq">繰り返し</label>
+        <select id="r-freq">
+          ${Object.entries(FREQ_LABEL)
+            .map(
+              ([value, label]) =>
+                `<option value="${value}" ${freq === value ? 'selected' : ''}>${label}</option>`,
+            )
+            .join('')}
+        </select>
+      </div>
+      <div class="field" id="r-weekday-field" ${freq === 'weekly' ? '' : 'hidden'}>
+        <label for="r-weekday">曜日</label>
+        <select id="r-weekday">
+          ${WEEKDAYS.map(
+            (label, index) =>
+              `<option value="${index}" ${
+                (recurrence?.weekday ?? 2) === index ? 'selected' : ''
+              }>${label}</option>`,
+          ).join('')}
+        </select>
+      </div>
+      <div class="field" id="r-monthday-field" ${freq === 'monthly' ? '' : 'hidden'}>
+        <label for="r-monthday">日</label>
+        <select id="r-monthday">
+          ${Array.from({ length: 31 }, (_, i) => i + 1)
+            .map(
+              (day) =>
+                `<option value="${day}" ${
+                  (recurrence?.month_day ?? 1) === day ? 'selected' : ''
+                }>${day}</option>`,
+            )
+            .join('')}
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="r-time">消費タイム（時間）</label>
+        <input id="r-time" type="number" step="0.25" min="0"
+               value="${minutesToHours(recurrence?.time_spent ?? 0)}" />
+      </div>
+      <div class="field">
+        <label for="r-money">消費ウォレット（円）</label>
+        <input id="r-money" type="number" step="100" min="0"
+               value="${recurrence?.money_spent ?? 0}" />
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="r-start">開始日</label>
+        <input id="r-start" type="date" value="${esc(recurrence?.start_date ?? todayKey)}" />
+      </div>
+      <div class="field">
+        <label for="r-end">終了日（任意）</label>
+        <input id="r-end" type="date" value="${esc(recurrence?.end_date ?? '')}" />
+      </div>
+    </div>
+  `;
+}
+
+// 繰り返しの種類に応じて曜日／日の欄を出し分ける。
+function wireFreqToggle(scope) {
+  const freq = scope.querySelector('#r-freq');
+  const apply = () => {
+    scope.querySelector('#r-weekday-field').hidden = freq.value !== 'weekly';
+    scope.querySelector('#r-monthday-field').hidden = freq.value !== 'monthly';
+  };
+  freq.addEventListener('change', apply);
+  apply();
+}
+
+function readRecurrenceFields(scope) {
+  const freq = scope.querySelector('#r-freq').value;
+  const end = scope.querySelector('#r-end').value;
+  return {
+    title: scope.querySelector('#r-title').value.trim(),
+    freq,
+    weekday: freq === 'weekly' ? Number(scope.querySelector('#r-weekday').value) : null,
+    month_day: freq === 'monthly' ? Number(scope.querySelector('#r-monthday').value) : null,
+    time_spent: hoursToMinutes(scope.querySelector('#r-time').value),
+    money_spent: Math.round(Number(scope.querySelector('#r-money').value || 0)),
+    start_date: scope.querySelector('#r-start').value,
+    end_date: end === '' ? null : end,
+  };
+}
+
+async function renderRecurrences() {
+  setActiveTab('home');
+  setTopbar({ title: '定期イベント', back: '#/settings' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const recurrences = await api('/recurrences');
+
+  viewEl.innerHTML = `
+    <div class="section-title">登録済み</div>
+    <div class="list">
+      ${
+        recurrences.length
+          ? recurrences
+              .map(
+                (r) => `
+        <a class="card kind-recurrence ${r.active ? '' : 'is-paused'}" href="#/recurrence/${r.id}">
+          <div class="card-top">
+            <span class="badge recurrence">${esc(scheduleText(r))}</span>
+            ${r.active ? '' : '<span class="badge abandoned">停止中</span>'}
+            <span class="spacer"></span>
+            <span>${r.next_date ? `次回 ${esc(fmtDay(r.next_date))}` : '予定なし'}</span>
+          </div>
+          <div class="card-title">${icon('hourglass')}<span>${esc(r.title)}</span></div>
+          <div class="card-meta">
+            <span>タイム ${esc(fmtTime(r.time_spent))}</span>
+            <span>ウォレット ${esc(fmtMoney(r.money_spent))}</span>
+          </div>
+        </a>`,
+              )
+              .join('')
+          : '<div class="empty">定期イベントはまだありません</div>'
+      }
+    </div>
+
+    <div class="section-title">新しく登録</div>
+    <form class="panel" id="recurrence-new">
+      ${recurrenceFields()}
+      <div class="hint">開始日から今日までのぶんは、登録した時点でログになります。</div>
+      <div class="btn-row"><button type="submit" class="primary">登録</button></div>
+    </form>
+  `;
+
+  const form = document.getElementById('recurrence-new');
+  wireFreqToggle(form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const created = await api('/recurrences', {
+        method: 'POST',
+        body: readRecurrenceFields(form),
+      });
+      toast('定期イベントを登録しました');
+      location.hash = `#/recurrence/${created.id}`;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+function occurrenceRow(occurrence) {
+  const badges = [];
+  if (occurrence.status === 'skipped') badges.push('<span class="badge abandoned">スキップ</span>');
+  else if (occurrence.log_id) badges.push('<span class="badge log">記録済</span>');
+  else badges.push('<span class="badge active">予定</span>');
+  if (occurrence.is_overridden) badges.push('<span class="badge now">個別</span>');
+
+  const skipped = occurrence.status === 'skipped';
+  return `
+    <div class="occurrence-row ${skipped ? 'is-skipped' : ''}">
+      <div class="occurrence-head">
+        <div class="occurrence-date">${esc(fmtDay(occurrence.date))} ${badges.join('')}</div>
+        <div class="occurrence-actions">
+          ${
+            occurrence.is_overridden
+              ? `<button type="button" class="ghost" data-reset="${esc(occurrence.date)}">既定へ</button>`
+              : ''
+          }
+          <button type="button" class="ghost ${skipped ? '' : 'danger'}"
+                  data-toggle="${esc(occurrence.date)}"
+                  data-status="${skipped ? 'scheduled' : 'skipped'}">
+            ${skipped ? '戻す' : 'スキップ'}
+          </button>
+        </div>
+      </div>
+      <div class="occurrence-inputs">
+        <label>タイム(h)
+          <input type="number" step="0.25" min="0" data-field="time_spent"
+                 data-date="${esc(occurrence.date)}"
+                 data-original="${minutesToHours(occurrence.time_spent)}"
+                 value="${minutesToHours(occurrence.time_spent)}" ${skipped ? 'disabled' : ''} />
+        </label>
+        <label>ウォレット(円)
+          <input type="number" step="100" min="0" data-field="money_spent"
+                 data-date="${esc(occurrence.date)}"
+                 data-original="${occurrence.money_spent}"
+                 value="${occurrence.money_spent}" ${skipped ? 'disabled' : ''} />
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+async function renderRecurrence(recurrenceId) {
+  setActiveTab('home');
+  setTopbar({ title: '定期イベント', back: '#/recurrences' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const recurrence = await api(`/recurrences/${recurrenceId}?back=6&ahead=6`);
+
+  viewEl.innerHTML = `
+    <div class="section-title">定義</div>
+    <form class="panel" id="recurrence-form">
+      ${recurrenceFields(recurrence)}
+      <div class="btn-row">
+        <button type="submit" class="primary">保存</button>
+        <button type="button" class="ghost" id="toggle-active">
+          ${recurrence.active ? '停止する' : '再開する'}
+        </button>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="ghost danger" id="delete-recurrence">この定期イベントを削除</button>
+      </div>
+      <div class="hint">削除しても、これまでに生成されたログは記録として残ります。</div>
+    </form>
+
+    <div class="section-title">直近の回</div>
+    <form class="panel" id="occurrence-list">
+      ${recurrence.occurrences.map(occurrenceRow).join('')}
+      <div class="btn-row"><button type="submit" class="primary">変更を保存</button></div>
+      <div class="hint">値を変えると、記録済みの回はログにも反映されます。</div>
+    </form>
+  `;
+
+  const form = document.getElementById('recurrence-form');
+  wireFreqToggle(form);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/recurrences/${recurrenceId}`, {
+        method: 'PATCH',
+        body: readRecurrenceFields(form),
+      });
+      toast('保存しました');
+      await renderRecurrence(recurrenceId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('toggle-active').addEventListener('click', async () => {
+    try {
+      await api(`/recurrences/${recurrenceId}`, {
+        method: 'PATCH',
+        body: { active: recurrence.active ? 0 : 1 },
+      });
+      toast(recurrence.active ? '停止しました' : '再開しました');
+      await renderRecurrence(recurrenceId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('delete-recurrence').addEventListener('click', async () => {
+    if (!confirm('この定期イベントを削除しますか？（生成済みのログは残ります）')) return;
+    try {
+      await api(`/recurrences/${recurrenceId}`, { method: 'DELETE' });
+      toast('削除しました');
+      location.hash = '#/recurrences';
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  const list = document.getElementById('occurrence-list');
+
+  list.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const byDate = new Map();
+    for (const input of list.querySelectorAll('input[data-date]')) {
+      if (input.disabled || input.value === input.dataset.original) continue;
+      const body = byDate.get(input.dataset.date) ?? {};
+      body[input.dataset.field] =
+        input.dataset.field === 'time_spent'
+          ? hoursToMinutes(input.value)
+          : Math.round(Number(input.value || 0));
+      byDate.set(input.dataset.date, body);
+    }
+    if (byDate.size === 0) return toast('変更はありません');
+    try {
+      for (const [date, body] of byDate) {
+        await api(`/recurrences/${recurrenceId}/occurrences/${date}`, { method: 'PATCH', body });
+      }
+      toast(`${byDate.size}回ぶんを保存しました`);
+      await renderRecurrence(recurrenceId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  list.addEventListener('click', async (event) => {
+    const toggle = event.target.closest('button[data-toggle]');
+    const reset = event.target.closest('button[data-reset]');
+    if (!toggle && !reset) return;
+    try {
+      if (toggle) {
+        await api(`/recurrences/${recurrenceId}/occurrences/${toggle.dataset.toggle}`, {
+          method: 'PATCH',
+          body: { status: toggle.dataset.status },
+        });
+        toast(toggle.dataset.status === 'skipped' ? 'スキップしました' : '予定に戻しました');
+      } else {
+        await api(`/recurrences/${recurrenceId}/occurrences/${reset.dataset.reset}`, {
+          method: 'DELETE',
+        });
+        toast('定義どおりに戻しました');
+      }
+      await renderRecurrence(recurrenceId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+/* ---------- レガシー ---------- */
+
+function legacyButton(kind, id, isLegacy) {
+  return `
+    <button type="button" class="ghost legacy-btn ${isLegacy ? 'is-on' : ''}"
+            data-legacy-kind="${kind}" data-legacy-id="${id}"
+            data-legacy-value="${isLegacy ? 0 : 1}">
+      ${icon('chest')}<span>${isLegacy ? 'レガシー解除' : 'レガシー'}</span>
+    </button>
+  `;
+}
+
+function wireLegacy(container, onChanged) {
+  container.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-legacy-kind]');
+    if (!button) return;
+    event.preventDefault();
+    const turningOn = button.dataset.legacyValue === '1';
+    button.disabled = true;
+    try {
+      await api(`/legacies/${button.dataset.legacyKind}/${button.dataset.legacyId}`, {
+        method: 'PUT',
+        body: { is_legacy: turningOn },
+      });
+      toast(turningOn ? 'レガシーに刻みました' : 'レガシーから外しました');
+      await onChanged();
+    } catch (err) {
+      toast(err.message, true);
+      button.disabled = false;
+    }
+  });
+}
+
+/* ---------- ダンジョン ---------- */
+
+let dungeonFilter = 'all';
+
+// 部屋（アイデア／ログ）と通路（ミッション）を入れ子で描く。
+function dungeonNode(node) {
+  const isRoom = node.type !== 'mission';
+  const iconName = node.type === 'mission' ? 'parchment' : KIND_ICON[node.type];
+  const canLegacy = node.type === 'log' || (node.type === 'mission' && node.status === 'done');
+
+  const title = isRoom
+    ? `<a class="room-title" href="#/${node.type}/${node.id}">${esc(node.title)}</a>`
+    : `<span class="room-title">${esc(node.title)}</span>`;
+
+  const meta = isRoom
+    ? `<span>${esc(fmtDate(node.at))}</span>` +
+      (node.type === 'log'
+        ? `<span>${esc(fmtTime(node.time))} · ${esc(fmtMoney(node.money))}</span>`
+        : '') +
+      (node.from_recurrence ? '<span>定期</span>' : '')
+    : `<span class="badge ${esc(node.status)}">${esc(STATUS_LABEL[node.status])}</span>` +
+      `<span>${esc(fmtTime(node.time))} · ${esc(fmtMoney(node.money))}</span>`;
+
+  return `
+    <div class="dungeon-node">
+      <div class="room room-${esc(node.type)} ${node.is_legacy ? 'is-legacy' : ''}">
+        <div class="room-head">
+          ${icon(iconName)}
+          ${title}
+          ${node.is_legacy ? icon('chest', 'legacy-mark') : ''}
+        </div>
+        <div class="room-meta">${meta}</div>
+        ${canLegacy ? `<div class="room-actions">${legacyButton(node.type, node.id, node.is_legacy)}</div>` : ''}
+      </div>
+      ${
+        node.children.length
+          ? `<div class="dungeon-children">${node.children.map(dungeonNode).join('')}</div>`
+          : ''
+      }
+    </div>
+  `;
+}
+
+async function renderDungeon() {
+  setActiveTab('dungeon');
+  setTopbar({ title: 'ダンジョン' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const [roots, legacies] = await Promise.all([
+    api(`/dungeon${dungeonFilter === 'legacy' ? '?legacy=1' : ''}`),
+    api('/legacies'),
+  ]);
+
+  viewEl.innerHTML = `
+    <div class="filters">
+      <button class="filter" data-filter="all" aria-pressed="${dungeonFilter === 'all'}">すべての層</button>
+      <button class="filter" data-filter="legacy" aria-pressed="${dungeonFilter === 'legacy'}">レガシーのある層</button>
+    </div>
+
+    <div class="section-title">レガシー</div>
+    ${
+      legacies.length
+        ? `<div class="list">${legacies
+            .map(
+              (item) => `
+        <div class="card is-legacy kind-${item.type === 'log' ? 'log' : 'mission'}">
+          <div class="card-top">
+            <span class="badge ${item.type === 'log' ? 'log' : 'done'}">${
+              item.type === 'log' ? 'ログ' : '完了ミッション'
+            }</span>
+            <span class="spacer"></span>
+            <span>${esc(fmtDate(item.at))}</span>
+          </div>
+          <div class="card-title">
+            ${icon(item.type === 'log' ? 'sword' : 'parchment')}
+            <span>${esc(item.title)}</span>
+            ${icon('chest', 'legacy-mark')}
+          </div>
+          <div class="card-meta">
+            <span>${esc(fmtTime(item.type === 'log' ? item.time_spent : item.estimated_time))}</span>
+            <span>${esc(fmtMoney(item.type === 'log' ? item.money_spent : item.estimated_money))}</span>
+          </div>
+          <div class="btn-row">${legacyButton(item.type, item.id, true)}</div>
+        </div>`,
+            )
+            .join('')}</div>`
+        : '<div class="empty">まだレガシーはありません。<br />ログや完了したミッションから選んで刻んでください。</div>'
+    }
+
+    <div class="section-title">探索</div>
+    ${
+      roots.length
+        ? roots
+            .map(
+              (root) => `
+      <div class="floor">
+        <div class="floor-head">
+          <span class="floor-depth">深度 ${root.totals.depth}</span>
+          <span class="floor-stat">部屋 ${root.totals.rooms} · ミッション ${root.totals.missions}${
+            root.totals.legacies ? ` · レガシー ${root.totals.legacies}` : ''
+          }</span>
+        </div>
+        <div class="floor-totals">
+          <span>費やした ${esc(fmtTime(root.totals.consumed_time))} · ${esc(
+            fmtMoney(root.totals.consumed_money),
+          )}</span>
+          ${
+            root.totals.planned_time || root.totals.planned_money
+              ? `<span class="hot">これから ${esc(fmtTime(root.totals.planned_time))} · ${esc(
+                  fmtMoney(root.totals.planned_money),
+                )}</span>`
+              : ''
+          }
+        </div>
+        ${dungeonNode(root)}
+      </div>`,
+            )
+            .join('')
+        : '<div class="empty">探索できる層がありません</div>'
+    }
+  `;
+
+  for (const button of viewEl.querySelectorAll('.filter')) {
+    button.addEventListener('click', () => {
+      dungeonFilter = button.dataset.filter;
+      renderDungeon();
+    });
+  }
+  wireLegacy(viewEl, renderDungeon);
+}
+
 /* ---------- ルーティング ---------- */
 
 async function route() {
@@ -689,7 +1243,12 @@ async function route() {
     if (hash === '/home') return await renderHome();
     if (hash === '/stream') return await renderStream();
     if (hash === '/missions') return await renderMissions();
+    if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
+    if (hash === '/recurrences') return await renderRecurrences();
+    if ((match = hash.match(/^\/recurrence\/(\d+)$/))) {
+      return await renderRecurrence(Number(match[1]));
+    }
     if ((match = hash.match(/^\/(idea|log)\/(\d+)$/))) {
       return await renderEntry(match[1], Number(match[2]));
     }

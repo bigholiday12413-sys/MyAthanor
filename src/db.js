@@ -56,12 +56,55 @@ CREATE TABLE IF NOT EXISTS budget (
   PRIMARY KEY (kind, period_key)
 );
 
+-- 定期イベントの定義。日付が来た回は自動でログになる。
+CREATE TABLE IF NOT EXISTS recurrence (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  title                 TEXT NOT NULL,
+  freq                  TEXT NOT NULL CHECK (freq IN ('daily', 'weekly', 'monthly')),
+  weekday               INTEGER,  -- weekly: 0=月 … 6=日
+  month_day             INTEGER,  -- monthly: 1..31（無い日はその月の末日に寄せる）
+  time_spent            INTEGER NOT NULL DEFAULT 0,
+  money_spent           INTEGER NOT NULL DEFAULT 0,
+  start_date            TEXT NOT NULL,
+  end_date              TEXT,
+  active                INTEGER NOT NULL DEFAULT 1,
+  materialized_through  TEXT,     -- ここまでの日付はログ化を試行済み
+  created_at            TEXT NOT NULL
+);
+
+-- 個別の回。定義と違う回だけ行を持つ（値の上書き・スキップ）。
+-- ログ化済みの回は log_id を持つ。
+CREATE TABLE IF NOT EXISTS occurrence (
+  recurrence_id INTEGER NOT NULL,
+  date          TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'scheduled'
+                  CHECK (status IN ('scheduled', 'skipped')),
+  title         TEXT,     -- NULL は定義を継承
+  time_spent    INTEGER,  -- NULL は定義を継承
+  money_spent   INTEGER,  -- NULL は定義を継承
+  log_id        INTEGER,
+  PRIMARY KEY (recurrence_id, date)
+);
+
 CREATE INDEX IF NOT EXISTS idx_log_occurred_at ON log (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_mission_source ON mission (source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_mission_status ON mission (status);
 `);
 
 db.exec(`INSERT OR IGNORE INTO settings (id, weekly_time, monthly_money) VALUES (1, 0, 0)`);
+
+// 既存 DB 向けの追加。CREATE TABLE IF NOT EXISTS では列は増えないため。
+function addColumn(table, column, definition) {
+  const exists = db
+    .prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`)
+    .get(table, column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+addColumn('log', 'source_recurrence_id', 'INTEGER');
+// レガシー：大事な出来事・成し遂げたことの印。
+addColumn('log', 'is_legacy', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('mission', 'is_legacy', 'INTEGER NOT NULL DEFAULT 0');
 
 export function transaction(fn) {
   db.exec('BEGIN');

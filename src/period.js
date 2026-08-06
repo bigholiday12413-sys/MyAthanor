@@ -5,10 +5,36 @@
 
 const pad = (n) => String(n).padStart(2, '0');
 
-function addDays(date, days) {
+export function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
+}
+
+// ローカル日付を YYYY-MM-DD で表す。日付の同一性はこの文字列で判断する。
+export function dateKey(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function parseDateKey(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? ''));
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(year, month - 1, day);
+  // 2026-02-30 のような繰り上がる日付を弾く
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
+export function daysInMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+// 月曜=0 … 日曜=6。週が月曜始まりなのに合わせる。
+export function weekdayIndex(date) {
+  return (date.getDay() + 6) % 7;
 }
 
 function mondayOf(date) {

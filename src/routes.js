@@ -24,6 +24,17 @@ function id(req) {
   return value;
 }
 
+// 開催日が来た定期イベントを、どのリクエストの処理よりも先にログ化しておく。
+// 同期済みの日は空ループなので実質ただの SELECT で済む。
+api.use((_req, _res, next) => {
+  try {
+    store.syncRecurrences();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* ストリーム */
 api.get('/stream', handle((req, res) => {
   const type = req.query.type ?? 'all';
@@ -105,6 +116,52 @@ api.put('/budgets/:kind/:key', handle((req, res) => {
 
 api.delete('/budgets/:kind/:key', handle((req, res) =>
   res.json(store.clearBudget(req.params.kind, req.params.key))));
+
+/* 定期イベント */
+api.get('/recurrences', handle((_req, res) => res.json(store.listRecurrences())));
+
+api.post('/recurrences', handle((req, res) =>
+  res.status(201).json(store.createRecurrence(req.body ?? {}))));
+
+api.get('/recurrences/:id', handle((req, res) => {
+  const recurrenceId = id(req);
+  res.json({
+    ...store.getRecurrence(recurrenceId),
+    occurrences: store.listOccurrences(recurrenceId, {
+      back: req.query.back ?? 4,
+      ahead: req.query.ahead ?? 4,
+    }),
+  });
+}));
+
+api.patch('/recurrences/:id', handle((req, res) =>
+  res.json(store.updateRecurrence(id(req), req.body ?? {}))));
+
+api.delete('/recurrences/:id', handle((req, res) => res.json(store.deleteRecurrence(id(req)))));
+
+/* 定期イベントの個別の回 */
+api.patch('/recurrences/:id/occurrences/:date', handle((req, res) =>
+  res.json(store.updateOccurrence(id(req), req.params.date, req.body ?? {}))));
+
+api.delete('/recurrences/:id/occurrences/:date', handle((req, res) =>
+  res.json(store.resetOccurrence(id(req), req.params.date))));
+
+/* レガシー */
+api.get('/legacies', handle((_req, res) => res.json(store.listLegacies())));
+
+api.put('/legacies/:kind/:id', handle((req, res) => {
+  const value = req.body?.is_legacy;
+  if (typeof value !== 'boolean') {
+    const err = new Error('is_legacy must be a boolean');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.setLegacy(req.params.kind, id(req), value));
+}));
+
+/* ダンジョン */
+api.get('/dungeon', handle((req, res) =>
+  res.json(store.getDungeon({ onlyLegacy: req.query.legacy === '1' }))));
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));

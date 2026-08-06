@@ -1,5 +1,12 @@
 import { db, transaction } from './db.js';
-import { periods } from './period.js';
+import {
+  periods,
+  addDays,
+  dateKey,
+  parseDateKey,
+  daysInMonth,
+  weekdayIndex,
+} from './period.js';
 
 // タイムは分、ウォレットは円。どちらも整数で保持する。
 const nowIso = () => new Date().toISOString();
@@ -73,10 +80,15 @@ export function getLog(id) {
     ? db.prepare(`SELECT id, title, source_type, source_id FROM mission WHERE id = ?`)
         .get(row.source_mission_id) ?? null
     : null;
+  const recurrence = row.source_recurrence_id
+    ? db.prepare(`SELECT id, title FROM recurrence WHERE id = ?`).get(row.source_recurrence_id) ??
+      null
+    : null;
   return {
     ...row,
     kind: 'log',
     source_mission: source,
+    source_recurrence: recurrence,
     missions: listMissionsBySource('log', id),
   };
 }
@@ -105,7 +117,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
-             0 AS time_spent, 0 AS money_spent, 0 AS from_mission
+             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence
       FROM idea i
     `);
   }
@@ -113,7 +125,8 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,
-             CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission
+             CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission,
+             CASE WHEN l.source_recurrence_id IS NULL THEN 0 ELSE 1 END AS from_recurrence
       FROM log l
     `);
   }
@@ -137,6 +150,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
     return {
       ...row,
       from_mission: Boolean(row.from_mission),
+      from_recurrence: Boolean(row.from_recurrence),
       mission_count: c ? c.total : 0,
       active_mission_count: c ? c.active : 0,
     };
@@ -395,6 +409,551 @@ export function clearBudget(kind, periodKey) {
   return { kind, ...period, ...resolveBudget(kind, period.key) };
 }
 
+/* ---------- recurrence（定期イベント） ---------- */
+
+// 初回同期で遡る上限。開始日をうんと過去にしても大量生成にならないようにする。
+const BACKFILL_LIMIT_DAYS = 366;
+
+function badRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
+function requireDateKey(value, label) {
+  const date = parseDateKey(value);
+  if (!date) throw badRequest(`${label} must be YYYY-MM-DD`);
+  return date;
+}
+
+// 定義の妥当性を確認し、DB に入れる形に正規化する。
+function normalizeRecurrence(input, base = null) {
+  const freq = input.freq ?? base?.freq;
+  if (!['daily', 'weekly', 'monthly'].includes(freq)) {
+    throw badRequest('freq must be daily, weekly or monthly');
+  }
+
+  let weekday = null;
+  if (freq === 'weekly') {
+    const value = input.weekday ?? base?.weekday;
+    weekday = int(value);
+    if (value === undefined || value === null || weekday < 0 || weekday > 6) {
+      throw badRequest('weekday must be 0 (Mon) .. 6 (Sun)');
+    }
+  }
+
+  let monthDay = null;
+  if (freq === 'monthly') {
+    const value = input.month_day ?? base?.month_day;
+    monthDay = int(value);
+    if (value === undefined || value === null || monthDay < 1 || monthDay > 31) {
+      throw badRequest('month_day must be 1..31');
+    }
+  }
+
+  const startKey = input.start_date ?? base?.start_date ?? dateKey(new Date());
+  const start = requireDateKey(startKey, 'start_date');
+
+  const endInput = input.end_date === undefined ? base?.end_date ?? null : input.end_date;
+  const endKey = endInput === null || endInput === '' ? null : endInput;
+  if (endKey !== null) {
+    const end = requireDateKey(endKey, 'end_date');
+    if (end < start) throw badRequest('end_date must not be before start_date');
+  }
+
+  return {
+    title: requireTitle(input.title ?? base?.title),
+    freq,
+    weekday,
+    month_day: monthDay,
+    time_spent: int(input.time_spent ?? base?.time_spent ?? 0),
+    money_spent: int(input.money_spent ?? base?.money_spent ?? 0),
+    start_date: dateKey(start),
+    end_date: endKey,
+    active: (input.active ?? base?.active ?? 1) ? 1 : 0,
+  };
+}
+
+// [from, to]（両端含む・ローカル日付）に含まれる開催日を列挙する。
+function scheduleDates(recurrence, from, to) {
+  const start = parseDateKey(recurrence.start_date);
+  const end = recurrence.end_date ? parseDateKey(recurrence.end_date) : null;
+  if (!start) return [];
+
+  const first = from > start ? from : start;
+  const last = end && end < to ? end : to;
+  if (first > last) return [];
+
+  const dates = [];
+  const guard = 2000;
+
+  if (recurrence.freq === 'daily') {
+    for (let d = first; d <= last && dates.length < guard; d = addDays(d, 1)) {
+      dates.push(dateKey(d));
+    }
+    return dates;
+  }
+
+  if (recurrence.freq === 'weekly') {
+    const shift = (recurrence.weekday - weekdayIndex(first) + 7) % 7;
+    for (let d = addDays(first, shift); d <= last && dates.length < guard; d = addDays(d, 7)) {
+      dates.push(dateKey(d));
+    }
+    return dates;
+  }
+
+  // monthly: 無い日付（2月31日など）はその月の末日に寄せる
+  let cursor = new Date(first.getFullYear(), first.getMonth(), 1);
+  while (cursor <= last && dates.length < guard) {
+    const day = Math.min(
+      recurrence.month_day,
+      daysInMonth(cursor.getFullYear(), cursor.getMonth()),
+    );
+    const date = new Date(cursor.getFullYear(), cursor.getMonth(), day);
+    if (date >= first && date <= last) dates.push(dateKey(date));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  return dates;
+}
+
+function isScheduled(recurrence, key) {
+  const date = parseDateKey(key);
+  if (!date) return false;
+  return scheduleDates(recurrence, date, date).length === 1;
+}
+
+function getOccurrenceRow(recurrenceId, key) {
+  return db
+    .prepare(`SELECT * FROM occurrence WHERE recurrence_id = ? AND date = ?`)
+    .get(recurrenceId, key);
+}
+
+// 定義の値に、その回の上書きを重ねた実効値。
+function effectiveValues(recurrence, occurrence) {
+  return {
+    title: occurrence?.title ?? recurrence.title,
+    time_spent: occurrence?.time_spent ?? recurrence.time_spent,
+    money_spent: occurrence?.money_spent ?? recurrence.money_spent,
+  };
+}
+
+function writeLogForOccurrence(recurrence, key, occurrence) {
+  const values = effectiveValues(recurrence, occurrence);
+  const occurredAt = parseDateKey(key).toISOString();
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO log (title, occurred_at, time_spent, money_spent, source_recurrence_id)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+    .run(values.title, occurredAt, values.time_spent, values.money_spent, recurrence.id);
+
+  db.prepare(`
+    INSERT INTO occurrence (recurrence_id, date, status, log_id) VALUES (?, ?, 'scheduled', ?)
+    ON CONFLICT (recurrence_id, date) DO UPDATE SET log_id = excluded.log_id
+  `).run(recurrence.id, key, Number(lastInsertRowid));
+
+  return Number(lastInsertRowid);
+}
+
+// 開催日が来た回をログにする。スキップ済み・ログ化済みは触らない。
+export function syncRecurrences(now = new Date()) {
+  const active = db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all();
+  if (active.length === 0) return 0;
+
+  const todayKey = dateKey(now);
+  const today = parseDateKey(todayKey);
+  const floor = addDays(today, -BACKFILL_LIMIT_DAYS);
+
+  return transaction(() => {
+    let created = 0;
+    for (const recurrence of active) {
+      const resume = recurrence.materialized_through
+        ? addDays(parseDateKey(recurrence.materialized_through), 1)
+        : parseDateKey(recurrence.start_date);
+      const from = resume > floor ? resume : floor;
+      if (from > today) continue;
+
+      for (const key of scheduleDates(recurrence, from, today)) {
+        const occurrence = getOccurrenceRow(recurrence.id, key);
+        if (occurrence?.status === 'skipped' || occurrence?.log_id) continue;
+        writeLogForOccurrence(recurrence, key, occurrence);
+        created += 1;
+      }
+      db.prepare(`UPDATE recurrence SET materialized_through = ? WHERE id = ?`)
+        .run(todayKey, recurrence.id);
+    }
+    return created;
+  });
+}
+
+function decorateRecurrence(recurrence, now = new Date()) {
+  const today = parseDateKey(dateKey(now));
+  const horizon = addDays(today, 400);
+  const next = scheduleDates(recurrence, addDays(today, 1), horizon).find(
+    (key) => getOccurrenceRow(recurrence.id, key)?.status !== 'skipped',
+  );
+  return { ...recurrence, active: Boolean(recurrence.active), next_date: next ?? null };
+}
+
+export function listRecurrences() {
+  return db
+    .prepare(`SELECT * FROM recurrence ORDER BY active DESC, id DESC`)
+    .all()
+    .map((row) => decorateRecurrence(row));
+}
+
+export function getRecurrence(id) {
+  const row = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
+  if (!row) throw notFound('recurrence');
+  return decorateRecurrence(row);
+}
+
+export function createRecurrence(input) {
+  const values = normalizeRecurrence(input ?? {});
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO recurrence
+        (title, freq, weekday, month_day, time_spent, money_spent,
+         start_date, end_date, active, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      values.title,
+      values.freq,
+      values.weekday,
+      values.month_day,
+      values.time_spent,
+      values.money_spent,
+      values.start_date,
+      values.end_date,
+      values.active,
+      new Date().toISOString(),
+    );
+  syncRecurrences();
+  return getRecurrence(Number(lastInsertRowid));
+}
+
+export function updateRecurrence(id, input) {
+  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
+  if (!current) throw notFound('recurrence');
+  const values = normalizeRecurrence(input ?? {}, current);
+
+  db.prepare(`
+    UPDATE recurrence
+       SET title = ?, freq = ?, weekday = ?, month_day = ?, time_spent = ?,
+           money_spent = ?, start_date = ?, end_date = ?, active = ?
+     WHERE id = ?
+  `).run(
+    values.title,
+    values.freq,
+    values.weekday,
+    values.month_day,
+    values.time_spent,
+    values.money_spent,
+    values.start_date,
+    values.end_date,
+    values.active,
+    id,
+  );
+  syncRecurrences();
+  return getRecurrence(id);
+}
+
+// 定義を消しても、生成済みのログは記録として残す。
+export function deleteRecurrence(id) {
+  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
+  if (!current) throw notFound('recurrence');
+  return transaction(() => {
+    db.prepare(`DELETE FROM occurrence WHERE recurrence_id = ?`).run(id);
+    db.prepare(`DELETE FROM recurrence WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
+}
+
+// 直近の回を、過去 back 回・先 ahead 回ぶん並べる。
+export function listOccurrences(recurrenceId, { back = 4, ahead = 4 } = {}) {
+  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
+  if (!recurrence) throw notFound('recurrence');
+
+  const backCount = Math.min(Math.max(int(back), 0), 60);
+  const aheadCount = Math.min(Math.max(int(ahead), 0), 60);
+  const todayKey = dateKey(new Date());
+  const today = parseDateKey(todayKey);
+
+  // 頻度に応じて十分広い範囲を取ってから、今日の前後で切り出す。
+  const span = { daily: 1, weekly: 7, monthly: 31 }[recurrence.freq];
+  const all = scheduleDates(
+    recurrence,
+    addDays(today, -span * (backCount + 2)),
+    addDays(today, span * (aheadCount + 2)),
+  );
+  const past = all.filter((key) => key <= todayKey).slice(-backCount);
+  const future = all.filter((key) => key > todayKey).slice(0, aheadCount);
+
+  return [...past, ...future]
+    .reverse()
+    .map((key) => {
+      const occurrence = getOccurrenceRow(recurrenceId, key);
+      const values = effectiveValues(recurrence, occurrence);
+      return {
+        recurrence_id: recurrenceId,
+        date: key,
+        status: occurrence?.status ?? 'scheduled',
+        ...values,
+        log_id: occurrence?.log_id ?? null,
+        is_overridden: Boolean(
+          occurrence &&
+            (occurrence.title !== null ||
+              occurrence.time_spent !== null ||
+              occurrence.money_spent !== null),
+        ),
+        is_past: key <= todayKey,
+      };
+    });
+}
+
+// その回だけ値を変える／スキップする。ログ化済みならログにも反映する。
+export function updateOccurrence(recurrenceId, key, input) {
+  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
+  if (!recurrence) throw notFound('recurrence');
+  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
+
+  const status = input.status ?? undefined;
+  if (status !== undefined && !['scheduled', 'skipped'].includes(status)) {
+    throw badRequest('status must be scheduled or skipped');
+  }
+
+  return transaction(() => {
+    const current = getOccurrenceRow(recurrenceId, key);
+    const next = {
+      status: status ?? current?.status ?? 'scheduled',
+      title:
+        input.title === undefined
+          ? current?.title ?? null
+          : input.title === null || input.title === ''
+            ? null
+            : requireTitle(input.title),
+      time_spent:
+        input.time_spent === undefined
+          ? current?.time_spent ?? null
+          : input.time_spent === null
+            ? null
+            : int(input.time_spent),
+      money_spent:
+        input.money_spent === undefined
+          ? current?.money_spent ?? null
+          : input.money_spent === null
+            ? null
+            : int(input.money_spent),
+    };
+
+    db.prepare(`
+      INSERT INTO occurrence (recurrence_id, date, status, title, time_spent, money_spent, log_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (recurrence_id, date) DO UPDATE
+        SET status = excluded.status, title = excluded.title,
+            time_spent = excluded.time_spent, money_spent = excluded.money_spent
+    `).run(
+      recurrenceId,
+      key,
+      next.status,
+      next.title,
+      next.time_spent,
+      next.money_spent,
+      current?.log_id ?? null,
+    );
+
+    const logId = current?.log_id ?? null;
+    const values = effectiveValues(recurrence, next);
+
+    if (next.status === 'skipped') {
+      // 行かなかった回。生成済みのログは取り消す。
+      if (logId) {
+        db.prepare(`DELETE FROM log WHERE id = ?`).run(logId);
+        db.prepare(`UPDATE occurrence SET log_id = NULL WHERE recurrence_id = ? AND date = ?`)
+          .run(recurrenceId, key);
+      }
+    } else if (logId) {
+      db.prepare(`UPDATE log SET title = ?, time_spent = ?, money_spent = ? WHERE id = ?`)
+        .run(values.title, values.time_spent, values.money_spent, logId);
+    } else if (key <= dateKey(new Date())) {
+      // スキップを取り消した過去の回は、その場でログに戻す。
+      writeLogForOccurrence(recurrence, key, getOccurrenceRow(recurrenceId, key));
+    }
+
+    return listOccurrences(recurrenceId).find((row) => row.date === key) ?? null;
+  });
+}
+
+// その回の個別変更を取り消し、定義どおりに戻す。
+export function resetOccurrence(recurrenceId, key) {
+  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
+  if (!recurrence) throw notFound('recurrence');
+  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
+
+  return updateOccurrence(recurrenceId, key, {
+    status: 'scheduled',
+    title: null,
+    time_spent: null,
+    money_spent: null,
+  });
+}
+
+// 期間内のこれから起きる回（明日以降）の合計。今日ぶんは既にログなので数えない。
+function plannedRecurring(period, now) {
+  const today = parseDateKey(dateKey(now));
+  const from = addDays(today, 1);
+  const to = new Date(new Date(period.end).getTime() - 1);
+  const totals = { time: 0, money: 0 };
+  if (from > to) return totals;
+
+  for (const recurrence of db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all()) {
+    for (const key of scheduleDates(recurrence, from, to)) {
+      const occurrence = getOccurrenceRow(recurrence.id, key);
+      if (occurrence?.status === 'skipped') continue;
+      const values = effectiveValues(recurrence, occurrence);
+      totals.time += values.time_spent;
+      totals.money += values.money_spent;
+    }
+  }
+  return totals;
+}
+
+/* ---------- レガシー ---------- */
+
+// 大事なものに印をつける。ミッションは完了したものだけ。
+export function setLegacy(kind, id, value) {
+  if (kind !== 'log' && kind !== 'mission') {
+    throw badRequest('kind must be "log" or "mission"');
+  }
+  const row = db.prepare(`SELECT * FROM ${kind} WHERE id = ?`).get(id);
+  if (!row) throw notFound(kind);
+  if (kind === 'mission' && row.status !== 'done' && value) {
+    const err = new Error('only completed missions can be marked as legacy');
+    err.status = 409;
+    throw err;
+  }
+  db.prepare(`UPDATE ${kind} SET is_legacy = ? WHERE id = ?`).run(value ? 1 : 0, id);
+  return kind === 'log' ? getLog(id) : getMission(id);
+}
+
+export function listLegacies() {
+  const logs = db
+    .prepare(`SELECT * FROM log WHERE is_legacy = 1 ORDER BY occurred_at DESC`)
+    .all()
+    .map((row) => ({ ...row, type: 'log', at: row.occurred_at }));
+  const missions = db
+    .prepare(`SELECT * FROM mission WHERE is_legacy = 1 ORDER BY completed_at DESC`)
+    .all()
+    .map((row) => ({
+      ...row,
+      type: 'mission',
+      at: row.completed_at ?? row.created_at,
+      source_title: sourceTitle(row.source_type, row.source_id),
+    }));
+  return [...logs, ...missions].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+/* ---------- ダンジョン（つながりの探索） ---------- */
+
+const DUNGEON_MAX_DEPTH = 12;
+
+// ミッションを1本の通路として見る。完了していれば、その先に生成されたログの部屋がある。
+function dungeonMission(mission, depth) {
+  const generated =
+    depth >= DUNGEON_MAX_DEPTH
+      ? null
+      : db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(mission.id) ?? null;
+  return {
+    type: 'mission',
+    id: mission.id,
+    title: mission.title,
+    status: mission.status,
+    time: mission.estimated_time,
+    money: mission.estimated_money,
+    is_legacy: Boolean(mission.is_legacy),
+    at: mission.completed_at ?? mission.created_at,
+    children: generated ? [dungeonEntry('log', generated, depth + 1)] : [],
+  };
+}
+
+// アイデア／ログを1つの部屋として見る。切り出したミッションが次への通路になる。
+function dungeonEntry(type, row, depth) {
+  const children =
+    depth >= DUNGEON_MAX_DEPTH
+      ? []
+      : listMissionsBySource(type, row.id).map((mission) => dungeonMission(mission, depth + 1));
+  return {
+    type,
+    id: row.id,
+    title: row.title,
+    at: type === 'idea' ? row.created_at : row.occurred_at,
+    time: type === 'log' ? row.time_spent : 0,
+    money: type === 'log' ? row.money_spent : 0,
+    is_legacy: Boolean(row.is_legacy),
+    from_recurrence: type === 'log' ? Boolean(row.source_recurrence_id) : false,
+    children,
+  };
+}
+
+// 枝の合計。消費済みはログ側だけを数える（完了ミッションの消費はログになっているため）。
+function accumulate(node) {
+  const totals = {
+    consumed_time: 0,
+    consumed_money: 0,
+    planned_time: 0,
+    planned_money: 0,
+    rooms: 0,
+    missions: 0,
+    legacies: node.is_legacy ? 1 : 0,
+    depth: 1,
+  };
+
+  if (node.type === 'mission') {
+    totals.missions = 1;
+    if (node.status === 'active') {
+      totals.planned_time += node.time;
+      totals.planned_money += node.money;
+    }
+  } else {
+    totals.rooms = 1;
+    totals.consumed_time += node.time;
+    totals.consumed_money += node.money;
+  }
+
+  for (const child of node.children) {
+    const sub = accumulate(child);
+    totals.consumed_time += sub.consumed_time;
+    totals.consumed_money += sub.consumed_money;
+    totals.planned_time += sub.planned_time;
+    totals.planned_money += sub.planned_money;
+    totals.rooms += sub.rooms;
+    totals.missions += sub.missions;
+    totals.legacies += sub.legacies;
+    totals.depth = Math.max(totals.depth, sub.depth + 1);
+  }
+  return totals;
+}
+
+// 探索の入口＝アイデア全部と、ミッション由来ではないログ。
+export function getDungeon({ onlyLegacy = false } = {}) {
+  const roots = [
+    ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonEntry('idea', row, 0)),
+    ...db
+      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
+      .all()
+      .map((row) => dungeonEntry('log', row, 0)),
+  ].map((node) => ({ ...node, totals: accumulate(node) }));
+
+  const filtered = onlyLegacy ? roots.filter((node) => node.totals.legacies > 0) : roots;
+
+  return filtered.sort((a, b) => {
+    // 奥が深い順、同じなら新しい順。探索しがいのある枝を上に出す。
+    if (b.totals.depth !== a.totals.depth) return b.totals.depth - a.totals.depth;
+    return String(b.at).localeCompare(String(a.at));
+  });
+}
+
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
@@ -421,28 +980,40 @@ export function getSummary(now = new Date()) {
     `)
     .get();
 
-  const build = (budget, consumed, plannedValue, period) => ({
-    budget,
-    consumed,
-    planned: plannedValue,
-    // 進行中ミッションを全て完了した場合の残量
-    remaining: budget - consumed - plannedValue,
-    remaining_now: budget - consumed,
-    over: consumed + plannedValue > budget,
-    period,
-  });
+  // 定期イベントのこれから起きる回も消費予定に含める。
+  const recurringWeek = plannedRecurring(week, now);
+  const recurringMonth = plannedRecurring(month, now);
+
+  const build = (budget, consumed, fromMissions, fromRecurring, period) => {
+    const plannedValue = fromMissions + fromRecurring;
+    return {
+      budget,
+      consumed,
+      planned: plannedValue,
+      planned_missions: fromMissions,
+      planned_recurring: fromRecurring,
+      // 進行中ミッションを全て完了した場合の残量
+      remaining: budget - consumed - plannedValue,
+      remaining_now: budget - consumed,
+      over: consumed + plannedValue > budget,
+      period,
+    };
+  };
 
   return {
     time: {
       unit: 'minutes',
-      ...build(timeBudget.amount, spent(week).time, planned.time, week),
+      ...build(timeBudget.amount, spent(week).time, planned.time, recurringWeek.time, week),
       budget_source: timeBudget.source,
     },
     money: {
       unit: 'jpy',
-      ...build(moneyBudget.amount, spent(month).money, planned.money, month),
+      ...build(moneyBudget.amount, spent(month).money, planned.money, recurringMonth.money, month),
       budget_source: moneyBudget.source,
     },
     active_mission_count: planned.count,
+    recurrence_count: db
+      .prepare(`SELECT COUNT(*) AS total FROM recurrence WHERE active = 1`)
+      .get().total,
   };
 }
