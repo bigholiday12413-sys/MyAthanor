@@ -1700,3 +1700,67 @@ a.room-title {
   margin-top: 10px;
   border-color: #6a2f22;
 }
+
+/* ---------- 任意の入力は畳んでおく ---------- */
+
+.optional {
+  margin: 2px 0 4px;
+}
+
+.optional > summary {
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  list-style: none;
+}
+
+.optional > summary::-webkit-details-marker {
+  display: none;
+}
+
+.optional > summary::before {
+  content: '▸ ';
+}
+
+.optional[open] > summary::before {
+  content: '▾ ';
+}
+
+.optional[open] > summary {
+  margin-bottom: 6px;
+}
+
+.optional .field {
+  margin-bottom: 8px;
+}
+
+/* 開くと中身が出るパネル。ふだんは1行だけ。 */
+.optional-panel > summary {
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.optional-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.optional-panel > summary::before {
+  content: '＋ ';
+  color: var(--gold);
+}
+
+.optional-panel[open] > summary::before {
+  content: '− ';
+}
+
+.optional-panel[open] > summary {
+  margin-bottom: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px dotted var(--line-soft);
+}

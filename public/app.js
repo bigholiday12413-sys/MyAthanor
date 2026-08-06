@@ -218,10 +218,14 @@ function missionCard(mission, { showSource = true } = {}) {
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
       <div class="card-title">${icon('parchment')}<span>${esc(mission.title)}</span></div>
-      <div class="card-meta">
-        <span>${done ? '実消費' : '見積'} タイム ${esc(fmtTime(mission.estimated_time))}</span>
-        <span>ウォレット ${esc(fmtMoney(mission.estimated_money))}</span>
-      </div>
+      ${
+        mission.estimated_time || mission.estimated_money
+          ? `<div class="card-meta">
+               <span>${done ? '実消費' : '見積'} ${esc(fmtTime(mission.estimated_time))}</span>
+               <span>${esc(fmtMoney(mission.estimated_money))}</span>
+             </div>`
+          : ''
+      }
       ${
         mission.cauldron
           ? `<div class="card-meta"><span>${icon('cauldron')}大釜「${esc(
@@ -517,9 +521,9 @@ function streamCard(item) {
       <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
       <div class="card-meta">
         ${
-          item.kind === 'log'
-            ? `<span>タイム ${esc(fmtTime(item.time_spent))}</span>
-               <span>ウォレット ${esc(fmtMoney(item.money_spent))}</span>`
+          item.kind === 'log' && (item.time_spent || item.money_spent)
+            ? `<span>${esc(fmtTime(item.time_spent))}</span>
+               <span>${esc(fmtMoney(item.money_spent))}</span>`
             : ''
         }
         ${
@@ -691,14 +695,13 @@ function cauldronPanel(cauldron) {
             </div>
           </div>
           <div class="btn-row"><button type="submit">日付を保存</button></div>
-          <div class="hint">素材は自分の期限が無ければ、この日付を引き継ぎます。</div>
         </form>
       </details>
 
       <form class="material-add" data-add="${cauldron.id}">
         <div class="field">
-          <label for="mat-${cauldron.id}">素材を投入（1行に1つ）</label>
-          <textarea id="mat-${cauldron.id}" rows="2" placeholder="必要なことを並べる"></textarea>
+          <textarea id="mat-${cauldron.id}" rows="2"
+                    placeholder="素材を投入（1行に1つ）"></textarea>
         </div>
         <div class="btn-row">
           <button type="submit">投入</button>
@@ -720,11 +723,19 @@ function materialRow(material) {
               aria-label="${done ? '未完了に戻す' : '完了にする'}">${done ? '✓' : ''}</button>
       <div class="material-body">
         <div class="material-title">${esc(material.title)}</div>
-        <div class="material-meta">
-          ${esc(fmtTime(material.estimated_time))} · ${esc(fmtMoney(material.estimated_money))}
-          ${material.due_date ? ` · 〜${esc(fmtShortDay(material.due_date))}` : ''}
-          ${abandoned ? ' · 断念' : ''}
-        </div>
+      ${
+        material.estimated_time || material.estimated_money || material.due_date || abandoned
+          ? `<div class="material-meta">${[
+              material.estimated_time ? fmtTime(material.estimated_time) : '',
+              material.estimated_money ? fmtMoney(material.estimated_money) : '',
+              material.due_date ? `〜${fmtShortDay(material.due_date)}` : '',
+              abandoned ? '断念' : '',
+            ]
+              .filter(Boolean)
+              .map(esc)
+              .join(' · ')}</div>`
+          : ''
+      }
       </div>
       ${
         abandoned
@@ -835,7 +846,6 @@ function temperaturePanel(idea) {
       <div class="btn-row">
         <button type="button" id="temp-save" class="primary">この熱さに入れ直す</button>
       </div>
-      <div class="hint">触らずにいると設定から少しずつ 273K へ冷めます。半減期は設定で変えられます。</div>
     </div>
   `;
 }
@@ -924,27 +934,31 @@ async function renderEntry(kind, entryId) {
       </div>
     </form>
 
-    <div class="section-title">大釜<span class="section-count">錬成</span></div>
+    <div class="section-title">大釜</div>
     <div id="entry-cauldrons">
       ${entry.cauldrons.map(cauldronPanel).join('')}
-      <form class="panel" id="cauldron-new">
-        <div class="field">
-          <label for="c-title">新しい大釜</label>
-          <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
-        </div>
-        <div class="row">
+      <details class="panel optional-panel">
+        <summary>大釜を用意する</summary>
+        <form id="cauldron-new">
           <div class="field">
-            <label for="c-from">いつから（任意）</label>
-            <input id="c-from" type="date" />
+            <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
           </div>
-          <div class="field">
-            <label for="c-to">いつまで（任意）</label>
-            <input id="c-to" type="date" />
-          </div>
-        </div>
-        <div class="hint">必要なミッションを素材として並べ、全部そろうと錬成が終わります。</div>
-        <div class="btn-row"><button type="submit">大釜を用意する</button></div>
-      </form>
+          <details class="optional">
+            <summary>日付</summary>
+            <div class="row">
+              <div class="field">
+                <label for="c-from">いつから</label>
+                <input id="c-from" type="date" />
+              </div>
+              <div class="field">
+                <label for="c-to">いつまで</label>
+                <input id="c-to" type="date" />
+              </div>
+            </div>
+          </details>
+          <div class="btn-row"><button type="submit" class="primary">用意する</button></div>
+        </form>
+      </details>
     </div>
 
     <div class="section-title">単独のミッション</div>
@@ -984,30 +998,32 @@ async function renderEntry(kind, entryId) {
     <div class="section-title">ミッションを追加</div>
     <form class="panel" id="mission-form">
       <div class="field">
-        <label for="m-title">やること</label>
         <input id="m-title" autocomplete="off" placeholder="切り出すミッション" />
       </div>
-      <div class="row">
-        <div class="field">
-          <label for="m-time">見積タイム（時間）</label>
-          <input id="m-time" type="number" step="0.25" min="0" value="0" />
+      <details class="optional">
+        <summary>見積と日付</summary>
+        <div class="row">
+          <div class="field">
+            <label for="m-time">タイム（時間）</label>
+            <input id="m-time" type="number" step="0.25" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="m-money">ウォレット（円）</label>
+            <input id="m-money" type="number" step="1" min="0" value="0" />
+          </div>
         </div>
-        <div class="field">
-          <label for="m-money">見積ウォレット（円）</label>
-          <input id="m-money" type="number" step="1" min="0" value="0" />
+        <div class="row">
+          <div class="field">
+            <label for="m-from">いつから</label>
+            <input id="m-from" type="date" />
+          </div>
+          <div class="field">
+            <label for="m-to">いつまで</label>
+            <input id="m-to" type="date" />
+          </div>
         </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="m-from">いつから（任意）</label>
-          <input id="m-from" type="date" />
-        </div>
-        <div class="field">
-          <label for="m-to">いつまで（任意）</label>
-          <input id="m-to" type="date" />
-        </div>
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">ミッションを追加</button></div>
+      </details>
+      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
   `;
 
@@ -1267,7 +1283,7 @@ async function renderSettings() {
         <label for="monthly-money">月あたりの可処分ウォレット（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
       </div>
-      <div class="hint">個別に設定していない期間に適用されます。タイムは月曜始まりの週、ウォレットは暦月で集計します。</div>
+      <div class="hint">個別設定のない期間に使います。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -1278,10 +1294,7 @@ async function renderSettings() {
         <input id="half-life" type="number" step="1" min="0"
                value="${settings.cooling_half_life_days}" />
       </div>
-      <div class="hint">
-        この日数が経つごとに、アイデアの熱（273Kからの差）が半分になります。
-        0 にすると冷めません。
-      </div>
+      <div class="hint">この日数ごとに熱が半分になります。0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -1405,7 +1418,6 @@ function recurrenceFields(recurrence = null) {
 
   return `
     <div class="field">
-      <label for="r-title">出来事</label>
       <input id="r-title" autocomplete="off" placeholder="定期的に起きること"
              value="${esc(recurrence?.title ?? '')}" />
     </div>
@@ -1458,16 +1470,19 @@ function recurrenceFields(recurrence = null) {
                value="${recurrence?.money_spent ?? 0}" />
       </div>
     </div>
-    <div class="row">
-      <div class="field">
-        <label for="r-start">開始日</label>
-        <input id="r-start" type="date" value="${esc(recurrence?.start_date ?? todayKey)}" />
+    <details class="optional" ${recurrence?.end_date ? 'open' : ''}>
+      <summary>期間</summary>
+      <div class="row">
+        <div class="field">
+          <label for="r-start">開始日</label>
+          <input id="r-start" type="date" value="${esc(recurrence?.start_date ?? todayKey)}" />
+        </div>
+        <div class="field">
+          <label for="r-end">終了日</label>
+          <input id="r-end" type="date" value="${esc(recurrence?.end_date ?? '')}" />
+        </div>
       </div>
-      <div class="field">
-        <label for="r-end">終了日（任意）</label>
-        <input id="r-end" type="date" value="${esc(recurrence?.end_date ?? '')}" />
-      </div>
-    </div>
+    </details>
   `;
 }
 
@@ -1534,7 +1549,7 @@ async function renderRecurrences() {
     <div class="section-title">新しく登録</div>
     <form class="panel" id="recurrence-new">
       ${recurrenceFields()}
-      <div class="hint">開始日から今日までのぶんは、登録した時点でログになります。</div>
+      <div class="hint">開始日から今日までのぶんは登録時にログになります。</div>
       <div class="btn-row"><button type="submit" class="primary">登録</button></div>
     </form>
   `;
@@ -1619,14 +1634,13 @@ async function renderRecurrence(recurrenceId) {
       <div class="btn-row">
         <button type="button" class="ghost danger" id="delete-recurrence">この定期イベントを削除</button>
       </div>
-      <div class="hint">削除しても、これまでに生成されたログは記録として残ります。</div>
+      <div class="hint">生成済みのログは残ります。</div>
     </form>
 
     <div class="section-title">直近の回</div>
     <form class="panel" id="occurrence-list">
       ${recurrence.occurrences.map(occurrenceRow).join('')}
       <div class="btn-row"><button type="submit" class="primary">変更を保存</button></div>
-      <div class="hint">値を変えると、記録済みの回はログにも反映されます。</div>
     </form>
   `;
 
@@ -1751,7 +1765,7 @@ async function renderTags() {
               )
               .join('')}
             <div class="btn-row"><button type="submit" class="primary">名前を保存</button></div>
-            <div class="hint">削除するとタグは全ての項目から外れます。項目そのものは消えません。</div>
+            <div class="hint">削除してもタグが外れるだけで、項目は残ります。</div>
           </form>`
         : '<div class="empty">タグはまだありません。<br />アイデアやログの詳細から付けられます。</div>'
     }
