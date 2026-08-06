@@ -19,7 +19,8 @@
   --danger: #c0492f;
   --glass: #b9c9c2;
 
-  --stone: #8d8f7a;
+  --gem: #d9553f; /* 賢者の石 */
+  --stone: #8d8f7a; /* ダンジョンの石壁 */
   --trail: #c9b68d; /* 足跡 */
 
   /* 和文書体を先頭に置く。欧文だけ西洋書体になると翻訳物のように見えるため、
@@ -421,7 +422,7 @@ body {
 }
 
 .card.kind-idea {
-  border-left-color: var(--stone);
+  border-left-color: var(--gem);
 }
 
 .card.kind-log {
@@ -485,8 +486,8 @@ body {
 }
 
 .badge.idea {
-  color: #c3c5aa;
-  border-color: #5b5c48;
+  color: var(--gem);
+  border-color: #6b2b20;
 }
 
 .badge.log {
@@ -804,6 +805,222 @@ button:disabled {
   text-align: right;
 }
 
+/* ---------- タグ ---------- */
+
+.tag-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card .chips {
+  margin-top: 7px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 4px 9px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text);
+  white-space: nowrap;
+  background: #332810;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.chip b {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dim);
+}
+
+.chip.is-on {
+  color: #1c2810;
+  background: var(--green);
+  border-color: var(--green-dark);
+}
+
+.chip.is-on b {
+  color: #2f4d1a;
+}
+
+/* カード上のタグは押せないので平たく置く。 */
+.chip.is-flat {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--dim);
+  background: transparent;
+  border-style: dashed;
+}
+
+.chip button {
+  padding: 0 0 0 2px;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--dim);
+  background: none;
+  border: none;
+}
+
+.chips-empty {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.tag-add {
+  margin-top: 12px;
+}
+
+.tag-add button {
+  flex: 0 0 84px;
+}
+
+.section-count {
+  margin-left: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dim);
+}
+
+.tag-name {
+  padding: 7px 8px;
+  font-size: 15px;
+}
+
+/* ---------- アイデアの温度 ---------- */
+
+.temp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.temp .px {
+  width: 12px;
+  height: 12px;
+}
+
+.temp-big {
+  font-size: 26px;
+  letter-spacing: 0.02em;
+}
+
+.temp-big .px {
+  width: 26px;
+  height: 26px;
+}
+
+.temp-boiling {
+  color: #ff8a3c;
+}
+
+.temp-hot {
+  color: var(--gold);
+}
+
+.temp-warm {
+  color: #c9a06a;
+}
+
+.temp-cooling {
+  color: var(--dim);
+}
+
+.temp-frozen {
+  color: #9fc4d8;
+}
+
+.temp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.temp-label {
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.temp-scale {
+  display: flex;
+  justify-content: space-between;
+  margin: 2px 0 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+input[type='range'] {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 冷たい側から熱い側へ、そのまま温度計の目盛りにする。 */
+input[type='range']::-webkit-slider-runnable-track {
+  height: 8px;
+  background: linear-gradient(90deg, #6d93aa 0%, #8a7550 32%, #e0aa3c 72%, #ff8a3c 100%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  width: 14px;
+  height: 22px;
+  margin-top: -8px;
+  background: var(--text);
+  border: 1px solid #241a0c;
+  border-radius: 2px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type='range']::-moz-range-track {
+  height: 8px;
+  background: linear-gradient(90deg, #6d93aa 0%, #8a7550 32%, #e0aa3c 72%, #ff8a3c 100%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 22px;
+  background: var(--text);
+  border: 1px solid #241a0c;
+  border-radius: 2px;
+}
+
 /* ---------- ダンジョン ---------- */
 
 .floor {
@@ -881,7 +1098,7 @@ button:disabled {
 }
 
 .room-idea {
-  border-left-color: var(--stone);
+  border-left-color: var(--gem);
 }
 
 .room-log {

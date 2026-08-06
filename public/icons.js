@@ -11,54 +11,59 @@ const WOOD = '#8a5a2b';
 const WOOD_DARK = '#5d3a18';
 const CREAM = '#ecd9a8';
 const STONE = '#8d8f7a';
-const STONE_DARK = '#5f6152';
 const TRAIL = '#c9b68d'; // 踏んだ跡
 const GLASS = '#b9c9c2';
 
-// アイデア＝石。刻まれたルーンが光っている。
-const STONE_ROCK = {
+// アイデア＝賢者の石。上面を磨いた赤い宝石として切り、下半分にファセットを入れる。
+const PHILOSOPHERS_STONE = {
   rows: [
     '................',
+    '....oooooooo....',
+    '...ossllllllo...',
+    '..oslllllllllo..',
+    '.orrrrrrrrrrrro.',
+    '.orrrrrrrrrrrro.',
+    '..oddrrrrrrddo..',
+    '...oddrrrrddo...',
+    '...oddrrrrddo...',
+    '....odrrrrdo....',
+    '.....odrrdo.....',
+    '......oddo......',
+    '.......oo.......',
     '................',
-    '.....oooooo.....',
-    '...oohhhhhhoo...',
-    '..ohhhhhhhhhho..',
-    '.ohhhhhhhhhhhho.',
-    '.ohhhh1111hhhho.',
-    'ohhhhh1111hhhhho',
-    'ohhhhhh11hhhhhho',
-    'ohhhhh11hhhhhhho',
-    'ohhhhhhhhhhhhhho',
-    '.ohhhhhhhhhhhho.',
-    '..osssssssssso..',
-    '...oooooooooo...',
     '................',
     '................',
   ],
-  palette: { o: INK, h: STONE, s: STONE_DARK, 1: GOLD },
+  palette: {
+    o: '#4a1410', // 縁
+    s: '#ffd9c8', // きらめき
+    l: '#e8624a', // 天面
+    r: '#cc3a2a', // 本体
+    d: '#7d1f18', // 側面のファセット
+  },
 };
 
 // ログ（出来事）＝歩いた足跡。
-// 前を広く、土踏まずをくびれさせ、踵を丸めた靴跡の形。
-// 右上を前、左下を後ろにずらして「歩いている」向きを出す。
+// くびれは片側だけ削って土踏まずにする。両側から削ると細くなりすぎて足に見えない。
+// 右上が前（右足）、左下が後ろ（左足）で、歩いている向きを出す。
 const FOOTSTEPS = {
   rows: [
     '.........pppp...',
     '........pppppp..',
     '........pppppp..',
+    '.........ppppp..',
+    '..........pppp..',
+    '.........ppppp..',
     '.........pppp...',
-    '..........pp....',
-    '.........pppp...',
-    '.........pppp...',
-    '..........pp....',
+    '..........ppp...',
     '...pppp.........',
     '..pppppp........',
     '..pppppp........',
+    '..ppppp.........',
+    '..pppp..........',
+    '..ppppp.........',
     '...pppp.........',
-    '....pp..........',
-    '...pppp.........',
-    '...pppp.........',
-    '....pp..........',
+    '...ppp..........',
   ],
   palette: { p: TRAIL },
 };
@@ -246,6 +251,52 @@ const CHEST = {
   palette: { o: INK, w: WOOD, b: GOLD_DARK, g: GOLD },
 };
 
+// アイデアの温度＝炎。熱さに応じて色を差し替えて使う（icon の第3引数）。
+const FLAME = {
+  rows: [
+    '................',
+    '.......ff.......',
+    '......ffff......',
+    '......ffff......',
+    '.....ffffff.....',
+    '.....ffffff.....',
+    '....ffffffff....',
+    '....ffffffff....',
+    '...fffccccfff...',
+    '...fffccccfff...',
+    '...fffccccfff...',
+    '...fffccccfff...',
+    '....ffccccff....',
+    '.....ffccff.....',
+    '......ffff......',
+    '................',
+  ],
+  palette: { f: '#e0aa3c', c: '#ffe8a8' },
+};
+
+// 冷めきったアイデア＝霜の結晶。
+const FROST = {
+  rows: [
+    '................',
+    '.......cc.......',
+    '....c..cc..c....',
+    '.....c.cc.c.....',
+    '......cccc......',
+    '..c...cccc...c..',
+    '...cc.cccc.cc...',
+    'cccccccccccccccc',
+    'cccccccccccccccc',
+    '...cc.cccc.cc...',
+    '..c...cccc...c..',
+    '......cccc......',
+    '.....c.cc.c.....',
+    '....c..cc..c....',
+    '.......cc.......',
+    '................',
+  ],
+  palette: { c: '#9fc4d8' },
+};
+
 const CHEVRON = {
   rows: [
     '................',
@@ -289,7 +340,7 @@ function toRects({ rows, palette }) {
 }
 
 const SOURCES = {
-  stone: STONE_ROCK,
+  stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
   parchment: PARCHMENT,
   hourglass: HOURGLASS,
@@ -298,6 +349,8 @@ const SOURCES = {
   book: BOOK,
   gate: GATE,
   chest: CHEST,
+  flame: FLAME,
+  frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
 };
@@ -306,9 +359,13 @@ const RENDERED = Object.fromEntries(
   Object.entries(SOURCES).map(([name, source]) => [name, toRects(source)]),
 );
 
-export function icon(name, className = '') {
-  const body = RENDERED[name];
-  if (!body) return '';
+// overrides を渡すと配色だけ差し替えて描き直す（温度による炎の色など）。
+export function icon(name, className = '', overrides = null) {
+  const source = SOURCES[name];
+  if (!source) return '';
+  const body = overrides
+    ? toRects({ rows: source.rows, palette: { ...source.palette, ...overrides } })
+    : RENDERED[name];
   return (
     `<svg class="px ${className}" viewBox="0 0 16 16" shape-rendering="crispEdges" ` +
     `aria-hidden="true" focusable="false">${body}</svg>`

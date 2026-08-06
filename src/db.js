@@ -86,6 +86,21 @@ CREATE TABLE IF NOT EXISTS occurrence (
   PRIMARY KEY (recurrence_id, date)
 );
 
+CREATE TABLE IF NOT EXISTS tag (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
+-- アイデア／ログとタグの結び付き。
+CREATE TABLE IF NOT EXISTS entry_tag (
+  kind     TEXT NOT NULL CHECK (kind IN ('idea', 'log')),
+  entry_id INTEGER NOT NULL,
+  tag_id   INTEGER NOT NULL,
+  PRIMARY KEY (kind, entry_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_tag_tag ON entry_tag (tag_id);
 CREATE INDEX IF NOT EXISTS idx_log_occurred_at ON log (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_mission_source ON mission (source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_mission_status ON mission (status);
@@ -105,6 +120,11 @@ addColumn('log', 'source_recurrence_id', 'INTEGER');
 // レガシー：大事な出来事・成し遂げたことの印。
 addColumn('log', 'is_legacy', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('mission', 'is_legacy', 'INTEGER NOT NULL DEFAULT 0');
+// アイデアの温度（K）。273K を常温＝基準とし、設定時点から基準へ向けて冷めていく。
+addColumn('idea', 'temperature', 'INTEGER NOT NULL DEFAULT 320');
+addColumn('idea', 'temperature_at', 'TEXT');
+// 冷却の半減期（日）。0 なら冷めない。
+addColumn('settings', 'cooling_half_life_days', 'INTEGER NOT NULL DEFAULT 30');
 
 export function transaction(fn) {
   db.exec('BEGIN');

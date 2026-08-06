@@ -33,6 +33,149 @@ function notFound(what) {
   return err;
 }
 
+/* ---------- tag ---------- */
+
+const ENTRY_KINDS = new Set(['idea', 'log']);
+
+function requireEntryKind(kind) {
+  if (!ENTRY_KINDS.has(kind)) {
+    const err = new Error('kind must be "idea" or "log"');
+    err.status = 400;
+    throw err;
+  }
+  return kind;
+}
+
+// 表記ゆれで別タグにならないよう、前後の空白と連続空白を潰す。
+function normalizeTagName(name) {
+  const trimmed = String(name ?? '').trim().replace(/\s+/g, ' ');
+  if (!trimmed) {
+    const err = new Error('tag name is required');
+    err.status = 400;
+    throw err;
+  }
+  if (trimmed.length > 24) {
+    const err = new Error('tag name must be 24 characters or fewer');
+    err.status = 400;
+    throw err;
+  }
+  return trimmed;
+}
+
+function findOrCreateTag(name) {
+  const normalized = normalizeTagName(name);
+  const existing = db.prepare(`SELECT * FROM tag WHERE name = ?`).get(normalized);
+  if (existing) return existing;
+  const { lastInsertRowid } = db
+    .prepare(`INSERT INTO tag (name, created_at) VALUES (?, ?)`)
+    .run(normalized, nowIso());
+  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(Number(lastInsertRowid));
+}
+
+export function listTags() {
+  return db
+    .prepare(`
+      SELECT t.id, t.name,
+             COALESCE(SUM(CASE WHEN e.kind = 'idea' THEN 1 ELSE 0 END), 0) AS idea_count,
+             COALESCE(SUM(CASE WHEN e.kind = 'log' THEN 1 ELSE 0 END), 0) AS log_count,
+             COUNT(e.tag_id) AS total
+      FROM tag t
+      LEFT JOIN entry_tag e ON e.tag_id = t.id
+      GROUP BY t.id
+      ORDER BY total DESC, t.name ASC
+    `)
+    .all();
+}
+
+export function createTag({ name }) {
+  return findOrCreateTag(name);
+}
+
+export function renameTag(id, { name }) {
+  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
+  if (!row) throw notFound('tag');
+  const normalized = normalizeTagName(name);
+  const clash = db.prepare(`SELECT id FROM tag WHERE name = ? AND id <> ?`).get(normalized, id);
+  if (clash) {
+    const err = new Error('a tag with that name already exists');
+    err.status = 409;
+    throw err;
+  }
+  db.prepare(`UPDATE tag SET name = ? WHERE id = ?`).run(normalized, id);
+  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
+}
+
+export function deleteTag(id) {
+  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
+  if (!row) throw notFound('tag');
+  return transaction(() => {
+    db.prepare(`DELETE FROM entry_tag WHERE tag_id = ?`).run(id);
+    db.prepare(`DELETE FROM tag WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
+}
+
+export function tagsFor(kind, entryId) {
+  return db
+    .prepare(`
+      SELECT t.id, t.name FROM entry_tag e
+      JOIN tag t ON t.id = e.tag_id
+      WHERE e.kind = ? AND e.entry_id = ?
+      ORDER BY t.name ASC
+    `)
+    .all(kind, entryId);
+}
+
+// 名前の配列でまるごと置き換える。無い名前は作る。
+export function setEntryTags(kind, entryId, names) {
+  requireEntryKind(kind);
+  if (kind === 'idea') getIdea(entryId);
+  else getLog(entryId);
+  if (!Array.isArray(names)) {
+    const err = new Error('tags must be an array of names');
+    err.status = 400;
+    throw err;
+  }
+
+  return transaction(() => {
+    const ids = new Set(names.map((name) => findOrCreateTag(name).id));
+    db.prepare(`DELETE FROM entry_tag WHERE kind = ? AND entry_id = ?`).run(kind, entryId);
+    const insert = db.prepare(
+      `INSERT OR IGNORE INTO entry_tag (kind, entry_id, tag_id) VALUES (?, ?, ?)`,
+    );
+    for (const tagId of ids) insert.run(kind, entryId, tagId);
+    return tagsFor(kind, entryId);
+  });
+}
+
+/* ---------- アイデアの温度 ---------- */
+
+// 273K（水の凝固点）を常温＝基準とする。設定した熱は基準へ向かって指数的に冷める。
+export const AMBIENT_K = 273;
+export const MAX_K = 373;
+
+// 半減期ぶんの日数が経つごとに、基準からの差が半分になる。
+// halfLife を渡さなければ設定から読む（一覧では読み直しを避けるため渡す）。
+export function coolTemperature(setK, setAt, now = new Date(), halfLifeDays = null) {
+  const halfLife = halfLifeDays ?? getSettings().cooling_half_life_days;
+  const excess = setK - AMBIENT_K;
+  if (halfLife <= 0 || excess <= 0) return setK;
+
+  const elapsedDays = (now.getTime() - new Date(setAt).getTime()) / 86_400_000;
+  if (!Number.isFinite(elapsedDays) || elapsedDays <= 0) return setK;
+
+  return Math.round(AMBIENT_K + excess * 0.5 ** (elapsedDays / halfLife));
+}
+
+function withTemperature(idea, now = new Date()) {
+  const setAt = idea.temperature_at ?? idea.created_at;
+  return {
+    ...idea,
+    temperature_at: setAt,
+    current_temperature: coolTemperature(idea.temperature, setAt, now),
+  };
+}
+
 /* ---------- idea ---------- */
 
 export function createIdea({ title, created_at }) {
@@ -44,14 +187,25 @@ export function createIdea({ title, created_at }) {
 export function getIdea(id) {
   const row = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
   if (!row) throw notFound('idea');
-  return { ...row, kind: 'idea', missions: listMissionsBySource('idea', id) };
+  return {
+    ...withTemperature(row),
+    kind: 'idea',
+    tags: tagsFor('idea', id),
+    missions: listMissionsBySource('idea', id),
+  };
 }
 
-export function updateIdea(id, { title }) {
-  const row = db.prepare(`SELECT id FROM idea WHERE id = ?`).get(id);
+export function updateIdea(id, { title, temperature }) {
+  const row = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
   if (!row) throw notFound('idea');
   if (title !== undefined) {
     db.prepare(`UPDATE idea SET title = ? WHERE id = ?`).run(requireTitle(title), id);
+  }
+  if (temperature !== undefined) {
+    // 熱を入れ直したら冷却の起点も今にする。
+    const kelvin = Math.min(Math.max(int(temperature), AMBIENT_K), MAX_K);
+    db.prepare(`UPDATE idea SET temperature = ?, temperature_at = ? WHERE id = ?`)
+      .run(kelvin, nowIso(), id);
   }
   return getIdea(id);
 }
@@ -89,6 +243,7 @@ export function getLog(id) {
     kind: 'log',
     source_mission: source,
     source_recurrence: recurrence,
+    tags: tagsFor('log', id),
     missions: listMissionsBySource('log', id),
   };
 }
@@ -112,12 +267,13 @@ export function updateLog(id, { title, occurred_at, time_spent, money_spent }) {
 /* ---------- stream ---------- */
 
 // アイデアとログを時系列で混ぜて返す。
-export function listStream({ type = 'all', limit = 200 } = {}) {
+export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
-             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence
+             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence,
+             i.temperature, i.temperature_at
       FROM idea i
     `);
   }
@@ -126,7 +282,8 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,
              CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission,
-             CASE WHEN l.source_recurrence_id IS NULL THEN 0 ELSE 1 END AS from_recurrence
+             CASE WHEN l.source_recurrence_id IS NULL THEN 0 ELSE 1 END AS from_recurrence,
+             NULL AS temperature, NULL AS temperature_at
       FROM log l
     `);
   }
@@ -135,6 +292,20 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
   const rows = db
     .prepare(`${parts.join(' UNION ALL ')} ORDER BY at DESC, kind ASC, id DESC LIMIT ?`)
     .all(int(limit, { min: 1 }));
+
+  const links = db
+    .prepare(`
+      SELECT e.kind, e.entry_id, t.id, t.name FROM entry_tag e
+      JOIN tag t ON t.id = e.tag_id
+      ORDER BY t.name ASC
+    `)
+    .all();
+  const tagsByEntry = new Map();
+  for (const link of links) {
+    const key = `${link.kind}:${link.entry_id}`;
+    if (!tagsByEntry.has(key)) tagsByEntry.set(key, []);
+    tagsByEntry.get(key).push({ id: link.id, name: link.name });
+  }
 
   const counts = db
     .prepare(`
@@ -145,16 +316,28 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
     .all();
   const byKey = new Map(counts.map((c) => [`${c.source_type}:${c.source_id}`, c]));
 
-  return rows.map((row) => {
-    const c = byKey.get(`${row.kind}:${row.id}`);
-    return {
-      ...row,
-      from_mission: Boolean(row.from_mission),
-      from_recurrence: Boolean(row.from_recurrence),
-      mission_count: c ? c.total : 0,
-      active_mission_count: c ? c.active : 0,
-    };
-  });
+  const now = new Date();
+  const halfLife = getSettings().cooling_half_life_days;
+  const tagId = tag === null || tag === undefined || tag === '' ? null : int(tag);
+
+  return rows
+    .map((row) => {
+      const c = byKey.get(`${row.kind}:${row.id}`);
+      const tags = tagsByEntry.get(`${row.kind}:${row.id}`) ?? [];
+      return {
+        ...row,
+        from_mission: Boolean(row.from_mission),
+        from_recurrence: Boolean(row.from_recurrence),
+        tags,
+        current_temperature:
+          row.kind === 'idea'
+            ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
+            : null,
+        mission_count: c ? c.total : 0,
+        active_mission_count: c ? c.active : 0,
+      };
+    })
+    .filter((row) => tagId === null || row.tags.some((t) => t.id === tagId));
 }
 
 /* ---------- mission ---------- */
@@ -298,14 +481,22 @@ export function isMissionStatus(status) {
 /* ---------- settings ---------- */
 
 export function getSettings() {
-  return db.prepare(`SELECT weekly_time, monthly_money FROM settings WHERE id = 1`).get();
+  return db
+    .prepare(`SELECT weekly_time, monthly_money, cooling_half_life_days FROM settings WHERE id = 1`)
+    .get();
 }
 
-export function updateSettings({ weekly_time, monthly_money }) {
+export function updateSettings({ weekly_time, monthly_money, cooling_half_life_days }) {
   const current = getSettings();
-  db.prepare(`UPDATE settings SET weekly_time = ?, monthly_money = ? WHERE id = 1`).run(
+  db.prepare(`
+    UPDATE settings SET weekly_time = ?, monthly_money = ?, cooling_half_life_days = ?
+    WHERE id = 1
+  `).run(
     weekly_time === undefined ? current.weekly_time : int(weekly_time),
     monthly_money === undefined ? current.monthly_money : int(monthly_money),
+    cooling_half_life_days === undefined
+      ? current.cooling_half_life_days
+      : int(cooling_half_life_days),
   );
   return getSettings();
 }

@@ -68,6 +68,34 @@ function fmtDate(iso) {
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
 const KIND_LABEL = { idea: 'アイデア', log: 'ログ' };
 
+/* アイデアの温度。273K（＝0℃）を常温とし、そこへ向かって冷めていく。 */
+const AMBIENT_K = 273;
+const MAX_K = 373;
+
+const HEAT_LEVELS = [
+  { min: 350, key: 'boiling', label: '沸騰', flame: '#ff8a3c', core: '#ffe4b8' },
+  { min: 320, key: 'hot', label: '熱い', flame: '#e0aa3c', core: '#ffe8a8' },
+  { min: 295, key: 'warm', label: 'ぬるい', flame: '#b9925a', core: '#e6d0a0' },
+  { min: 276, key: 'cooling', label: '冷めかけ', flame: '#8a7550', core: '#b3a075' },
+];
+const FROZEN = { key: 'frozen', label: '凍結' };
+
+const heat = (kelvin) => HEAT_LEVELS.find((level) => kelvin >= level.min) ?? FROZEN;
+
+function heatIcon(kelvin) {
+  const level = heat(kelvin);
+  return level.key === 'frozen'
+    ? icon('frost')
+    : icon('flame', '', { f: level.flame, c: level.core });
+}
+
+function tempChip(kelvin) {
+  const level = heat(kelvin);
+  return `<span class="temp temp-${level.key}">${heatIcon(kelvin)}<span>${kelvin}K</span></span>`;
+}
+
+const toCelsius = (kelvin) => kelvin - AMBIENT_K;
+
 /* ---------- 共通パーツ ---------- */
 
 function setTopbar({ title, sub = '', back = null, action = '' }) {
@@ -272,12 +300,26 @@ async function renderHome() {
 /* ---------- ストリーム ---------- */
 
 let streamFilter = 'all';
+let streamView = 'time'; // time = 時系列 / tag = タグ別
+let streamTag = null;
 
 async function renderStream() {
   setActiveTab('stream');
   setTopbar({ title: 'ストリーム' });
 
-  const items = await api(`/stream?type=${streamFilter}`);
+  const [items, tags] = await Promise.all([
+    api(`/stream?type=${streamFilter}${streamTag ? `&tag=${streamTag}` : ''}`),
+    api('/tags'),
+  ]);
+
+  const body =
+    streamView === 'tag'
+      ? groupedByTag(items)
+      : `<div class="list">${
+          items.length
+            ? items.map(streamCard).join('')
+            : '<div class="empty">まだ記録がありません。＋から追加してください。</div>'
+        }</div>`;
 
   viewEl.innerHTML = `
     <div class="filters">
@@ -290,52 +332,116 @@ async function renderStream() {
         )
         .join('')}
     </div>
-    <div class="list">
-      ${
-        items.length
-          ? items
-              .map(
-                (item) => `
-        <a class="card kind-${esc(item.kind)}" href="#/${esc(item.kind)}/${item.id}">
-          <div class="card-top">
-            <span class="badge ${esc(item.kind)}">${esc(KIND_LABEL[item.kind])}</span>
-            ${item.from_mission ? '<span>ミッション由来</span>' : ''}
-            ${item.from_recurrence ? '<span>定期</span>' : ''}
-            <span class="spacer"></span>
-            <span>${esc(fmtDate(item.at))}</span>
-          </div>
-          <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
-          <div class="card-meta">
-            ${
-              item.kind === 'log'
-                ? `<span>タイム ${esc(fmtTime(item.time_spent))}</span>
-                   <span>ウォレット ${esc(fmtMoney(item.money_spent))}</span>`
-                : ''
-            }
-            ${
-              item.mission_count
-                ? `<span class="${item.active_mission_count ? 'hot' : ''}">ミッション ${item.mission_count}件${
-                    item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
-                  }</span>`
-                : ''
-            }
-          </div>
-        </a>`,
-              )
-              .join('')
-          : '<div class="empty">まだ記録がありません。＋から追加してください。</div>'
-      }
+    <div class="filters">
+      <button class="filter" data-view="time" aria-pressed="${streamView === 'time'}">時系列</button>
+      <button class="filter" data-view="tag" aria-pressed="${streamView === 'tag'}">タグ別</button>
     </div>
+    ${
+      streamView === 'time' && tags.length
+        ? `<div class="tag-bar">
+             <button class="chip ${streamTag ? '' : 'is-on'}" data-tag="">すべて</button>
+             ${tags
+               .map(
+                 (tag) => `<button class="chip ${
+                   String(streamTag) === String(tag.id) ? 'is-on' : ''
+                 }" data-tag="${tag.id}">${esc(tag.name)} <b>${tag.total}</b></button>`,
+               )
+               .join('')}
+           </div>`
+        : ''
+    }
+    ${body}
     <button class="fab" id="fab" aria-label="新規追加">${icon('plus')}</button>
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
     button.addEventListener('click', () => {
       streamFilter = button.dataset.filter;
       renderStream();
     });
   }
+  for (const button of viewEl.querySelectorAll('.filter[data-view]')) {
+    button.addEventListener('click', () => {
+      streamView = button.dataset.view;
+      renderStream();
+    });
+  }
+  for (const button of viewEl.querySelectorAll('.chip[data-tag]')) {
+    button.addEventListener('click', () => {
+      streamTag = button.dataset.tag || null;
+      renderStream();
+    });
+  }
   document.getElementById('fab').addEventListener('click', openNewEntryModal);
+}
+
+function streamCard(item) {
+  return `
+    <a class="card kind-${esc(item.kind)}" href="#/${esc(item.kind)}/${item.id}">
+      <div class="card-top">
+        <span class="badge ${esc(item.kind)}">${esc(KIND_LABEL[item.kind])}</span>
+        ${item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
+        ${item.from_mission ? '<span>ミッション由来</span>' : ''}
+        ${item.from_recurrence ? '<span>定期</span>' : ''}
+        <span class="spacer"></span>
+        <span>${esc(fmtDate(item.at))}</span>
+      </div>
+      <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
+      <div class="card-meta">
+        ${
+          item.kind === 'log'
+            ? `<span>タイム ${esc(fmtTime(item.time_spent))}</span>
+               <span>ウォレット ${esc(fmtMoney(item.money_spent))}</span>`
+            : ''
+        }
+        ${
+          item.mission_count
+            ? `<span class="${item.active_mission_count ? 'hot' : ''}">ミッション ${item.mission_count}件${
+                item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
+              }</span>`
+            : ''
+        }
+      </div>
+      ${
+        item.tags.length
+          ? `<div class="chips">${item.tags
+              .map((tag) => `<span class="chip is-flat">${esc(tag.name)}</span>`)
+              .join('')}</div>`
+          : ''
+      }
+    </a>
+  `;
+}
+
+// タグ別表示。複数タグが付いた項目はそれぞれの束に出る。未分類は最後。
+function groupedByTag(items) {
+  const groups = new Map();
+  const untagged = [];
+
+  for (const item of items) {
+    if (item.tags.length === 0) {
+      untagged.push(item);
+      continue;
+    }
+    for (const tag of item.tags) {
+      if (!groups.has(tag.id)) groups.set(tag.id, { name: tag.name, items: [] });
+      groups.get(tag.id).items.push(item);
+    }
+  }
+
+  const sections = [...groups.values()].sort((a, b) => b.items.length - a.items.length);
+  if (untagged.length) sections.push({ name: '未分類', items: untagged });
+  if (sections.length === 0) return '<div class="empty">まだ記録がありません。</div>';
+
+  return sections
+    .map(
+      (section) => `
+    <div class="section-title">${esc(section.name)}<span class="section-count">${
+      section.items.length
+    }</span></div>
+    <div class="list">${section.items.map(streamCard).join('')}</div>`,
+    )
+    .join('');
 }
 
 function openNewEntryModal() {
@@ -398,13 +504,77 @@ function openNewEntryModal() {
 
 /* ---------- 詳細（アイデア／ログ） ---------- */
 
+// アイデアの温度。設定した熱は 273K へ向かって冷めていくので、
+// 「いま何度か」と「いつ何度に入れたか」の両方を出す。
+function temperaturePanel(idea) {
+  const current = idea.current_temperature;
+  const level = heat(current);
+  const days = Math.floor((Date.now() - new Date(idea.temperature_at).getTime()) / 86_400_000);
+
+  return `
+    <div class="section-title">温度</div>
+    <div class="panel">
+      <div class="temp-head">
+        <span class="temp temp-${level.key} temp-big">${heatIcon(current)}<span
+          id="temp-value">${current}K</span></span>
+        <span class="temp-label" id="temp-label">${esc(level.label)}・${toCelsius(current)}℃</span>
+      </div>
+      <input type="range" id="temp-range" min="${AMBIENT_K}" max="${MAX_K}" step="1"
+             value="${current}" aria-label="アイデアの温度" />
+      <div class="temp-scale">
+        <span>${AMBIENT_K}K 凍結</span>
+        <span>${MAX_K}K 沸騰</span>
+      </div>
+      <div class="stat-line">
+        <span>入れた熱</span>
+        <span class="v">${idea.temperature}K（${days === 0 ? '今日' : `${days}日前`}）</span>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="temp-save" class="primary">この熱さに入れ直す</button>
+      </div>
+      <div class="hint">触らずにいると設定から少しずつ 273K へ冷めます。半減期は設定で変えられます。</div>
+    </div>
+  `;
+}
+
+function wireTemperature(idea, entryId) {
+  const range = document.getElementById('temp-range');
+  const value = document.getElementById('temp-value');
+  const label = document.getElementById('temp-label');
+  const chip = value.closest('.temp');
+
+  range.addEventListener('input', () => {
+    const kelvin = Number(range.value);
+    const level = heat(kelvin);
+    value.textContent = `${kelvin}K`;
+    label.textContent = `${level.label}・${toCelsius(kelvin)}℃`;
+    chip.className = `temp temp-${level.key} temp-big`;
+    chip.firstChild.replaceWith(
+      new DOMParser().parseFromString(heatIcon(kelvin), 'image/svg+xml').documentElement,
+    );
+  });
+
+  document.getElementById('temp-save').addEventListener('click', async () => {
+    try {
+      await api(`/ideas/${entryId}`, {
+        method: 'PATCH',
+        body: { temperature: Number(range.value) },
+      });
+      toast('熱を入れ直しました');
+      await renderEntry('idea', entryId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 async function renderEntry(kind, entryId) {
   setActiveTab('stream');
   setTopbar({ title: KIND_LABEL[kind], back: '#/stream' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
-  const entry = await api(path);
+  const [entry, allTags] = await Promise.all([api(path), api('/tags')]);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
 
   viewEl.innerHTML = `
@@ -458,6 +628,31 @@ async function renderEntry(kind, entryId) {
       }
     </div>
 
+    ${kind === 'idea' ? temperaturePanel(entry) : ''}
+
+    <div class="section-title">タグ</div>
+    <form class="panel" id="tag-form">
+      <div class="chips" id="entry-tags">
+        ${
+          entry.tags.length
+            ? entry.tags
+                .map(
+                  (tag) => `<span class="chip">${esc(tag.name)}<button type="button"
+                     data-remove="${esc(tag.name)}" aria-label="${esc(tag.name)} を外す">×</button></span>`,
+                )
+                .join('')
+            : '<span class="chips-empty">タグなし</span>'
+        }
+      </div>
+      <div class="row tag-add">
+        <input id="tag-input" list="tag-options" autocomplete="off" placeholder="タグを追加" />
+        <button type="submit">追加</button>
+      </div>
+      <datalist id="tag-options">
+        ${allTags.map((tag) => `<option value="${esc(tag.name)}"></option>`).join('')}
+      </datalist>
+    </form>
+
     <div class="section-title">ミッションを追加</div>
     <form class="panel" id="mission-form">
       <div class="field">
@@ -492,6 +687,38 @@ async function renderEntry(kind, entryId) {
       toast(err.message, true);
     }
   });
+
+  const currentTags = entry.tags.map((tag) => tag.name);
+  const saveTags = async (names, message) => {
+    try {
+      await api(`/entries/${kind}/${entryId}/tags`, { method: 'PUT', body: { tags: names } });
+      toast(message);
+      await renderEntry(kind, entryId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+
+  const tagForm = document.getElementById('tag-form');
+  tagForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('tag-input');
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    if (currentTags.includes(name)) return toast('もう付いています');
+    await saveTags([...currentTags, name], 'タグを付けました');
+  });
+
+  tagForm.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-remove]');
+    if (!button) return;
+    await saveTags(
+      currentTags.filter((name) => name !== button.dataset.remove),
+      'タグを外しました',
+    );
+  });
+
+  if (kind === 'idea') wireTemperature(entry, entryId);
 
   document.getElementById('mission-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -657,10 +884,30 @@ async function renderSettings() {
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
+    <div class="section-title">アイデアの冷却</div>
+    <form class="panel" id="cooling-form">
+      <div class="field">
+        <label for="half-life">冷却の半減期（日）</label>
+        <input id="half-life" type="number" step="1" min="0"
+               value="${settings.cooling_half_life_days}" />
+      </div>
+      <div class="hint">
+        この日数が経つごとに、アイデアの熱（273Kからの差）が半分になります。
+        0 にすると冷めません。
+      </div>
+      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
+    </form>
+
     <div class="section-title">定期イベント</div>
     <a class="card nav-card" href="#/recurrences">
       <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
       <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
+    </a>
+
+    <div class="section-title">タグ</div>
+    <a class="card nav-card" href="#/tags">
+      <div class="card-title"><span>タグの整理</span></div>
+      <div class="card-meta"><span>名前の変更と削除</span></div>
     </a>
 
     ${budgetSection('time', timeBudgets)}
@@ -679,6 +926,23 @@ async function renderSettings() {
       });
       toast('既定値を保存しました');
       await renderSettings();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('cooling-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api('/settings', {
+        method: 'PUT',
+        body: {
+          cooling_half_life_days: Math.round(
+            Number(document.getElementById('half-life').value || 0),
+          ),
+        },
+      });
+      toast('冷却の設定を保存しました');
     } catch (err) {
       toast(err.message, true);
     }
@@ -1070,6 +1334,79 @@ async function renderRecurrence(recurrenceId) {
   });
 }
 
+/* ---------- タグの整理 ---------- */
+
+async function renderTags() {
+  setActiveTab('home');
+  setTopbar({ title: 'タグの整理', back: '#/settings' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const tags = await api('/tags');
+
+  viewEl.innerHTML = `
+    <div class="section-title">タグ</div>
+    ${
+      tags.length
+        ? `<form class="panel" id="tag-list">
+            ${tags
+              .map(
+                (tag) => `
+              <div class="budget-row">
+                <div>
+                  <input class="tag-name" data-id="${tag.id}"
+                         data-original="${esc(tag.name)}" value="${esc(tag.name)}" />
+                  <div class="budget-consumed">アイデア ${tag.idea_count} · ログ ${tag.log_count}</div>
+                </div>
+                <div class="budget-src">${tag.total}件</div>
+                <button type="button" class="ghost danger" data-delete="${tag.id}"
+                        data-name="${esc(tag.name)}">削除</button>
+              </div>`,
+              )
+              .join('')}
+            <div class="btn-row"><button type="submit" class="primary">名前を保存</button></div>
+            <div class="hint">削除するとタグは全ての項目から外れます。項目そのものは消えません。</div>
+          </form>`
+        : '<div class="empty">タグはまだありません。<br />アイデアやログの詳細から付けられます。</div>'
+    }
+  `;
+
+  const list = document.getElementById('tag-list');
+  if (!list) return;
+
+  list.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const changed = [...list.querySelectorAll('.tag-name')].filter(
+      (input) => input.value.trim() !== input.dataset.original,
+    );
+    if (changed.length === 0) return toast('変更はありません');
+    try {
+      for (const input of changed) {
+        await api(`/tags/${input.dataset.id}`, {
+          method: 'PATCH',
+          body: { name: input.value.trim() },
+        });
+      }
+      toast(`${changed.length}件の名前を変えました`);
+      await renderTags();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  list.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-delete]');
+    if (!button) return;
+    if (!confirm(`タグ「${button.dataset.name}」を削除しますか？`)) return;
+    try {
+      await api(`/tags/${button.dataset.delete}`, { method: 'DELETE' });
+      toast('タグを削除しました');
+      await renderTags();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 /* ---------- レガシー ---------- */
 
 function legacyButton(kind, id, isLegacy) {
@@ -1246,6 +1583,7 @@ async function route() {
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
+    if (hash === '/tags') return await renderTags();
     if ((match = hash.match(/^\/recurrence\/(\d+)$/))) {
       return await renderRecurrence(Number(match[1]));
     }

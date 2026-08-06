@@ -43,7 +43,7 @@ api.get('/stream', handle((req, res) => {
     err.status = 400;
     throw err;
   }
-  res.json(store.listStream({ type, limit: req.query.limit ?? 200 }));
+  res.json(store.listStream({ type, limit: req.query.limit ?? 200, tag: req.query.tag ?? null }));
 }));
 
 /* 新規追加（種別を選んでテキストのみ） */
@@ -145,6 +145,16 @@ api.patch('/recurrences/:id/occurrences/:date', handle((req, res) =>
 
 api.delete('/recurrences/:id/occurrences/:date', handle((req, res) =>
   res.json(store.resetOccurrence(id(req), req.params.date))));
+
+/* タグ */
+api.get('/tags', handle((_req, res) => res.json(store.listTags())));
+api.post('/tags', handle((req, res) => res.status(201).json(store.createTag(req.body ?? {}))));
+api.patch('/tags/:id', handle((req, res) => res.json(store.renameTag(id(req), req.body ?? {}))));
+api.delete('/tags/:id', handle((req, res) => res.json(store.deleteTag(id(req)))));
+
+// アイデア／ログに付くタグを名前の配列で置き換える。
+api.put('/entries/:kind/:id/tags', handle((req, res) =>
+  res.json(store.setEntryTags(req.params.kind, id(req), req.body?.tags))));
 
 /* レガシー */
 api.get('/legacies', handle((_req, res) => res.json(store.listLegacies())));
