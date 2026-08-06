@@ -1023,6 +1023,239 @@ input[type='range']::-moz-range-thumb {
 
 /* ---------- ダンジョン ---------- */
 
+.region {
+  margin-bottom: 18px;
+  padding: 10px 0 4px;
+  background: linear-gradient(180deg, #221a0e, #1a1408);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.region-stat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 0 12px 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.region-stat .hot {
+  color: var(--gold);
+}
+
+/* 地図は横に伸びるので、区画の中だけで横スクロールさせる。 */
+.map-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0 8px;
+  border-top: 1px dotted var(--line-soft);
+}
+
+.map {
+  display: block;
+  max-width: none;
+}
+
+.map a {
+  cursor: pointer;
+}
+
+.map text {
+  font-family: var(--mono);
+  fill: var(--text);
+}
+
+.map-room {
+  font-size: 11px;
+}
+
+.map-corridor {
+  font-size: 9px;
+  fill: var(--dim);
+}
+
+.map-cauldron {
+  font-size: 9px;
+  fill: var(--green);
+}
+
+.map-dead {
+  font-size: 9px;
+  fill: var(--dim);
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 14px;
+  padding: 9px 11px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  background: #1d1609;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+}
+
+.map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.map-legend .px {
+  width: 13px;
+  height: 13px;
+}
+
+.map-legend .rule {
+  width: 18px;
+  height: 0;
+  border-top: 3px solid #8d8f7a;
+}
+
+.map-legend .rule.active {
+  border-top-style: dashed;
+  border-top-color: var(--gold);
+}
+
+.map-legend .rule.abandoned {
+  border-top: 2px dotted #5b4a2c;
+}
+
+/* ---------- 大釜 ---------- */
+
+.cauldron {
+  margin-bottom: 10px;
+  padding: 12px;
+  background: linear-gradient(180deg, #2b2113, #201809);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--green-dark);
+  border-radius: 4px;
+}
+
+.cauldron.is-complete {
+  border-left-color: var(--gold);
+}
+
+.cauldron-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cauldron-head .px {
+  width: 20px;
+  height: 20px;
+}
+
+.cauldron-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 15px;
+  word-break: break-word;
+}
+
+.cauldron-count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.brew {
+  height: 8px;
+  margin: 9px 0 7px;
+  overflow: hidden;
+  background: #150f06;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.brew-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green-dark), var(--green));
+  transition: width 0.3s ease;
+}
+
+.cauldron.is-complete .brew-fill {
+  background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+}
+
+.material {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 0;
+  border-bottom: 1px dotted var(--line-soft);
+}
+
+.material:last-of-type {
+  border-bottom: none;
+}
+
+.material-check {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--dim);
+  background: #150f06;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.material.is-done .material-check {
+  color: #1c2810;
+  background: var(--green);
+  border-color: var(--green-dark);
+}
+
+.material.is-abandoned {
+  opacity: 0.5;
+}
+
+.material-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.material-title {
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.material.is-done .material-title,
+.material.is-abandoned .material-title {
+  color: var(--dim);
+}
+
+.material.is-abandoned .material-title {
+  text-decoration: line-through;
+}
+
+.material-meta {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.material-drop {
+  flex: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
 .floor {
   margin-bottom: 18px;
   padding: 12px;
@@ -1383,4 +1616,12 @@ a.room-title {
   .tubes {
     grid-template-columns: 1fr;
   }
+}
+
+.card-meta .px {
+  width: 13px;
+  height: 13px;
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 3px;
 }

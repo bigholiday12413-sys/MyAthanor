@@ -251,6 +251,29 @@ const CHEST = {
   palette: { o: INK, w: WOOD, b: GOLD_DARK, g: GOLD },
 };
 
+// 大釜＝素材を集めて錬成する器。
+const CAULDRON = {
+  rows: [
+    '................',
+    '....gg....gg....',
+    '.....g....g.....',
+    '..oooooooooooo..',
+    '..oggggggggggo..',
+    '.obbbbbbbbbbbbo.',
+    '.obbbbbbbbbbbbo.',
+    '.obbbbbbbbbbbbo.',
+    '.obbbbbbbbbbbbo.',
+    '..obbbbbbbbbbo..',
+    '...obbbbbbbbo...',
+    '....oooooooo....',
+    '.....o....o.....',
+    '....oo....oo....',
+    '................',
+    '................',
+  ],
+  palette: { o: INK, b: '#4a4038', g: GREEN },
+};
+
 // アイデアの温度＝炎。熱さに応じて色を差し替えて使う（icon の第3引数）。
 const FLAME = {
   rows: [
@@ -349,6 +372,7 @@ const SOURCES = {
   book: BOOK,
   gate: GATE,
   chest: CHEST,
+  cauldron: CAULDRON,
   flame: FLAME,
   frost: FROST,
   plus: PLUS,
@@ -358,6 +382,15 @@ const SOURCES = {
 const RENDERED = Object.fromEntries(
   Object.entries(SOURCES).map(([name, source]) => [name, toRects(source)]),
 );
+
+// 地図など、外側の SVG に埋め込みたいときは矩形だけ取り出す。
+export function iconBody(name, overrides = null) {
+  const source = SOURCES[name];
+  if (!source) return '';
+  return overrides
+    ? toRects({ rows: source.rows, palette: { ...source.palette, ...overrides } })
+    : RENDERED[name];
+}
 
 // overrides を渡すと配色だけ差し替えて描き直す（温度による炎の色など）。
 export function icon(name, className = '', overrides = null) {

@@ -1,6 +1,6 @@
 /* MyAthanor — フロントエンド（ビルドなしの ES モジュール） */
 
-import { icon, KIND_ICON } from './icons.js';
+import { icon, iconBody, KIND_ICON } from './icons.js';
 
 const viewEl = document.getElementById('view');
 const topbarEl = document.getElementById('topbar');
@@ -145,6 +145,13 @@ function missionCard(mission, { showSource = true } = {}) {
         <span>${done ? '実消費' : '見積'} タイム ${esc(fmtTime(mission.estimated_time))}</span>
         <span>ウォレット ${esc(fmtMoney(mission.estimated_money))}</span>
       </div>
+      ${
+        mission.cauldron
+          ? `<div class="card-meta"><span>${icon('cauldron')}大釜「${esc(
+              mission.cauldron.title,
+            )}」の素材</span></div>`
+          : ''
+      }
       ${
         showSource && mission.source_title
           ? `<div class="card-meta">
@@ -504,6 +511,128 @@ function openNewEntryModal() {
 
 /* ---------- 詳細（アイデア／ログ） ---------- */
 
+/* ---------- 大釜（ミッションのTODOリスト） ---------- */
+
+// ひとつの大きなイベントに必要なミッションを素材として並べる。
+// 素材が全部そろうと錬成が終わる。断念した素材は必要数から外れる。
+function cauldronPanel(cauldron) {
+  const { progress } = cauldron;
+  const complete = Boolean(cauldron.completed_at);
+  const percent = progress.needed ? Math.round((progress.done / progress.needed) * 100) : 0;
+
+  return `
+    <div class="cauldron ${complete ? 'is-complete' : ''}" data-cauldron="${cauldron.id}">
+      <div class="cauldron-head">
+        ${icon('cauldron')}
+        <span class="cauldron-title">${esc(cauldron.title)}</span>
+        <span class="cauldron-count">${progress.done}/${progress.needed}</span>
+      </div>
+      <div class="brew"><div class="brew-fill" style="width:${percent}%"></div></div>
+      <div class="region-stat" style="padding:0 0 6px">
+        ${
+          complete
+            ? '<span class="hot">錬成完了</span>'
+            : `<span>残り ${esc(fmtTime(progress.remaining_time))} · ${esc(
+                fmtMoney(progress.remaining_money),
+              )}</span>`
+        }
+        ${progress.abandoned ? `<span>断念 ${progress.abandoned}</span>` : ''}
+      </div>
+
+      ${cauldron.materials.map(materialRow).join('')}
+
+      <form class="material-add" data-add="${cauldron.id}">
+        <div class="field">
+          <label for="mat-${cauldron.id}">素材を投入（1行に1つ）</label>
+          <textarea id="mat-${cauldron.id}" rows="2" placeholder="必要なことを並べる"></textarea>
+        </div>
+        <div class="btn-row">
+          <button type="submit">投入</button>
+          <button type="button" class="ghost danger" data-drop="${cauldron.id}"
+                  data-name="${esc(cauldron.title)}">大釜を捨てる</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function materialRow(material) {
+  const done = material.status === 'done';
+  const abandoned = material.status === 'abandoned';
+  return `
+    <div class="material ${done ? 'is-done' : ''} ${abandoned ? 'is-abandoned' : ''}">
+      <button type="button" class="material-check" data-toggle-material="${material.id}"
+              data-status="${material.status}"
+              aria-label="${done ? '未完了に戻す' : '完了にする'}">${done ? '✓' : ''}</button>
+      <div class="material-body">
+        <div class="material-title">${esc(material.title)}</div>
+        <div class="material-meta">
+          ${esc(fmtTime(material.estimated_time))} · ${esc(fmtMoney(material.estimated_money))}
+          ${abandoned ? ' · 断念' : ''}
+        </div>
+      </div>
+      ${
+        abandoned
+          ? `<button type="button" class="ghost material-drop"
+               data-material-act="reopen" data-id="${material.id}">戻す</button>`
+          : done
+            ? ''
+            : `<button type="button" class="ghost danger material-drop"
+                 data-material-act="abandon" data-id="${material.id}">要らない</button>`
+      }
+    </div>
+  `;
+}
+
+function wireCauldrons(container, entryId, kind) {
+  const reload = () => renderEntry(kind, entryId);
+
+  container.addEventListener('submit', async (event) => {
+    const form = event.target.closest('form[data-add]');
+    if (!form) return;
+    event.preventDefault();
+    const box = form.querySelector('textarea');
+    const titles = box.value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (titles.length === 0) return box.focus();
+    try {
+      await api(`/cauldrons/${form.dataset.add}/materials`, {
+        method: 'POST',
+        body: { items: titles.map((title) => ({ title })) },
+      });
+      toast(`${titles.length}個の素材を投入しました`);
+      await reload();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  container.addEventListener('click', async (event) => {
+    const check = event.target.closest('button[data-toggle-material]');
+    const act = event.target.closest('button[data-material-act]');
+    const drop = event.target.closest('button[data-drop]');
+    if (!check && !act && !drop) return;
+
+    try {
+      if (check) {
+        const next = check.dataset.status === 'done' ? 'reopen' : 'complete';
+        await api(`/missions/${check.dataset.toggleMaterial}/${next}`, { method: 'POST' });
+      } else if (act) {
+        await api(`/missions/${act.dataset.id}/${act.dataset.materialAct}`, { method: 'POST' });
+      } else {
+        if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のミッションとして残ります）`)) return;
+        await api(`/cauldrons/${drop.dataset.drop}`, { method: 'DELETE' });
+        toast('大釜を捨てました');
+      }
+      await reload();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 // アイデアの温度。設定した熱は 273K へ向かって冷めていくので、
 // 「いま何度か」と「いつ何度に入れたか」の両方を出す。
 function temperaturePanel(idea) {
@@ -576,6 +705,8 @@ async function renderEntry(kind, entryId) {
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
   const [entry, allTags] = await Promise.all([api(path), api('/tags')]);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
+  // 大釜に入っているミッションは大釜のほうに出すので、こちらからは外す。
+  const loose = entry.missions.filter((mission) => !mission.cauldron_id);
 
   viewEl.innerHTML = `
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
@@ -619,12 +750,25 @@ async function renderEntry(kind, entryId) {
       </div>
     </form>
 
-    <div class="section-title">切り出したミッション</div>
+    <div class="section-title">大釜<span class="section-count">錬成</span></div>
+    <div id="entry-cauldrons">
+      ${entry.cauldrons.map(cauldronPanel).join('')}
+      <form class="panel" id="cauldron-new">
+        <div class="field">
+          <label for="c-title">新しい大釜</label>
+          <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
+        </div>
+        <div class="hint">必要なミッションを素材として並べ、全部そろうと錬成が終わります。</div>
+        <div class="btn-row"><button type="submit">大釜を用意する</button></div>
+      </form>
+    </div>
+
+    <div class="section-title">単独のミッション</div>
     <div class="list" id="entry-missions">
       ${
-        entry.missions.length
-          ? entry.missions.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">紐づくミッションはありません</div>'
+        loose.length
+          ? loose.map((m) => missionCard(m, { showSource: false })).join('')
+          : '<div class="empty">大釜に入っていないミッションはありません</div>'
       }
     </div>
 
@@ -719,6 +863,25 @@ async function renderEntry(kind, entryId) {
   });
 
   if (kind === 'idea') wireTemperature(entry, entryId);
+
+  const cauldronArea = document.getElementById('entry-cauldrons');
+  wireCauldrons(cauldronArea, entryId, kind);
+  document.getElementById('cauldron-new').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('c-title');
+    const title = input.value.trim();
+    if (!title) return input.focus();
+    try {
+      await api('/cauldrons', {
+        method: 'POST',
+        body: { title, source_type: kind, source_id: entryId },
+      });
+      toast('大釜を用意しました');
+      await renderEntry(kind, entryId);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
 
   document.getElementById('mission-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1440,45 +1603,184 @@ function wireLegacy(container, onChanged) {
   });
 }
 
-/* ---------- ダンジョン ---------- */
+/* ---------- ダンジョン ----------
+
+   たまっていく情報を「道」として地図にする。
+     部屋 = アイデア／ログ、通路 = ミッション、大釜 = 通路の束、宝箱 = レガシー。
+     縦 = 深さ（子は必ず親より後に生まれるので、下へ行くほど後の時間）。
+     横 = 枝分かれ。区画 = タグ。                                            */
 
 let dungeonFilter = 'all';
 
-// 部屋（アイデア／ログ）と通路（ミッション）を入れ子で描く。
-function dungeonNode(node) {
-  const isRoom = node.type !== 'mission';
-  const iconName = node.type === 'mission' ? 'parchment' : KIND_ICON[node.type];
-  const canLegacy = node.type === 'log' || (node.type === 'mission' && node.status === 'done');
+const MAP = { row: 56, col: 100, padX: 14, padY: 16, icon: 18 };
 
-  const title = isRoom
-    ? `<a class="room-title" href="#/${node.type}/${node.id}">${esc(node.title)}</a>`
-    : `<span class="room-title">${esc(node.title)}</span>`;
+const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
 
-  const meta = isRoom
-    ? `<span>${esc(fmtDate(node.at))}</span>` +
-      (node.type === 'log'
-        ? `<span>${esc(fmtTime(node.time))} · ${esc(fmtMoney(node.money))}</span>`
-        : '') +
-      (node.from_recurrence ? '<span>定期</span>' : '')
-    : `<span class="badge ${esc(node.status)}">${esc(STATUS_LABEL[node.status])}</span>` +
-      `<span>${esc(fmtTime(node.time))} · ${esc(fmtMoney(node.money))}</span>`;
+// 部屋と通路に (depth, lane) を振る。葉から順にレーンを配り、親は子の中央に置く。
+// 大釜は素材ごとにレーンを取らず、1つに畳んで進み具合だけ出す。
+// 素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。
+function layoutRoad(root) {
+  const nodes = [];
+  let nextLane = 0;
+
+  const placeCorridor = (corridor, depth) => {
+    const child = corridor.room
+      ? place(corridor.room, depth)
+      : { kind: 'dead', depth, lane: nextLane++, children: [] };
+    if (!corridor.room) nodes.push(child);
+    child.corridor = corridor;
+    return child;
+  };
+
+  const placeCauldron = (bundle, depth) => {
+    const branching = bundle.corridors.filter((c) => c.room && hasBranch(c.room));
+    const children = branching.map((corridor) => placeCorridor(corridor, depth + 1));
+    const lane = children.length
+      ? (children[0].lane + children[children.length - 1].lane) / 2
+      : nextLane++;
+    const done = bundle.corridors.filter((c) => c.mission.status === 'done').length;
+    const needed = bundle.corridors.filter((c) => c.mission.status !== 'abandoned').length;
+    const node = {
+      kind: 'cauldron',
+      cauldron: bundle.cauldron,
+      done,
+      needed,
+      depth,
+      lane,
+      children,
+    };
+    for (const child of children) child.parent = node;
+    nodes.push(node);
+    return node;
+  };
+
+  function place(room, depth) {
+    const children = [
+      ...room.corridors.map((corridor) => placeCorridor(corridor, depth + 1)),
+      ...room.cauldrons.map((bundle) => placeCauldron(bundle, depth + 1)),
+    ];
+    const lane = children.length
+      ? (children[0].lane + children[children.length - 1].lane) / 2
+      : nextLane++;
+    const node = { kind: 'room', room, depth, lane, children };
+    for (const child of children) child.parent = node;
+    nodes.push(node);
+    return node;
+  }
+
+  place(root, 0);
+
+  const maxLane = Math.max(...nodes.map((n) => n.lane));
+  const maxDepth = Math.max(...nodes.map((n) => n.depth));
+  for (const node of nodes) {
+    node.x = MAP.padX + node.lane * MAP.col + MAP.icon;
+    node.y = MAP.padY + node.depth * MAP.row;
+  }
+  return {
+    nodes,
+    width: MAP.padX * 2 + maxLane * MAP.col + MAP.col,
+    height: MAP.padY * 2 + maxDepth * MAP.row,
+  };
+}
+
+const CORRIDOR_STYLE = {
+  done: { stroke: '#8d8f7a', width: 3, dash: '' },
+  active: { stroke: '#e0aa3c', width: 3, dash: '6 5' },
+  abandoned: { stroke: '#5b4a2c', width: 2, dash: '2 5' },
+};
+
+function clip(text, max) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// 親から子へ、直角に折れる通路を引く。
+function corridorPath(parent, child) {
+  const midY = parent.y + MAP.row / 2;
+  return `M ${parent.x} ${parent.y + 12} V ${midY} H ${child.x} V ${child.y - 12}`;
+}
+
+function mapPixel(name, x, y, size, overrides = null) {
+  const scale = size / 16;
+  return `<g transform="translate(${x - size / 2} ${y - size / 2}) scale(${scale})"
+    shape-rendering="crispEdges">${iconBody(name, overrides)}</g>`;
+}
+
+function roadMap(root) {
+  const { nodes, width, height } = layoutRoad(root);
+  const parts = [];
+
+  // 通路（先に描いて部屋の下に敷く）
+  for (const node of nodes) {
+    if (!node.parent) continue;
+    const style = CORRIDOR_STYLE[node.kind === 'cauldron' ? 'done' : node.corridor.mission.status];
+    parts.push(
+      `<path d="${corridorPath(node.parent, node)}" fill="none" stroke="${style.stroke}"
+        stroke-width="${style.width}" ${style.dash ? `stroke-dasharray="${style.dash}"` : ''}
+        stroke-linecap="square" />`,
+    );
+    if (node.kind !== 'cauldron') {
+      // 通路の名前は縦の区間に添える
+      parts.push(
+        `<text class="map-corridor" x="${node.x + 8}" y="${node.y - 17}">${esc(
+          clip(node.corridor.mission.title, 6),
+        )}</text>`,
+      );
+      if (node.corridor.mission.is_legacy) {
+        parts.push(mapPixel('chest', node.x - 9, node.y - 24, 13));
+      }
+    }
+  }
+
+  // 部屋・大釜・行き止まり
+  for (const node of nodes) {
+    if (node.kind === 'cauldron') {
+      parts.push(
+        mapPixel('cauldron', node.x, node.y, MAP.icon),
+        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y}">${esc(
+          clip(node.cauldron.title, 5),
+        )}</text>`,
+        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y + 11}">${node.done}/${
+          node.needed
+        } ${node.cauldron.complete ? '錬成完了' : '錬成中'}</text>`,
+      );
+      continue;
+    }
+
+    if (node.kind === 'dead') {
+      const digging = node.corridor.mission.status === 'active';
+      parts.push(
+        `<circle cx="${node.x}" cy="${node.y}" r="6" fill="#120e06"
+          stroke="${digging ? '#e0aa3c' : '#5b4a2c'}" stroke-width="2"
+          stroke-dasharray="3 3" />`,
+        `<text class="map-dead" x="${node.x + 12}" y="${node.y + 4}">${
+          digging ? '掘削中' : '崩落'
+        }</text>`,
+      );
+      continue;
+    }
+
+    const room = node.room;
+    if (room.is_legacy) {
+      parts.push(
+        `<circle cx="${node.x}" cy="${node.y}" r="15" fill="rgba(224,170,60,.14)"
+          stroke="#a97c22" stroke-width="1" />`,
+      );
+    }
+    parts.push(
+      `<a href="#/${room.type}/${room.id}">`,
+      mapPixel(KIND_ICON[room.type], node.x, node.y, MAP.icon),
+      `<text class="map-room" x="${node.x + 13}" y="${node.y + 4}">${esc(
+        clip(room.title, 7),
+      )}</text>`,
+      '</a>',
+    );
+    if (room.is_legacy) parts.push(mapPixel('chest', node.x + 11, node.y - 11, 13));
+  }
 
   return `
-    <div class="dungeon-node">
-      <div class="room room-${esc(node.type)} ${node.is_legacy ? 'is-legacy' : ''}">
-        <div class="room-head">
-          ${icon(iconName)}
-          ${title}
-          ${node.is_legacy ? icon('chest', 'legacy-mark') : ''}
-        </div>
-        <div class="room-meta">${meta}</div>
-        ${canLegacy ? `<div class="room-actions">${legacyButton(node.type, node.id, node.is_legacy)}</div>` : ''}
-      </div>
-      ${
-        node.children.length
-          ? `<div class="dungeon-children">${node.children.map(dungeonNode).join('')}</div>`
-          : ''
-      }
+    <div class="map-scroll">
+      <svg class="map" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"
+           role="img" aria-label="${esc(root.title)} の道">${parts.join('')}</svg>
     </div>
   `;
 }
@@ -1488,18 +1790,67 @@ async function renderDungeon() {
   setTopbar({ title: 'ダンジョン' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [roots, legacies] = await Promise.all([
+  const [regions, legacies] = await Promise.all([
     api(`/dungeon${dungeonFilter === 'legacy' ? '?legacy=1' : ''}`),
     api('/legacies'),
   ]);
 
   viewEl.innerHTML = `
     <div class="filters">
-      <button class="filter" data-filter="all" aria-pressed="${dungeonFilter === 'all'}">すべての層</button>
-      <button class="filter" data-filter="legacy" aria-pressed="${dungeonFilter === 'legacy'}">レガシーのある層</button>
+      <button class="filter" data-filter="all" aria-pressed="${dungeonFilter === 'all'}">全区画</button>
+      <button class="filter" data-filter="legacy" aria-pressed="${
+        dungeonFilter === 'legacy'
+      }">宝箱のある道</button>
     </div>
 
-    <div class="section-title">レガシー</div>
+    <div class="map-legend">
+      <span>${icon('stone')}アイデア</span>
+      <span>${icon('footsteps')}ログ</span>
+      <span><i class="rule done"></i>通った道</span>
+      <span><i class="rule active"></i>掘削中</span>
+      <span><i class="rule abandoned"></i>崩落</span>
+      <span>${icon('chest')}宝箱</span>
+    </div>
+
+    ${
+      regions.length
+        ? regions
+            .map(
+              (region) => `
+      <div class="section-title">${esc(region.tag ? region.tag.name : '未踏')}<span
+        class="section-count">${region.totals.roads}本</span></div>
+      <div class="region">
+        <div class="region-stat">
+          <span>部屋 ${region.totals.rooms}</span>
+          <span>通路 ${region.totals.corridors}</span>
+          ${region.totals.cauldrons ? `<span>大釜 ${region.totals.cauldrons}</span>` : ''}
+          <span>最深 ${region.totals.depth}</span>
+          ${
+            region.totals.legacies
+              ? `<span class="hot">宝箱 ${region.totals.legacies}</span>`
+              : ''
+          }
+        </div>
+        <div class="region-stat">
+          <span>費やした ${esc(fmtTime(region.totals.consumed_time))} · ${esc(
+            fmtMoney(region.totals.consumed_money),
+          )}</span>
+          ${
+            region.totals.planned_time || region.totals.planned_money
+              ? `<span class="hot">これから ${esc(fmtTime(region.totals.planned_time))} · ${esc(
+                  fmtMoney(region.totals.planned_money),
+                )}</span>`
+              : ''
+          }
+        </div>
+        ${region.roads.map(roadMap).join('')}
+      </div>`,
+            )
+            .join('')
+        : '<div class="empty">まだ道がありません</div>'
+    }
+
+    <div class="section-title">宝物庫</div>
     ${
       legacies.length
         ? `<div class="list">${legacies
@@ -1526,39 +1877,7 @@ async function renderDungeon() {
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだレガシーはありません。<br />ログや完了したミッションから選んで刻んでください。</div>'
-    }
-
-    <div class="section-title">探索</div>
-    ${
-      roots.length
-        ? roots
-            .map(
-              (root) => `
-      <div class="floor">
-        <div class="floor-head">
-          <span class="floor-depth">深度 ${root.totals.depth}</span>
-          <span class="floor-stat">部屋 ${root.totals.rooms} · ミッション ${root.totals.missions}${
-            root.totals.legacies ? ` · レガシー ${root.totals.legacies}` : ''
-          }</span>
-        </div>
-        <div class="floor-totals">
-          <span>費やした ${esc(fmtTime(root.totals.consumed_time))} · ${esc(
-            fmtMoney(root.totals.consumed_money),
-          )}</span>
-          ${
-            root.totals.planned_time || root.totals.planned_money
-              ? `<span class="hot">これから ${esc(fmtTime(root.totals.planned_time))} · ${esc(
-                  fmtMoney(root.totals.planned_money),
-                )}</span>`
-              : ''
-          }
-        </div>
-        ${dungeonNode(root)}
-      </div>`,
-            )
-            .join('')
-        : '<div class="empty">探索できる層がありません</div>'
+        : '<div class="empty">まだ宝箱はありません。<br />ログや完了したミッションから、得たものが大きかったと思うものを選んでください。</div>'
     }
   `;
 

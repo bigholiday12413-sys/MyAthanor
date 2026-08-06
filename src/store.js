@@ -191,6 +191,7 @@ export function getIdea(id) {
     ...withTemperature(row),
     kind: 'idea',
     tags: tagsFor('idea', id),
+    cauldrons: listCauldronsBySource('idea', id),
     missions: listMissionsBySource('idea', id),
   };
 }
@@ -244,6 +245,7 @@ export function getLog(id) {
     source_mission: source,
     source_recurrence: recurrence,
     tags: tagsFor('log', id),
+    cauldrons: listCauldronsBySource('log', id),
     missions: listMissionsBySource('log', id),
   };
 }
@@ -351,31 +353,57 @@ function sourceTitle(type, id) {
 }
 
 function decorate(mission) {
-  return { ...mission, source_title: sourceTitle(mission.source_type, mission.source_id) };
+  const cauldron = mission.cauldron_id
+    ? db.prepare(`SELECT id, title FROM cauldron WHERE id = ?`).get(mission.cauldron_id) ?? null
+    : null;
+  return {
+    ...mission,
+    source_title: sourceTitle(mission.source_type, mission.source_id),
+    cauldron,
+  };
 }
 
-export function createMission({ title, source_type, source_id, estimated_time, estimated_money }) {
-  if (source_type !== 'idea' && source_type !== 'log') {
+export function createMission({
+  title,
+  source_type,
+  source_id,
+  estimated_time,
+  estimated_money,
+  cauldron_id,
+}) {
+  // 大釜に入れる場合は、器と同じ元エントリに揃える。
+  let sourceType = source_type;
+  let sourceId = source_id;
+  if (cauldron_id) {
+    const cauldron = cauldronRow(cauldron_id);
+    sourceType = cauldron.source_type;
+    sourceId = cauldron.source_id;
+  }
+
+  if (sourceType !== 'idea' && sourceType !== 'log') {
     const err = new Error('source_type must be "idea" or "log"');
     err.status = 400;
     throw err;
   }
-  if (sourceTitle(source_type, source_id) === null) throw notFound(source_type);
+  if (sourceTitle(sourceType, sourceId) === null) throw notFound(sourceType);
 
   const { lastInsertRowid } = db
     .prepare(`
       INSERT INTO mission
-        (title, source_type, source_id, status, estimated_time, estimated_money, created_at)
-      VALUES (?, ?, ?, 'active', ?, ?, ?)
+        (title, source_type, source_id, status, estimated_time, estimated_money,
+         created_at, cauldron_id)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
     `)
     .run(
       requireTitle(title),
-      source_type,
-      int(source_id),
+      sourceType,
+      int(sourceId),
       int(estimated_time),
       int(estimated_money),
       nowIso(),
+      cauldron_id ?? null,
     );
+  refreshCauldron(cauldron_id);
   return getMission(Number(lastInsertRowid));
 }
 
@@ -441,6 +469,7 @@ export function completeMission(id) {
       `)
       .run(mission.title, at, mission.estimated_time, mission.estimated_money, id);
 
+    refreshCauldron(mission.cauldron_id);
     return {
       mission: decorate(db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id)),
       log: db.prepare(`SELECT * FROM log WHERE id = ?`).get(Number(lastInsertRowid)),
@@ -458,6 +487,7 @@ export function abandonMission(id) {
     throw err;
   }
   db.prepare(`UPDATE mission SET status = 'abandoned', completed_at = NULL WHERE id = ?`).run(id);
+  refreshCauldron(row.cauldron_id);
   return getMission(id);
 }
 
@@ -471,6 +501,7 @@ export function reopenMission(id) {
     throw err;
   }
   db.prepare(`UPDATE mission SET status = 'active', completed_at = NULL WHERE id = ?`).run(id);
+  refreshCauldron(row.cauldron_id);
   return getMission(id);
 }
 
@@ -1010,6 +1041,148 @@ function plannedRecurring(period, now) {
   return totals;
 }
 
+/* ---------- 大釜（ミッションのTODOリスト） ---------- */
+
+function cauldronRow(id) {
+  const row = db.prepare(`SELECT * FROM cauldron WHERE id = ?`).get(id);
+  if (!row) throw notFound('cauldron');
+  return row;
+}
+
+// 素材（＝この大釜に入っているミッション）。
+export function listMaterials(cauldronId) {
+  return db
+    .prepare(`SELECT * FROM mission WHERE cauldron_id = ? ORDER BY id ASC`)
+    .all(cauldronId)
+    .map(decorate);
+}
+
+// 断念した素材は「要らなくなった」とみなし、必要数から外す。
+function cauldronProgress(materials) {
+  const needed = materials.filter((m) => m.status !== 'abandoned');
+  const done = needed.filter((m) => m.status === 'done');
+  return {
+    total: materials.length,
+    needed: needed.length,
+    done: done.length,
+    abandoned: materials.length - needed.length,
+    remaining_time: needed
+      .filter((m) => m.status === 'active')
+      .reduce((sum, m) => sum + m.estimated_time, 0),
+    remaining_money: needed
+      .filter((m) => m.status === 'active')
+      .reduce((sum, m) => sum + m.estimated_money, 0),
+    spent_time: done.reduce((sum, m) => sum + m.estimated_time, 0),
+    spent_money: done.reduce((sum, m) => sum + m.estimated_money, 0),
+  };
+}
+
+// 素材の状態が変わるたびに錬成の完了を判定し直す。
+// 素材が1つ以上あって、断念を除く全部が完了していれば錬成完了。
+function refreshCauldron(cauldronId) {
+  if (!cauldronId) return;
+  const row = db.prepare(`SELECT * FROM cauldron WHERE id = ?`).get(cauldronId);
+  if (!row) return;
+
+  const progress = cauldronProgress(listMaterials(cauldronId));
+  const complete = progress.needed > 0 && progress.done === progress.needed;
+
+  if (complete && !row.completed_at) {
+    db.prepare(`UPDATE cauldron SET completed_at = ? WHERE id = ?`).run(nowIso(), cauldronId);
+  } else if (!complete && row.completed_at) {
+    db.prepare(`UPDATE cauldron SET completed_at = NULL WHERE id = ?`).run(cauldronId);
+  }
+}
+
+export function getCauldron(id) {
+  const row = cauldronRow(id);
+  const materials = listMaterials(id);
+  return {
+    ...row,
+    source_title: sourceTitle(row.source_type, row.source_id),
+    materials,
+    progress: cauldronProgress(materials),
+  };
+}
+
+export function listCauldronsBySource(sourceType, sourceId) {
+  return db
+    .prepare(`
+      SELECT * FROM cauldron WHERE source_type = ? AND source_id = ?
+      ORDER BY completed_at IS NOT NULL, id ASC
+    `)
+    .all(sourceType, sourceId)
+    .map((row) => {
+      const materials = listMaterials(row.id);
+      return { ...row, materials, progress: cauldronProgress(materials) };
+    });
+}
+
+export function createCauldron({ title, source_type, source_id }) {
+  if (source_type !== 'idea' && source_type !== 'log') {
+    throw badRequest('source_type must be "idea" or "log"');
+  }
+  if (sourceTitle(source_type, source_id) === null) throw notFound(source_type);
+
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO cauldron (title, source_type, source_id, created_at) VALUES (?, ?, ?, ?)
+    `)
+    .run(requireTitle(title), source_type, int(source_id), nowIso());
+  return getCauldron(Number(lastInsertRowid));
+}
+
+export function updateCauldron(id, { title }) {
+  const row = cauldronRow(id);
+  if (title !== undefined) {
+    db.prepare(`UPDATE cauldron SET title = ? WHERE id = ?`).run(requireTitle(title), id);
+  }
+  return getCauldron(row.id);
+}
+
+// 大釜を捨てても素材は残す。単独のミッションに戻すだけ。
+export function deleteCauldron(id) {
+  cauldronRow(id);
+  return transaction(() => {
+    db.prepare(`UPDATE mission SET cauldron_id = NULL WHERE cauldron_id = ?`).run(id);
+    db.prepare(`DELETE FROM cauldron WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
+}
+
+// 素材をまとめて投入する。1行1素材で受け取る想定。
+export function addMaterials(cauldronId, items) {
+  const cauldron = cauldronRow(cauldronId);
+  if (!Array.isArray(items) || items.length === 0) {
+    throw badRequest('items must be a non-empty array');
+  }
+
+  return transaction(() => {
+    for (const item of items) {
+      const values = typeof item === 'string' ? { title: item } : item ?? {};
+      const { lastInsertRowid } = db
+        .prepare(`
+          INSERT INTO mission
+            (title, source_type, source_id, status, estimated_time, estimated_money,
+             created_at, cauldron_id)
+          VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
+        `)
+        .run(
+          requireTitle(values.title),
+          cauldron.source_type,
+          cauldron.source_id,
+          int(values.estimated_time),
+          int(values.estimated_money),
+          nowIso(),
+          cauldronId,
+        );
+      void lastInsertRowid;
+    }
+    refreshCauldron(cauldronId);
+    return getCauldron(cauldronId);
+  });
+}
+
 /* ---------- レガシー ---------- */
 
 // 大事なものに印をつける。ミッションは完了したものだけ。
@@ -1045,35 +1218,64 @@ export function listLegacies() {
   return [...logs, ...missions].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
-/* ---------- ダンジョン（つながりの探索） ---------- */
+/* ---------- ダンジョン（たまった情報を道として見る） ----------
+
+   部屋   = アイデア／ログ。実際に起きたこと・思いついたこと。
+   通路   = ミッション。部屋から次の部屋へ掘った道。
+            完了した通路の先には、生成されたログの部屋がある。
+            進行中の通路は掘りかけ、断念した通路は崩れて行き止まり。
+   大釜   = ひとつの部屋から出る通路のうち、同じ器に入っているものの束。
+   深さ   = 道を進んだ順。子は必ず親より後に生まれるので、深さは時間の順序でもある。
+   区画   = タグ。道のどこかに付いたタグで、その道全体が区画に属する。
+   宝箱   = レガシー。                                                        */
 
 const DUNGEON_MAX_DEPTH = 12;
 
-// ミッションを1本の通路として見る。完了していれば、その先に生成されたログの部屋がある。
-function dungeonMission(mission, depth) {
+function corridorFrom(mission, depth) {
   const generated =
-    depth >= DUNGEON_MAX_DEPTH
-      ? null
-      : db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(mission.id) ?? null;
+    mission.status === 'done' && depth < DUNGEON_MAX_DEPTH
+      ? db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(mission.id) ?? null
+      : null;
   return {
-    type: 'mission',
-    id: mission.id,
-    title: mission.title,
-    status: mission.status,
-    time: mission.estimated_time,
-    money: mission.estimated_money,
-    is_legacy: Boolean(mission.is_legacy),
-    at: mission.completed_at ?? mission.created_at,
-    children: generated ? [dungeonEntry('log', generated, depth + 1)] : [],
+    mission: {
+      id: mission.id,
+      title: mission.title,
+      status: mission.status,
+      time: mission.estimated_time,
+      money: mission.estimated_money,
+      is_legacy: Boolean(mission.is_legacy),
+      at: mission.completed_at ?? mission.created_at,
+    },
+    room: generated ? dungeonRoom('log', generated, depth + 1) : null,
   };
 }
 
-// アイデア／ログを1つの部屋として見る。切り出したミッションが次への通路になる。
-function dungeonEntry(type, row, depth) {
-  const children =
-    depth >= DUNGEON_MAX_DEPTH
-      ? []
-      : listMissionsBySource(type, row.id).map((mission) => dungeonMission(mission, depth + 1));
+function dungeonRoom(type, row, depth) {
+  const missions = depth >= DUNGEON_MAX_DEPTH ? [] : listMissionsBySource(type, row.id);
+
+  // 大釜に入っている通路は束ねて、器ごとにまとめて出す。
+  const loose = [];
+  const bundles = new Map();
+  for (const mission of missions) {
+    const corridor = corridorFrom(mission, depth);
+    if (!mission.cauldron_id) {
+      loose.push(corridor);
+      continue;
+    }
+    if (!bundles.has(mission.cauldron_id)) {
+      const cauldron = db
+        .prepare(`SELECT id, title, completed_at FROM cauldron WHERE id = ?`)
+        .get(mission.cauldron_id);
+      bundles.set(mission.cauldron_id, {
+        cauldron: cauldron
+          ? { ...cauldron, complete: Boolean(cauldron.completed_at) }
+          : { id: mission.cauldron_id, title: '大釜', complete: false },
+        corridors: [],
+      });
+    }
+    bundles.get(mission.cauldron_id).corridors.push(corridor);
+  }
+
   return {
     type,
     id: row.id,
@@ -1083,66 +1285,131 @@ function dungeonEntry(type, row, depth) {
     money: type === 'log' ? row.money_spent : 0,
     is_legacy: Boolean(row.is_legacy),
     from_recurrence: type === 'log' ? Boolean(row.source_recurrence_id) : false,
-    children,
+    temperature: type === 'idea' ? withTemperature(row).current_temperature : null,
+    tags: tagsFor(type, row.id),
+    corridors: loose,
+    cauldrons: [...bundles.values()],
   };
 }
 
-// 枝の合計。消費済みはログ側だけを数える（完了ミッションの消費はログになっているため）。
-function accumulate(node) {
+function eachCorridor(room) {
+  return [...room.corridors, ...room.cauldrons.flatMap((bundle) => bundle.corridors)];
+}
+
+// 道ぜんたいの合計。消費済みはログ側だけ数える（完了ミッションの消費はログになっている）。
+function accumulate(room) {
   const totals = {
-    consumed_time: 0,
-    consumed_money: 0,
+    rooms: 1,
+    corridors: 0,
+    cauldrons: room.cauldrons.length,
+    legacies: room.is_legacy ? 1 : 0,
+    consumed_time: room.time,
+    consumed_money: room.money,
     planned_time: 0,
     planned_money: 0,
-    rooms: 0,
-    missions: 0,
-    legacies: node.is_legacy ? 1 : 0,
     depth: 1,
   };
 
-  if (node.type === 'mission') {
-    totals.missions = 1;
-    if (node.status === 'active') {
-      totals.planned_time += node.time;
-      totals.planned_money += node.money;
+  for (const corridor of eachCorridor(room)) {
+    totals.corridors += 1;
+    if (corridor.mission.is_legacy) totals.legacies += 1;
+    if (corridor.mission.status === 'active') {
+      totals.planned_time += corridor.mission.time;
+      totals.planned_money += corridor.mission.money;
     }
-  } else {
-    totals.rooms = 1;
-    totals.consumed_time += node.time;
-    totals.consumed_money += node.money;
-  }
-
-  for (const child of node.children) {
-    const sub = accumulate(child);
+    if (!corridor.room) {
+      totals.depth = Math.max(totals.depth, 2); // 掘りかけ・行き止まりも一歩ぶん
+      continue;
+    }
+    const sub = accumulate(corridor.room);
+    totals.rooms += sub.rooms;
+    totals.corridors += sub.corridors;
+    totals.cauldrons += sub.cauldrons;
+    totals.legacies += sub.legacies;
     totals.consumed_time += sub.consumed_time;
     totals.consumed_money += sub.consumed_money;
     totals.planned_time += sub.planned_time;
     totals.planned_money += sub.planned_money;
-    totals.rooms += sub.rooms;
-    totals.missions += sub.missions;
-    totals.legacies += sub.legacies;
     totals.depth = Math.max(totals.depth, sub.depth + 1);
   }
   return totals;
 }
 
+// 道のどこかに付いたタグを集める。入口だけでなく途中で付けたタグでも辿れるように。
+function collectTags(room, into = new Map()) {
+  for (const tag of room.tags) into.set(tag.id, tag);
+  for (const corridor of eachCorridor(room)) {
+    if (corridor.room) collectTags(corridor.room, into);
+  }
+  return into;
+}
+
 // 探索の入口＝アイデア全部と、ミッション由来ではないログ。
 export function getDungeon({ onlyLegacy = false } = {}) {
   const roots = [
-    ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonEntry('idea', row, 0)),
+    ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
     ...db
       .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
       .all()
-      .map((row) => dungeonEntry('log', row, 0)),
-  ].map((node) => ({ ...node, totals: accumulate(node) }));
+      .map((row) => dungeonRoom('log', row, 0)),
+  ]
+    .map((room) => ({ ...room, totals: accumulate(room) }))
+    .filter((room) => !onlyLegacy || room.totals.legacies > 0);
 
-  const filtered = onlyLegacy ? roots.filter((node) => node.totals.legacies > 0) : roots;
+  // タグごとの区画に振り分ける。タグが1つも無い道は「未踏」に集める。
+  const regions = new Map();
+  const push = (key, tag, room) => {
+    if (!regions.has(key)) regions.set(key, { tag, roads: [] });
+    regions.get(key).roads.push(room);
+  };
+  for (const room of roots) {
+    const tags = [...collectTags(room).values()].sort((a, b) => a.name.localeCompare(b.name));
+    if (tags.length === 0) push('__none__', null, room);
+    else for (const tag of tags) push(tag.id, tag, room);
+  }
 
-  return filtered.sort((a, b) => {
-    // 奥が深い順、同じなら新しい順。探索しがいのある枝を上に出す。
-    if (b.totals.depth !== a.totals.depth) return b.totals.depth - a.totals.depth;
-    return String(b.at).localeCompare(String(a.at));
-  });
+  return [...regions.values()]
+    .map((region) => {
+      const totals = region.roads.reduce(
+        (sum, road) => ({
+          roads: sum.roads + 1,
+          rooms: sum.rooms + road.totals.rooms,
+          corridors: sum.corridors + road.totals.corridors,
+          cauldrons: sum.cauldrons + road.totals.cauldrons,
+          legacies: sum.legacies + road.totals.legacies,
+          consumed_time: sum.consumed_time + road.totals.consumed_time,
+          consumed_money: sum.consumed_money + road.totals.consumed_money,
+          planned_time: sum.planned_time + road.totals.planned_time,
+          planned_money: sum.planned_money + road.totals.planned_money,
+          depth: Math.max(sum.depth, road.totals.depth),
+        }),
+        {
+          roads: 0,
+          rooms: 0,
+          corridors: 0,
+          cauldrons: 0,
+          legacies: 0,
+          consumed_time: 0,
+          consumed_money: 0,
+          planned_time: 0,
+          planned_money: 0,
+          depth: 0,
+        },
+      );
+      // 深い道から見せる。同じ深さなら新しい順。
+      const roads = [...region.roads].sort((a, b) =>
+        b.totals.depth !== a.totals.depth
+          ? b.totals.depth - a.totals.depth
+          : String(b.at).localeCompare(String(a.at)),
+      );
+      return { tag: region.tag, totals, roads };
+    })
+    .sort((a, b) => {
+      if (!a.tag) return 1; // 未踏は最後
+      if (!b.tag) return -1;
+      if (b.totals.rooms !== a.totals.rooms) return b.totals.rooms - a.totals.rooms;
+      return a.tag.name.localeCompare(b.tag.name);
+    });
 }
 
 /* ---------- summary（ホームのタンク） ---------- */

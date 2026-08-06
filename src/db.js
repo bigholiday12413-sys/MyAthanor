@@ -86,6 +86,19 @@ CREATE TABLE IF NOT EXISTS occurrence (
   PRIMARY KEY (recurrence_id, date)
 );
 
+-- 大釜：ひとつの大きなイベントに必要なミッション（素材）をまとめる器。
+-- 素材が全部そろうと錬成が終わる。
+CREATE TABLE IF NOT EXISTS cauldron (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  title        TEXT NOT NULL,
+  source_type  TEXT NOT NULL CHECK (source_type IN ('idea', 'log')),
+  source_id    INTEGER NOT NULL,
+  created_at   TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cauldron_source ON cauldron (source_type, source_id);
+
 CREATE TABLE IF NOT EXISTS tag (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
@@ -125,6 +138,8 @@ addColumn('idea', 'temperature', 'INTEGER NOT NULL DEFAULT 320');
 addColumn('idea', 'temperature_at', 'TEXT');
 // 冷却の半減期（日）。0 なら冷めない。
 addColumn('settings', 'cooling_half_life_days', 'INTEGER NOT NULL DEFAULT 30');
+// 大釜に入っている素材（ミッション）。NULL なら単独のミッション。
+addColumn('mission', 'cauldron_id', 'INTEGER');
 
 export function transaction(fn) {
   db.exec('BEGIN');

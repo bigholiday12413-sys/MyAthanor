@@ -146,6 +146,21 @@ api.patch('/recurrences/:id/occurrences/:date', handle((req, res) =>
 api.delete('/recurrences/:id/occurrences/:date', handle((req, res) =>
   res.json(store.resetOccurrence(id(req), req.params.date))));
 
+/* 大釜（ミッションのTODOリスト） */
+api.post('/cauldrons', handle((req, res) =>
+  res.status(201).json(store.createCauldron(req.body ?? {}))));
+
+api.get('/cauldrons/:id', handle((req, res) => res.json(store.getCauldron(id(req)))));
+
+api.patch('/cauldrons/:id', handle((req, res) =>
+  res.json(store.updateCauldron(id(req), req.body ?? {}))));
+
+api.delete('/cauldrons/:id', handle((req, res) => res.json(store.deleteCauldron(id(req)))));
+
+// 素材をまとめて投入する。
+api.post('/cauldrons/:id/materials', handle((req, res) =>
+  res.status(201).json(store.addMaterials(id(req), req.body?.items))));
+
 /* タグ */
 api.get('/tags', handle((_req, res) => res.json(store.listTags())));
 api.post('/tags', handle((req, res) => res.status(201).json(store.createTag(req.body ?? {}))));
