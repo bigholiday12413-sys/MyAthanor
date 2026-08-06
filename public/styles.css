@@ -44,12 +44,13 @@
     "Hiragino Sans", "Yu Gothic", "BIZ UDGothic", "Noto Sans JP", "IPAGothic", monospace;
   --pad: 18px;
 
-  /* 額装。外を暗く落とし、内側に金の細い罫を回す。製本の見返しと同じ作り。 */
-  --frame:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.15),
-    inset 0 1px 0 rgba(255, 234, 180, 0.08),
-    0 8px 20px rgba(0, 0, 0, 0.55);
-  --surface: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  /* 額装。金の細い罫を1本回すだけ。ぼかしは使わない。 */
+  --frame: inset 0 0 0 1px rgba(230, 187, 86, 0.22);
+  /* 立体は1pxの明暗2本で作る。ぼかした影は輪郭が溶けて締まらない。 */
+  --bevel:
+    inset 1px 1px 0 rgba(255, 236, 190, 0.13),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.55);
+  --surface: #241a0d;
 }
 
 * {
@@ -72,7 +73,6 @@ body {
   background-color: var(--bg);
   /* 上からの燭台の灯りと、革の目 */
   background-image:
-    radial-gradient(ellipse 70% 40% at 50% -8%, rgba(230, 187, 86, 0.13), transparent 70%),
     repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 2px, transparent 2px 4px);
   background-attachment: fixed;
 }
@@ -88,15 +88,6 @@ body::after {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* 四隅を沈めて中央に視線を集める。 */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  pointer-events: none;
-  background: radial-gradient(ellipse 85% 65% at 50% 38%, transparent 45%, rgba(0, 0, 0, 0.5));
-}
 
 .app {
   display: flex;
@@ -126,11 +117,9 @@ body::before {
   padding: 11px var(--pad);
   padding-top: max(11px, env(safe-area-inset-top));
   min-height: 54px;
-  background: linear-gradient(180deg, #221909 70%, rgba(15, 10, 4, 0.94));
-  border-bottom: 1px solid var(--edge);
-  box-shadow:
-    inset 0 -1px 0 rgba(230, 187, 86, 0.28),
-    0 10px 22px rgba(0, 0, 0, 0.5);
+  background: #1b1308;
+  border-bottom: 2px solid var(--edge);
+  box-shadow: inset 0 -3px 0 -1px var(--gold-deep);
 }
 
 .topbar h1 {
@@ -164,28 +153,17 @@ body::before {
   color: var(--text);
   text-decoration: none;
   cursor: pointer;
-  background: linear-gradient(180deg, #3a2c14, #241a0b);
+  background: #33260f;
   border: 1px solid var(--edge);
-  border-radius: 4px;
-  box-shadow:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.2),
-    0 2px 6px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.2);
 }
 
 .icon-btn:active {
-  background: linear-gradient(180deg, #241a0b, #3a2c14);
+  background: #241a0b;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.2);
 }
 
-/* 金は単色だと塗りに見える。明→地→陰の階調を字面に流して箔にする。 */
-@supports (-webkit-background-clip: text) or (background-clip: text) {
-  .topbar h1,
-  .section-title {
-    background-image: linear-gradient(180deg, var(--gold-hi) 0%, var(--gold) 52%, #a5762a 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-}
 
 /* ---------- view ---------- */
 
@@ -213,8 +191,7 @@ body::before {
   width: 7px;
   height: 7px;
   transform: rotate(45deg);
-  background: linear-gradient(135deg, var(--gold-hi), var(--gold-dark));
-  box-shadow: 0 0 6px rgba(230, 187, 86, 0.35);
+  background: var(--gold);
 }
 
 /* 罫は1本ではなく、金の線とその下の影の2本で引く。 */
@@ -236,7 +213,7 @@ body::before {
   padding: 16px;
   background: var(--surface);
   border: 1px solid var(--edge);
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: var(--frame);
 }
 
@@ -272,9 +249,9 @@ body::before {
   line-height: 1.8;
   color: var(--dim);
   text-align: center;
-  background: linear-gradient(180deg, rgba(44, 33, 20, 0.4), transparent);
-  border: 1px dashed rgba(230, 187, 86, 0.22);
-  border-radius: 3px;
+  background: #1b1409;
+  border: 1px dashed rgba(230, 187, 86, 0.28);
+  border-radius: 2px;
 }
 
 /* ---------- 試験管（リソース） ---------- */
@@ -289,7 +266,7 @@ body::before {
   padding: 14px;
   background: var(--surface);
   border: 1px solid var(--edge);
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: var(--frame);
 }
 
@@ -334,11 +311,13 @@ body::before {
 .tube-neck {
   width: 44px;
   height: 7px;
-  background: linear-gradient(180deg, #f0dda6 0%, var(--brass) 40%, #7d6122 100%);
+  background: var(--brass);
   border: 1px solid #4a3510;
   border-bottom: none;
-  border-radius: 3px 3px 0 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 #f0dda6,
+    inset 0 -1px 0 #7d6122;
 }
 
 .tube-body {
@@ -348,14 +327,10 @@ body::before {
   width: 38px;
   height: 176px;
   overflow: hidden;
-  background: linear-gradient(90deg, rgba(8, 14, 10, 0.9), rgba(32, 46, 36, 0.45) 45%,
-    rgba(8, 14, 10, 0.9));
-  border: 2px solid rgba(207, 224, 216, 0.72);
+  background: #12180f;
+  border: 2px solid #9fb3aa;
   border-top: none;
-  border-radius: 0 0 19px 19px;
-  box-shadow:
-    inset -4px 0 8px rgba(0, 0, 0, 0.55),
-    0 3px 10px rgba(0, 0, 0, 0.5);
+  border-radius: 0 0 18px 18px;
 }
 
 .tube-body .liquid {
@@ -365,7 +340,7 @@ body::before {
 
 /* 消費済み＝濃い薬草色 */
 .liquid-consumed {
-  background: linear-gradient(180deg, #b6e878 0 2px, #7dbb3c 8%, #4b8022 60%, #2d5414 100%);
+  background: linear-gradient(180deg, #a8dc63 0 3px, #74b134 3px 9px, #4b8022 9px 100%);
 }
 
 /* 消費予定＝琥珀。まだ飲んでいないぶんなので斜線で区別する。 */
@@ -396,8 +371,7 @@ body::before {
   left: 5px;
   width: 5px;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.04));
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .tube.is-over .tube-body,
@@ -502,15 +476,12 @@ body::before {
   background: var(--surface);
   border: 1px solid var(--edge);
   border-left: 3px solid var(--line);
-  border-radius: 3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.11),
-    inset 0 1px 0 rgba(255, 234, 180, 0.07),
-    0 4px 12px rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
 }
 
 .card:active {
-  background: linear-gradient(180deg, #362810, #201607);
+  background: #2f2211;
 }
 
 .card.kind-idea {
@@ -657,19 +628,20 @@ body::before {
   letter-spacing: 0.06em;
   color: var(--dim);
   cursor: pointer;
-  background: linear-gradient(180deg, #322512, #1e1508);
+  background: #33260f;
   border: 1px solid var(--edge);
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
+  border-radius: 2px;
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.14);
   text-align: center;
 }
 
 .filter[aria-pressed='true'] {
-  color: #33230a;
-  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.4);
-  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
+  color: #2b1d05;
+  background: var(--gold);
   border-color: var(--gold-deep);
-  box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.5);
+  box-shadow:
+    inset 1px 1px 0 var(--gold-hi),
+    inset -1px -1px 0 #a5762a;
 }
 
 /* ---------- フォーム ---------- */
@@ -706,10 +678,11 @@ textarea {
   color: var(--text);
   background: #0e0904;
   border: 1px solid var(--edge);
-  border-radius: 3px;
+  border-radius: 2px;
+  /* 沈んで見せるのも1pxで。上・左を暗く、下・右を明るく。 */
   box-shadow:
-    inset 0 2px 5px rgba(0, 0, 0, 0.6),
-    inset 0 0 0 1px rgba(230, 187, 86, 0.1);
+    inset 1px 1px 0 rgba(0, 0, 0, 0.7),
+    inset -1px -1px 0 rgba(255, 236, 190, 0.07);
 }
 
 input[type='number'],
@@ -721,11 +694,8 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--gold-dark);
-  box-shadow:
-    inset 0 2px 5px rgba(0, 0, 0, 0.6),
-    inset 0 0 0 1px rgba(230, 187, 86, 0.45),
-    0 0 0 3px rgba(230, 187, 86, 0.12);
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold-deep);
 }
 
 .row {
@@ -746,52 +716,52 @@ button {
   letter-spacing: 0.08em;
   color: var(--text);
   cursor: pointer;
-  background: linear-gradient(180deg, #362814, #221807);
+  background: #33260f;
   border: 1px solid var(--edge);
-  border-radius: 3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.18),
-    0 2px 6px rgba(0, 0, 0, 0.4);
+  border-radius: 2px;
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.18);
 }
 
 button:active {
-  background: linear-gradient(180deg, #221807, #362814);
+  background: #241a0b;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.18);
 }
 
-/* 主要動作は金箔。金属は階調が無いと箔に見えないので、ここだけ諧調を許す。 */
+/* 主要動作は金。平らに塗り、上下1pxの明暗だけで起こす。 */
 button.primary {
-  color: #33230a;
-  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.45);
-  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
+  color: #2b1d05;
+  background: var(--gold);
   border-color: var(--gold-deep);
   box-shadow:
-    inset 0 1px 0 rgba(255, 252, 240, 0.55),
-    0 2px 8px rgba(0, 0, 0, 0.45);
+    inset 1px 1px 0 var(--gold-hi),
+    inset -1px -1px 0 #a5762a;
 }
 
 button.primary:active {
-  background: linear-gradient(180deg, #c79a35 0%, var(--gold) 60%, #e2c97f 100%);
+  background: #cfa544;
+  box-shadow: inset 1px 1px 0 #a5762a;
 }
 
 /* カードの上で繰り返し出る動作。金は確定動作のために取っておき、
    ここは薬草色に金の細線だけを回す。 */
 button.act {
-  color: #eaf3d8;
-  background: linear-gradient(180deg, #5c8a2e, #395c1a);
+  color: #eef7dd;
+  background: #4d7a26;
   border-color: #1d3210;
   box-shadow:
-    inset 0 1px 0 rgba(226, 245, 190, 0.28),
-    inset 0 0 0 1px rgba(230, 187, 86, 0.22),
-    0 2px 6px rgba(0, 0, 0, 0.45);
+    inset 1px 1px 0 #7cae44,
+    inset -1px -1px 0 #2b4a13,
+    inset 0 0 0 1px rgba(230, 187, 86, 0.001);
 }
 
 button.act:active {
-  background: linear-gradient(180deg, #395c1a, #5c8a2e);
+  background: #395c1a;
+  box-shadow: inset 1px 1px 0 #2b4a13;
 }
 
 button.ghost {
-  background: rgba(0, 0, 0, 0.2);
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
+  background: #161007;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.16);
 }
 
 button.ghost:active {
@@ -965,10 +935,10 @@ button:disabled {
   letter-spacing: 0;
   color: var(--text);
   white-space: nowrap;
-  background: linear-gradient(180deg, #322512, #1e1508);
+  background: #2b1f0c;
   border: 1px solid var(--edge);
-  border-radius: 11px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
 }
 
 .chip b {
@@ -980,7 +950,7 @@ button:disabled {
 
 .chip.is-on {
   color: #33230a;
-  background: linear-gradient(180deg, #f6dd9c, var(--gold) 50%, #b98c2c);
+  background: var(--gold);
   border-color: var(--gold-deep);
 }
 
@@ -1117,9 +1087,10 @@ input[type='range'] {
 /* 冷たい側から熱い側へ、そのまま温度計の目盛りにする。 */
 input[type='range']::-webkit-slider-runnable-track {
   height: 8px;
-  background: linear-gradient(90deg, #6d93aa 0%, #8a7550 32%, #e0aa3c 72%, #ff8a3c 100%);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: linear-gradient(90deg, #6d93aa 0 22%, #8a7550 22% 46%, #c9a24a 46% 72%,
+    #e0aa3c 72% 88%, #ff8a3c 88% 100%);
+  border: 1px solid var(--edge);
+  border-radius: 0;
 }
 
 input[type='range']::-webkit-slider-thumb {
@@ -1135,9 +1106,10 @@ input[type='range']::-webkit-slider-thumb {
 
 input[type='range']::-moz-range-track {
   height: 8px;
-  background: linear-gradient(90deg, #6d93aa 0%, #8a7550 32%, #e0aa3c 72%, #ff8a3c 100%);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: linear-gradient(90deg, #6d93aa 0 22%, #8a7550 22% 46%, #c9a24a 46% 72%,
+    #e0aa3c 72% 88%, #ff8a3c 88% 100%);
+  border: 1px solid var(--edge);
+  border-radius: 0;
 }
 
 input[type='range']::-moz-range-thumb {
@@ -1223,9 +1195,9 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
-  background: linear-gradient(180deg, #221a0c, #150f06);
+  background: #1d1509;
   border: 1px solid var(--edge);
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.12);
 }
 
@@ -1263,10 +1235,8 @@ input[type='range']::-moz-range-thumb {
   background: var(--surface);
   border: 1px solid var(--edge);
   border-left: 3px solid var(--green-dark);
-  border-radius: 3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.11),
-    0 4px 12px rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
 }
 
 .cauldron.is-complete {
@@ -1310,12 +1280,12 @@ input[type='range']::-moz-range-thumb {
 
 .brew-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--green-dark), var(--green));
+  background: var(--green);
   transition: width 0.3s ease;
 }
 
 .cauldron.is-complete .brew-fill {
-  background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+  background: var(--gold);
 }
 
 .material {
@@ -1391,10 +1361,10 @@ input[type='range']::-moz-range-thumb {
 .floor {
   margin-bottom: 18px;
   padding: 12px;
-  background: linear-gradient(180deg, #241c0f, #1b1408);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: inset 0 1px 0 rgba(236, 217, 168, 0.06);
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: var(--frame);
 }
 
 .floor-head {
@@ -1477,9 +1447,7 @@ input[type='range']::-moz-range-thumb {
 
 .room.is-legacy {
   border-color: var(--gold-dark);
-  box-shadow:
-    inset 0 0 0 1px rgba(224, 170, 60, 0.22),
-    0 0 10px rgba(224, 170, 60, 0.12);
+  box-shadow: inset 0 0 0 1px var(--gold-dark);
 }
 
 .room-head {
@@ -1551,9 +1519,7 @@ a.room-title {
 
 .card.is-legacy {
   border-color: var(--gold-dark);
-  box-shadow:
-    inset 0 1px 0 rgba(236, 217, 168, 0.08),
-    0 0 10px rgba(224, 170, 60, 0.12);
+  box-shadow: inset 0 0 0 1px var(--gold-dark);
 }
 
 .card-title .legacy-mark {
@@ -1574,12 +1540,12 @@ a.room-title {
   width: 54px;
   height: 54px;
   padding: 0;
-  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
-  border: 1px solid var(--gold-deep);
-  border-radius: 6px;
+  background: var(--gold);
+  border: 2px solid var(--gold-deep);
+  border-radius: 3px;
   box-shadow:
-    inset 0 1px 0 rgba(255, 252, 240, 0.6),
-    0 6px 16px rgba(0, 0, 0, 0.6);
+    inset 2px 2px 0 var(--gold-hi),
+    inset -2px -2px 0 #a5762a;
 }
 
 .fab .px {
@@ -1588,7 +1554,8 @@ a.room-title {
 }
 
 .fab:active {
-  background: linear-gradient(180deg, #c79a35, var(--gold));
+  background: #cfa544;
+  box-shadow: inset 2px 2px 0 #a5762a;
 }
 
 /* ---------- モーダル ---------- */
@@ -1609,12 +1576,10 @@ a.room-title {
   padding: 18px var(--pad);
   padding-bottom: calc(18px + env(safe-area-inset-bottom));
   background: var(--surface);
-  border: 1px solid var(--edge);
+  border: 2px solid var(--edge);
   border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  box-shadow:
-    inset 0 1px 0 rgba(230, 187, 86, 0.3),
-    0 -12px 30px rgba(0, 0, 0, 0.6);
+  border-radius: 2px 2px 0 0;
+  box-shadow: inset 0 2px 0 -1px var(--gold-deep);
 }
 
 .modal h2 {
@@ -1659,11 +1624,9 @@ a.room-title {
   z-index: 30;
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
-  background: linear-gradient(180deg, #211809, #100b05);
-  border-top: 1px solid var(--edge);
-  box-shadow:
-    inset 0 1px 0 rgba(230, 187, 86, 0.26),
-    0 -10px 22px rgba(0, 0, 0, 0.55);
+  background: #1b1308;
+  border-top: 2px solid var(--edge);
+  box-shadow: inset 0 3px 0 -1px var(--gold-deep);
 }
 
 .tab {
@@ -1708,9 +1671,8 @@ a.room-title {
   top: 0;
   left: 22%;
   right: 22%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
-  box-shadow: 0 0 8px rgba(230, 187, 86, 0.6);
+  height: 3px;
+  background: var(--gold);
 }
 
 .tab.is-active .tab-mark {
@@ -1737,12 +1699,10 @@ a.room-title {
   font-family: var(--serif);
   font-size: 13px;
   color: var(--text);
-  background: linear-gradient(180deg, #3d2e15, #211807);
+  background: #33260f;
   border: 1px solid var(--edge);
-  border-radius: 3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(230, 187, 86, 0.35),
-    0 6px 18px rgba(0, 0, 0, 0.6);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.4);
   transform: translateX(-50%);
 }
 
