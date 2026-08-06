@@ -61,6 +61,14 @@ api.post('/ideas', handle((req, res) => res.status(201).json(store.createIdea(re
 api.get('/ideas/:id', handle((req, res) => res.json(store.getIdea(id(req)))));
 api.patch('/ideas/:id', handle((req, res) => res.json(store.updateIdea(id(req), req.body ?? {}))));
 
+/* スペル（スペルブック） */
+api.get('/spells', handle((_req, res) => res.json(store.listSpells())));
+api.post('/spells', handle((req, res) => res.status(201).json(store.createSpell(req.body ?? {}))));
+api.get('/spells/:id', handle((req, res) => res.json(store.getSpell(id(req)))));
+api.patch('/spells/:id', handle((req, res) =>
+  res.json(store.updateSpell(id(req), req.body ?? {}))));
+api.delete('/spells/:id', handle((req, res) => res.json(store.deleteSpell(id(req)))));
+
 /* ログ */
 api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.body ?? {}))));
 api.get('/logs/:id', handle((req, res) => res.json(store.getLog(id(req)))));

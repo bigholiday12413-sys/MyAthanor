@@ -274,6 +274,52 @@ const CAULDRON = {
   palette: { o: INK, b: '#4a4038', g: GREEN },
 };
 
+// スペルブック＝閉じた魔導書。背表紙・小口・表紙の紋章で組む。
+const GRIMOIRE = {
+  rows: [
+    '................',
+    '..oooooooooooo..',
+    '..oSSccccccccpo.',
+    '..oSSccccccccpo.',
+    '..oSSccc11cccpo.',
+    '..oSScc1111ccpo.',
+    '..oSSc111111cpo.',
+    '..oSSc111111cpo.',
+    '..oSScc1111ccpo.',
+    '..oSSccc11cccpo.',
+    '..oSSccccccccpo.',
+    '..oSSccccccccpo.',
+    '..oSSccccccccpo.',
+    '..oooooooooooo..',
+    '................',
+    '................',
+  ],
+  palette: { o: INK, S: WOOD_DARK, c: GREEN_DARK, p: CREAM, 1: GOLD },
+};
+
+// スペル1つ＝刻んだ紋。
+const SIGIL = {
+  rows: [
+    '................',
+    '.......gg.......',
+    '.......gg.......',
+    '......gggg......',
+    '......gggg......',
+    '.g...gggggg...g.',
+    '..gg.gggggg.gg..',
+    '...gggccccggg...',
+    '...gggccccggg...',
+    '..gg.gggggg.gg..',
+    '.g...gggggg...g.',
+    '......gggg......',
+    '......gggg......',
+    '.......gg.......',
+    '.......gg.......',
+    '................',
+  ],
+  palette: { g: GOLD, c: CREAM },
+};
+
 // アイデアの温度＝炎。熱さに応じて色を差し替えて使う（icon の第3引数）。
 const FLAME = {
   rows: [
@@ -373,6 +419,8 @@ const SOURCES = {
   gate: GATE,
   chest: CHEST,
   cauldron: CAULDRON,
+  grimoire: GRIMOIRE,
+  sigil: SIGIL,
   flame: FLAME,
   frost: FROST,
   plus: PLUS,
@@ -408,6 +456,7 @@ export function icon(name, className = '', overrides = null) {
 // 種別からアイコン名を引く。
 export const KIND_ICON = {
   idea: 'stone',
+  spell: 'sigil',
   log: 'footsteps',
   mission: 'parchment',
   recurrence: 'hourglass',

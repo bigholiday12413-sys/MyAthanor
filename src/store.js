@@ -211,6 +211,75 @@ export function updateIdea(id, { title, temperature }) {
   return getIdea(id);
 }
 
+/* ---------- spell（スペルブック） ---------- */
+
+function spellRow(id) {
+  const row = db.prepare(`SELECT * FROM idea WHERE id = ? AND is_spell = 1`).get(id);
+  if (!row) throw notFound('spell');
+  return row;
+}
+
+export function listSpells() {
+  return db
+    .prepare(`
+      SELECT i.*,
+             (SELECT COUNT(*) FROM mission m
+               WHERE m.source_type = 'idea' AND m.source_id = i.id) AS mission_count,
+             (SELECT COUNT(*) FROM mission m
+               WHERE m.source_type = 'idea' AND m.source_id = i.id
+                 AND m.status = 'active') AS active_mission_count
+      FROM idea i WHERE i.is_spell = 1
+      ORDER BY i.created_at DESC, i.id DESC
+    `)
+    .all()
+    .map((row) => ({ ...row, tags: tagsFor('idea', row.id) }));
+}
+
+export function getSpell(id) {
+  const row = spellRow(id);
+  return {
+    ...row,
+    kind: 'spell',
+    tags: tagsFor('idea', id),
+    missions: listMissionsBySource('idea', id),
+  };
+}
+
+export function createSpell({ title, body }) {
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO idea (title, created_at, is_spell, body) VALUES (?, ?, 1, ?)
+    `)
+    .run(requireTitle(title), nowIso(), body ? String(body) : null);
+  return getSpell(Number(lastInsertRowid));
+}
+
+export function updateSpell(id, { title, body }) {
+  const row = spellRow(id);
+  db.prepare(`UPDATE idea SET title = ?, body = ? WHERE id = ?`).run(
+    title === undefined ? row.title : requireTitle(title),
+    body === undefined ? row.body : body === null || body === '' ? null : String(body),
+    id,
+  );
+  return getSpell(id);
+}
+
+// ミッションを抱えたままのスペルは消させない。道が切れてしまうため。
+export function deleteSpell(id) {
+  spellRow(id);
+  const missions = listMissionsBySource('idea', id);
+  if (missions.length > 0) {
+    const err = new Error('spell still has missions');
+    err.status = 409;
+    throw err;
+  }
+  return transaction(() => {
+    db.prepare(`DELETE FROM entry_tag WHERE kind = 'idea' AND entry_id = ?`).run(id);
+    db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
+}
+
 /* ---------- log ---------- */
 
 export function createLog({ title, occurred_at, time_spent, money_spent, source_mission_id }) {
@@ -276,7 +345,7 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
              0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence,
              i.temperature, i.temperature_at
-      FROM idea i
+      FROM idea i WHERE i.is_spell = 0
     `);
   }
   if (type === 'all' || type === 'log') {
@@ -1343,7 +1412,8 @@ function dungeonRoom(type, row, depth) {
   }
 
   return {
-    type,
+    // 表示は spell と分けるが、ミッションやタグの引き当ては idea のまま。
+    type: type === 'idea' && row.is_spell ? 'spell' : type,
     id: row.id,
     title: row.title,
     at: type === 'idea' ? row.created_at : row.occurred_at,

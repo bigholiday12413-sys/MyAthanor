@@ -1764,3 +1764,33 @@ a.room-title {
   padding-bottom: 9px;
   border-bottom: 1px dotted var(--line-soft);
 }
+
+/* ---------- スペル ---------- */
+
+.card.kind-spell {
+  border-left-color: var(--gold);
+}
+
+.spell-excerpt {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.room-spell {
+  border-left-color: var(--gold);
+}
+
+.topbar .icon-btn + .icon-btn {
+  margin-left: -2px;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}

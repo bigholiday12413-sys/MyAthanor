@@ -143,6 +143,10 @@ addColumn('mission', 'cauldron_id', 'INTEGER');
 // いつから／いつまで。どちらも任意で、YYYY-MM-DD のローカル日付。
 addColumn('mission', 'start_date', 'TEXT');
 addColumn('mission', 'due_date', 'TEXT');
+// スペル：したいことではなく、良いと思った物事・考え方として持っておくアイデア。
+// ミッションの切り出しやタグをそのまま使いたいので、同じ器に印を付ける形にする。
+addColumn('idea', 'is_spell', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('idea', 'body', 'TEXT');
 // 大釜の期日。素材が自分の期限を持たなければ、これを引き継ぐ。
 addColumn('cauldron', 'start_date', 'TEXT');
 addColumn('cauldron', 'due_date', 'TEXT');

@@ -341,7 +341,9 @@ async function renderHome() {
   setActiveTab('home');
   setTopbar({
     title: 'MyAthanor',
-    action: `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
+    action:
+      `<a class="icon-btn" href="#/spells" aria-label="スペルブック">${icon('grimoire')}</a>` +
+      `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
@@ -1735,6 +1737,258 @@ async function renderRecurrence(recurrenceId) {
   });
 }
 
+/* ---------- スペルブック ---------- */
+
+// スペルは「したいこと」ではなく、良いと思った物事を持っておくもの。
+// 時系列の出来事ではないのでストリームには出さず、ここに溜める。
+async function renderSpells() {
+  setActiveTab('home');
+  setTopbar({ title: 'スペルブック', back: '#/home' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const spells = await api('/spells');
+
+  viewEl.innerHTML = `
+    <form class="panel" id="spell-new">
+      <div class="field">
+        <input id="s-title" autocomplete="off" placeholder="良いと思った物事・考え方" />
+      </div>
+      <div class="btn-row"><button type="submit" class="primary">書き留める</button></div>
+    </form>
+
+    <div class="section-title">スペル<span class="section-count">${spells.length}</span></div>
+    <div class="list">
+      ${
+        spells.length
+          ? spells
+              .map(
+                (spell) => `
+        <a class="card kind-spell" href="#/spell/${spell.id}">
+          <div class="card-top">
+            <span class="spacer"></span>
+            <span>${esc(fmtDate(spell.created_at))}</span>
+          </div>
+          <div class="card-title">${icon('sigil')}<span>${esc(spell.title)}</span></div>
+          ${spell.body ? `<div class="spell-excerpt">${esc(spell.body)}</div>` : ''}
+          ${
+            spell.mission_count
+              ? `<div class="card-meta"><span class="${
+                  spell.active_mission_count ? 'hot' : ''
+                }">ミッション ${spell.mission_count}件${
+                  spell.active_mission_count ? `（進行中 ${spell.active_mission_count}）` : ''
+                }</span></div>`
+              : ''
+          }
+          ${
+            spell.tags.length
+              ? `<div class="chips">${spell.tags
+                  .map((tag) => `<span class="chip is-flat">${esc(tag.name)}</span>`)
+                  .join('')}</div>`
+              : ''
+          }
+        </a>`,
+              )
+              .join('')
+          : '<div class="empty">まだ何も書かれていません。</div>'
+      }
+    </div>
+  `;
+
+  document.getElementById('spell-new').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('s-title');
+    const title = input.value.trim();
+    if (!title) return input.focus();
+    try {
+      const created = await api('/spells', { method: 'POST', body: { title } });
+      toast('スペルを書き留めました');
+      location.hash = `#/spell/${created.id}`;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+async function renderSpell(spellId) {
+  setActiveTab('home');
+  setTopbar({ title: 'スペル', back: '#/spells' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const [spell, allTags] = await Promise.all([api(`/spells/${spellId}`), api('/tags')]);
+
+  viewEl.innerHTML = `
+    <form class="panel" id="spell-form">
+      <div class="field">
+        <label for="title">スペル</label>
+        <input id="title" value="${esc(spell.title)}" autocomplete="off" />
+      </div>
+      <div class="field">
+        <textarea id="body" rows="5" placeholder="思ったことを書き留める">${esc(
+          spell.body ?? '',
+        )}</textarea>
+      </div>
+      <div class="btn-row">
+        <button type="submit" class="primary">保存</button>
+        <button type="button" class="ghost danger" id="spell-delete">捨てる</button>
+      </div>
+    </form>
+
+    <div class="section-title">タグ</div>
+    <form class="panel" id="tag-form">
+      <div class="chips" id="entry-tags">
+        ${
+          spell.tags.length
+            ? spell.tags
+                .map(
+                  (tag) => `<span class="chip">${esc(tag.name)}<button type="button"
+                     data-remove="${esc(tag.name)}" aria-label="${esc(tag.name)} を外す">×</button></span>`,
+                )
+                .join('')
+            : '<span class="chips-empty">タグなし</span>'
+        }
+      </div>
+      <div class="row tag-add">
+        <input id="tag-input" list="tag-options" autocomplete="off" placeholder="タグを追加" />
+        <button type="submit">追加</button>
+      </div>
+      <datalist id="tag-options">
+        ${allTags.map((tag) => `<option value="${esc(tag.name)}"></option>`).join('')}
+      </datalist>
+    </form>
+
+    <div class="section-title">ここから出たミッション</div>
+    <div class="list" id="entry-missions">
+      ${
+        spell.missions.length
+          ? spell.missions.map((m) => missionCard(m, { showSource: false })).join('')
+          : '<div class="empty">まだありません</div>'
+      }
+    </div>
+
+    <div class="section-title">ミッションを切り出す</div>
+    <form class="panel" id="mission-form">
+      <div class="field">
+        <input id="m-title" autocomplete="off" placeholder="このスペルからやること" />
+      </div>
+      <details class="optional">
+        <summary>見積と日付</summary>
+        <div class="row">
+          <div class="field">
+            <label for="m-time">タイム（時間）</label>
+            <input id="m-time" type="number" step="0.25" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="m-money">ウォレット（円）</label>
+            <input id="m-money" type="number" step="1" min="0" value="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="m-from">いつから</label>
+            <input id="m-from" type="date" />
+          </div>
+          <div class="field">
+            <label for="m-to">いつまで</label>
+            <input id="m-to" type="date" />
+          </div>
+        </div>
+      </details>
+      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
+    </form>
+  `;
+
+  const reload = () => renderSpell(spellId);
+
+  document.getElementById('spell-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/spells/${spellId}`, {
+        method: 'PATCH',
+        body: {
+          title: document.getElementById('title').value.trim(),
+          body: document.getElementById('body').value,
+        },
+      });
+      toast('保存しました');
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('spell-delete').addEventListener('click', async () => {
+    if (!confirm('このスペルを捨てますか？')) return;
+    try {
+      await api(`/spells/${spellId}`, { method: 'DELETE' });
+      toast('スペルを捨てました');
+      location.hash = '#/spells';
+    } catch (err) {
+      toast(
+        err.message === 'spell still has missions'
+          ? 'ミッションが残っているので捨てられません'
+          : err.message,
+        true,
+      );
+    }
+  });
+
+  // タグは idea として持っているので、既存の経路をそのまま使う。
+  const currentTags = spell.tags.map((tag) => tag.name);
+  const saveTags = async (names, message) => {
+    try {
+      await api(`/entries/idea/${spellId}/tags`, { method: 'PUT', body: { tags: names } });
+      toast(message);
+      await reload();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+
+  const tagForm = document.getElementById('tag-form');
+  tagForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('tag-input');
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    if (currentTags.includes(name)) return toast('もう付いています');
+    await saveTags([...currentTags, name], 'タグを付けました');
+  });
+  tagForm.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-remove]');
+    if (!button) return;
+    await saveTags(
+      currentTags.filter((name) => name !== button.dataset.remove),
+      'タグを外しました',
+    );
+  });
+
+  document.getElementById('mission-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const title = document.getElementById('m-title').value.trim();
+    if (!title) return toast('やることを入力してください', true);
+    try {
+      await api('/missions', {
+        method: 'POST',
+        body: {
+          title,
+          source_type: 'idea',
+          source_id: spellId,
+          estimated_time: hoursToMinutes(document.getElementById('m-time').value),
+          estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
+          start_date: document.getElementById('m-from').value || null,
+          due_date: document.getElementById('m-to').value || null,
+        },
+      });
+      toast('ミッションを切り出しました');
+      await reload();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  wireMissionActions(document.getElementById('entry-missions'), reload);
+  wireLegacy(viewEl, reload);
+}
+
 /* ---------- タグの整理 ---------- */
 
 async function renderTags() {
@@ -2141,6 +2395,10 @@ async function route() {
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
     if (hash === '/tags') return await renderTags();
+    if (hash === '/spells') return await renderSpells();
+    if ((match = hash.match(/^\/spell\/(\d+)$/))) {
+      return await renderSpell(Number(match[1]));
+    }
     if ((match = hash.match(/^\/recurrence\/(\d+)$/))) {
       return await renderRecurrence(Number(match[1]));
     }
