@@ -349,7 +349,7 @@ function openNewEntryModal() {
         <label>種別</label>
         <div class="seg-toggle" id="kind-toggle">
           <button type="button" data-kind="idea" aria-pressed="true">${icon('stone')}アイデア</button>
-          <button type="button" data-kind="log" aria-pressed="false">${icon('sword')}ログ</button>
+          <button type="button" data-kind="log" aria-pressed="false">${icon('footsteps')}ログ</button>
         </div>
       </div>
       <div class="field">
@@ -1177,7 +1177,7 @@ async function renderDungeon() {
             <span>${esc(fmtDate(item.at))}</span>
           </div>
           <div class="card-title">
-            ${icon(item.type === 'log' ? 'sword' : 'parchment')}
+            ${icon(item.type === 'log' ? 'footsteps' : 'parchment')}
             <span>${esc(item.title)}</span>
             ${icon('chest', 'legacy-mark')}
           </div>

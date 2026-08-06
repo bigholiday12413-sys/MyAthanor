@@ -20,7 +20,7 @@
   --glass: #b9c9c2;
 
   --stone: #8d8f7a;
-  --steel: #aebcc0;
+  --trail: #c9b68d; /* 足跡 */
 
   /* 和文書体を先頭に置く。欧文だけ西洋書体になると翻訳物のように見えるため、
      見出し・本文とも日本語の書体で拾わせ、欧文はその書体の欧文字面を使う。
@@ -425,7 +425,7 @@ body {
 }
 
 .card.kind-log {
-  border-left-color: var(--steel);
+  border-left-color: var(--trail);
 }
 
 .card.kind-recurrence {
@@ -490,7 +490,7 @@ body {
 }
 
 .badge.log {
-  color: var(--steel);
+  color: var(--trail);
   border-color: #566268;
 }
 
@@ -885,7 +885,7 @@ button:disabled {
 }
 
 .room-log {
-  border-left-color: var(--steel);
+  border-left-color: var(--trail);
 }
 
 .room-mission {

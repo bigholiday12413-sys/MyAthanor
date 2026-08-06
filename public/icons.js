@@ -12,9 +12,7 @@ const WOOD_DARK = '#5d3a18';
 const CREAM = '#ecd9a8';
 const STONE = '#8d8f7a';
 const STONE_DARK = '#5f6152';
-const STEEL = '#aebcc0';
-const STEEL_DARK = '#6d7e85';
-const SHINE = '#e8f1f3';
+const TRAIL = '#c9b68d'; // 踏んだ跡
 const GLASS = '#b9c9c2';
 
 // アイデア＝石。刻まれたルーンが光っている。
@@ -40,27 +38,29 @@ const STONE_ROCK = {
   palette: { o: INK, h: STONE, s: STONE_DARK, 1: GOLD },
 };
 
-// ログ（出来事）＝剣。
-const SWORD = {
+// ログ（出来事）＝歩いた足跡。
+// 前を広く、土踏まずをくびれさせ、踵を丸めた靴跡の形。
+// 右上を前、左下を後ろにずらして「歩いている」向きを出す。
+const FOOTSTEPS = {
   rows: [
-    '.......ws.......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '......ewsd......',
-    '..gggggggggggg..',
-    '.......hh.......',
-    '.......hh.......',
-    '.......hh.......',
-    '......gggg......',
-    '................',
+    '.........pppp...',
+    '........pppppp..',
+    '........pppppp..',
+    '.........pppp...',
+    '..........pp....',
+    '.........pppp...',
+    '.........pppp...',
+    '..........pp....',
+    '...pppp.........',
+    '..pppppp........',
+    '..pppppp........',
+    '...pppp.........',
+    '....pp..........',
+    '...pppp.........',
+    '...pppp.........',
+    '....pp..........',
   ],
-  palette: { w: SHINE, s: STEEL, e: STEEL, d: STEEL_DARK, g: GOLD, h: WOOD },
+  palette: { p: TRAIL },
 };
 
 // ミッション＝羊皮紙の巻物。
@@ -290,7 +290,7 @@ function toRects({ rows, palette }) {
 
 const SOURCES = {
   stone: STONE_ROCK,
-  sword: SWORD,
+  footsteps: FOOTSTEPS,
   parchment: PARCHMENT,
   hourglass: HOURGLASS,
   key: KEY,
@@ -318,7 +318,7 @@ export function icon(name, className = '') {
 // 種別からアイコン名を引く。
 export const KIND_ICON = {
   idea: 'stone',
-  log: 'sword',
+  log: 'footsteps',
   mission: 'parchment',
   recurrence: 'hourglass',
 };
