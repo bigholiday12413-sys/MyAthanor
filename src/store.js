@@ -366,12 +366,24 @@ function sourceTitle(type, id) {
   return row ? row.title : null;
 }
 
+// 素材は自分の期限を持たなければ大釜の期限を引き継ぐ。並び替えもこれで行う。
+const MISSION_SELECT = `
+  SELECT m.*,
+         COALESCE(m.due_date, c.due_date) AS effective_due_date,
+         CASE WHEN m.due_date IS NULL AND c.due_date IS NOT NULL THEN 1 ELSE 0 END
+           AS due_inherited
+  FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
+`;
+
 function decorate(mission) {
   const cauldron = mission.cauldron_id
-    ? db.prepare(`SELECT id, title FROM cauldron WHERE id = ?`).get(mission.cauldron_id) ?? null
+    ? db
+        .prepare(`SELECT id, title, start_date, due_date FROM cauldron WHERE id = ?`)
+        .get(mission.cauldron_id) ?? null
     : null;
   return {
     ...mission,
+    due_inherited: Boolean(mission.due_inherited),
     source_title: sourceTitle(mission.source_type, mission.source_id),
     cauldron,
   };
@@ -430,22 +442,22 @@ export function createMission({
 }
 
 export function getMission(id) {
-  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
+  const row = db.prepare(`${MISSION_SELECT} WHERE m.id = ?`).get(id);
   if (!row) throw notFound('mission');
   return decorate(row);
 }
 
 // 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
 const MISSION_ORDER = {
-  due: `ORDER BY (due_date IS NULL), due_date ASC, created_at ASC, id ASC`,
-  recent: `ORDER BY COALESCE(completed_at, created_at) DESC, id DESC`,
+  due: `ORDER BY (effective_due_date IS NULL), effective_due_date ASC, m.created_at ASC, m.id ASC`,
+  recent: `ORDER BY COALESCE(m.completed_at, m.created_at) DESC, m.id DESC`,
 };
 
 export function listMissions({ status, sort = 'recent' } = {}) {
   const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
   const rows = status
-    ? db.prepare(`SELECT * FROM mission WHERE status = ? ${order}`).all(status)
-    : db.prepare(`SELECT * FROM mission ${order}`).all();
+    ? db.prepare(`${MISSION_SELECT} WHERE m.status = ? ${order}`).all(status)
+    : db.prepare(`${MISSION_SELECT} ${order}`).all();
   return rows.map(decorate);
 }
 
@@ -456,10 +468,11 @@ export function isMissionSort(sort) {
 export function listMissionsBySource(source_type, source_id) {
   return db
     .prepare(`
-      SELECT * FROM mission WHERE source_type = ? AND source_id = ?
-      ORDER BY (due_date IS NULL), due_date ASC, created_at ASC, id ASC
+      ${MISSION_SELECT} WHERE m.source_type = ? AND m.source_id = ?
+      ${MISSION_ORDER.due}
     `)
-    .all(source_type, source_id);
+    .all(source_type, source_id)
+    .map(decorate);
 }
 
 export function updateMission(
@@ -1092,7 +1105,7 @@ function cauldronRow(id) {
 // 素材（＝この大釜に入っているミッション）。
 export function listMaterials(cauldronId) {
   return db
-    .prepare(`SELECT * FROM mission WHERE cauldron_id = ? ORDER BY id ASC`)
+    .prepare(`${MISSION_SELECT} WHERE m.cauldron_id = ? ORDER BY m.id ASC`)
     .all(cauldronId)
     .map(decorate);
 }
@@ -1158,25 +1171,38 @@ export function listCauldronsBySource(sourceType, sourceId) {
     });
 }
 
-export function createCauldron({ title, source_type, source_id }) {
+export function createCauldron({ title, source_type, source_id, start_date, due_date }) {
   if (source_type !== 'idea' && source_type !== 'log') {
     throw badRequest('source_type must be "idea" or "log"');
   }
   if (sourceTitle(source_type, source_id) === null) throw notFound(source_type);
 
+  const startKey = optionalDate(start_date, 'start_date');
+  const dueKey = optionalDate(due_date, 'due_date');
+  checkDateOrder(startKey, dueKey);
+
   const { lastInsertRowid } = db
     .prepare(`
-      INSERT INTO cauldron (title, source_type, source_id, created_at) VALUES (?, ?, ?, ?)
+      INSERT INTO cauldron (title, source_type, source_id, created_at, start_date, due_date)
+      VALUES (?, ?, ?, ?, ?, ?)
     `)
-    .run(requireTitle(title), source_type, int(source_id), nowIso());
+    .run(requireTitle(title), source_type, int(source_id), nowIso(), startKey, dueKey);
   return getCauldron(Number(lastInsertRowid));
 }
 
-export function updateCauldron(id, { title }) {
+export function updateCauldron(id, { title, start_date, due_date }) {
   const row = cauldronRow(id);
-  if (title !== undefined) {
-    db.prepare(`UPDATE cauldron SET title = ? WHERE id = ?`).run(requireTitle(title), id);
-  }
+  const startKey =
+    start_date === undefined ? row.start_date : optionalDate(start_date, 'start_date');
+  const dueKey = due_date === undefined ? row.due_date : optionalDate(due_date, 'due_date');
+  checkDateOrder(startKey, dueKey);
+
+  db.prepare(`UPDATE cauldron SET title = ?, start_date = ?, due_date = ? WHERE id = ?`).run(
+    title === undefined ? row.title : requireTitle(title),
+    startKey,
+    dueKey,
+    id,
+  );
   return getCauldron(row.id);
 }
 
@@ -1304,7 +1330,7 @@ function dungeonRoom(type, row, depth) {
     }
     if (!bundles.has(mission.cauldron_id)) {
       const cauldron = db
-        .prepare(`SELECT id, title, completed_at FROM cauldron WHERE id = ?`)
+        .prepare(`SELECT id, title, completed_at, due_date FROM cauldron WHERE id = ?`)
         .get(mission.cauldron_id);
       bundles.set(mission.cauldron_id, {
         cauldron: cauldron

@@ -143,6 +143,9 @@ addColumn('mission', 'cauldron_id', 'INTEGER');
 // いつから／いつまで。どちらも任意で、YYYY-MM-DD のローカル日付。
 addColumn('mission', 'start_date', 'TEXT');
 addColumn('mission', 'due_date', 'TEXT');
+// 大釜の期日。素材が自分の期限を持たなければ、これを引き継ぐ。
+addColumn('cauldron', 'start_date', 'TEXT');
+addColumn('cauldron', 'due_date', 'TEXT');
 
 export function transaction(fn) {
   db.exec('BEGIN');

@@ -162,6 +162,11 @@ public/styles.css  見た目
 - 日付はカードの「日付を決める」を開けばその場で変えられる。空にすれば外れる
 - 期限が開始日より前だと 400 を返す
 
+**大釜にも同じ日付を持たせられる。素材は自分の期限が無ければ大釜の期限を引き継ぐ**
+ので、大きなイベントには大釜側に一度だけ日付を振れば足りる。
+素材に自分の期限を入れればそちらが優先され、大釜の日付を変えれば引き継いでいる
+素材だけが追随する。並び替えもこの実効の期限で行う。
+
 ホームの進行中ミッションと、アイデア／ログ詳細のミッション一覧も期限順で並ぶ。
 
 ## 大釜（ミッションのTODOリスト）
@@ -228,7 +233,7 @@ public/styles.css  見た目
 | `PATCH` | `/api/recurrences/:id/occurrences/:date` | その回だけ変更・スキップ |
 | `DELETE` | `/api/recurrences/:id/occurrences/:date` | その回の個別変更を取り消す |
 | `POST` | `/api/cauldrons` | 大釜を用意する |
-| `GET` `PATCH` `DELETE` | `/api/cauldrons/:id` | 大釜の取得（素材つき）／改名／破棄 |
+| `GET` `PATCH` `DELETE` | `/api/cauldrons/:id` | 大釜の取得（素材つき）／編集（名前・日付）／破棄 |
 | `POST` | `/api/cauldrons/:id/materials` | 素材をまとめて投入 |
 | `GET` `POST` | `/api/tags` | タグの一覧（件数つき）／作成 |
 | `PATCH` `DELETE` | `/api/tags/:id` | タグの名前変更／削除 |

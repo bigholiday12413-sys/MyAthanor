@@ -1691,3 +1691,7 @@ a.room-title {
   padding: 7px 10px;
   font-size: 12px;
 }
+
+.region-stat .over {
+  color: #e5806c;
+}

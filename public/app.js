@@ -142,8 +142,9 @@ const fmtShortDay = (key) => {
 // 期日の状態。進行中のものだけ急かす。
 function dueState(mission) {
   if (mission.status !== 'active') return null;
-  if (mission.due_date) {
-    const left = daysUntil(mission.due_date);
+  const due = mission.effective_due_date ?? mission.due_date;
+  if (due) {
+    const left = daysUntil(due);
     if (left < 0) return { key: 'over', label: `${-left}日超過` };
     if (left === 0) return { key: 'today', label: '今日まで' };
     if (left <= 3) return { key: 'soon', label: `あと${left}日` };
@@ -157,7 +158,9 @@ function dueState(mission) {
 }
 
 function dueRange(mission) {
-  if (!mission.start_date && !mission.due_date) return '';
+  if (!mission.start_date && !mission.due_date) {
+    return mission.effective_due_date ? `大釜 → ${fmtShortDay(mission.effective_due_date)}` : '';
+  }
   const from = mission.start_date ? fmtShortDay(mission.start_date) : '';
   const to = mission.due_date ? fmtShortDay(mission.due_date) : '';
   return `${from}${from ? ' ' : ''}→${to ? ' ' : ''}${to}`;
@@ -206,8 +209,8 @@ function missionCard(mission, { showSource = true } = {}) {
         ${
           due
             ? `<span class="badge due-${due.key}">${esc(due.label)}</span>`
-            : mission.due_date
-              ? `<span class="badge">〜${esc(fmtShortDay(mission.due_date))}</span>`
+            : mission.effective_due_date
+              ? `<span class="badge">〜${esc(fmtShortDay(mission.effective_due_date))}</span>`
               : ''
         }
         ${mission.is_legacy ? `<span class="badge now">${icon('chest')}レガシー</span>` : ''}
@@ -612,6 +615,8 @@ function openNewEntryModal() {
 function cauldronPanel(cauldron) {
   const { progress } = cauldron;
   const complete = Boolean(cauldron.completed_at);
+  // 錬成が終わっていれば急かさない。
+  const due = complete ? null : dueState({ ...cauldron, status: 'active' });
   const percent = progress.needed ? Math.round((progress.done / progress.needed) * 100) : 0;
 
   return `
@@ -624,6 +629,15 @@ function cauldronPanel(cauldron) {
       <div class="brew"><div class="brew-fill" style="width:${percent}%"></div></div>
       <div class="region-stat" style="padding:0 0 6px">
         ${
+          due
+            ? `<span class="${
+                due.key === 'over' ? 'over' : due.key === 'far' || due.key === 'waiting' ? '' : 'hot'
+              }">${esc(dueRange(cauldron) || '')} ${esc(due.label)}</span>`
+            : dueRange(cauldron)
+              ? `<span>${esc(dueRange(cauldron))}</span>`
+              : ''
+        }
+        ${
           complete
             ? '<span class="hot">錬成完了</span>'
             : `<span>残り ${esc(fmtTime(progress.remaining_time))} · ${esc(
@@ -634,6 +648,28 @@ function cauldronPanel(cauldron) {
       </div>
 
       ${cauldron.materials.map(materialRow).join('')}
+
+      <details class="mission-dates">
+        <summary>${
+          dueRange(cauldron) ? esc(dueRange(cauldron)) : '大釜の日付を決める'
+        }</summary>
+        <form class="mission-date-form" data-cauldron-dates="${cauldron.id}">
+          <div class="row">
+            <div class="field">
+              <label for="cfrom-${cauldron.id}">いつから</label>
+              <input id="cfrom-${cauldron.id}" type="date" name="start_date"
+                     value="${esc(cauldron.start_date ?? '')}" />
+            </div>
+            <div class="field">
+              <label for="cto-${cauldron.id}">いつまで</label>
+              <input id="cto-${cauldron.id}" type="date" name="due_date"
+                     value="${esc(cauldron.due_date ?? '')}" />
+            </div>
+          </div>
+          <div class="btn-row"><button type="submit">日付を保存</button></div>
+          <div class="hint">素材は自分の期限が無ければ、この日付を引き継ぎます。</div>
+        </form>
+      </details>
 
       <form class="material-add" data-add="${cauldron.id}">
         <div class="field">
@@ -662,6 +698,7 @@ function materialRow(material) {
         <div class="material-title">${esc(material.title)}</div>
         <div class="material-meta">
           ${esc(fmtTime(material.estimated_time))} · ${esc(fmtMoney(material.estimated_money))}
+          ${material.due_date ? ` · 〜${esc(fmtShortDay(material.due_date))}` : ''}
           ${abandoned ? ' · 断念' : ''}
         </div>
       </div>
@@ -682,6 +719,25 @@ function wireCauldrons(container, entryId, kind) {
   const reload = () => renderEntry(kind, entryId);
 
   container.addEventListener('submit', async (event) => {
+    const dates = event.target.closest('form[data-cauldron-dates]');
+    if (dates) {
+      event.preventDefault();
+      try {
+        await api(`/cauldrons/${dates.dataset.cauldronDates}`, {
+          method: 'PATCH',
+          body: {
+            start_date: dates.elements.start_date.value || null,
+            due_date: dates.elements.due_date.value || null,
+          },
+        });
+        toast('大釜の日付を保存しました');
+        await reload();
+      } catch (err) {
+        toast(err.message, true);
+      }
+      return;
+    }
+
     const form = event.target.closest('form[data-add]');
     if (!form) return;
     event.preventDefault();
@@ -852,6 +908,16 @@ async function renderEntry(kind, entryId) {
           <label for="c-title">新しい大釜</label>
           <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
         </div>
+        <div class="row">
+          <div class="field">
+            <label for="c-from">いつから（任意）</label>
+            <input id="c-from" type="date" />
+          </div>
+          <div class="field">
+            <label for="c-to">いつまで（任意）</label>
+            <input id="c-to" type="date" />
+          </div>
+        </div>
         <div class="hint">必要なミッションを素材として並べ、全部そろうと錬成が終わります。</div>
         <div class="btn-row"><button type="submit">大釜を用意する</button></div>
       </form>
@@ -978,7 +1044,13 @@ async function renderEntry(kind, entryId) {
     try {
       await api('/cauldrons', {
         method: 'POST',
-        body: { title, source_type: kind, source_id: entryId },
+        body: {
+          title,
+          source_type: kind,
+          source_id: entryId,
+          start_date: document.getElementById('c-from').value || null,
+          due_date: document.getElementById('c-to').value || null,
+        },
       });
       toast('大釜を用意しました');
       await renderEntry(kind, entryId);
