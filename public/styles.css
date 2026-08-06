@@ -2,42 +2,54 @@
    緑（薬草）・茶（革と木）・黄金（金貨）を基調に、絵情報はドット絵で持つ。 */
 
 :root {
-  --bg: #171208;
-  --panel: #241b0f;
-  --panel-2: #30250f;
-  --line: #4a3a1e;
-  --line-soft: #3a2d16;
-  --text: #ecd9a8;
-  --dim: #a08a5e;
+  /* 夜の深さ。面は暗く沈め、パネルだけを灯りの下に置く。 */
+  --bg: #0d0904;
+  --panel-hi: #2c2114;
+  --panel-lo: #191106;
+  --line: #3b2d18;
+  --line-soft: #2c2113;
+  --edge: #080502;
+  --text: #f2e4c2;
+  --dim: #ab9470;
 
-  --green: #7ab648;
-  --green-dark: #4e7c2c;
-  --green-deep: #2f4d1a;
-  --gold: #e0aa3c;
-  --gold-dark: #a97c22;
+  /* 金は単色にせず明・地・陰の3段で持つ。金属は階調が無いと箔に見えない。 */
+  --gold-hi: #ffeab4;
+  --gold: #e6bb56;
+  --gold-dark: #9c7325;
+  --gold-deep: #634813;
+
+  --green: #6f9c3c;
+  --green-dark: #4a6c26;
+  --green-deep: #2c4415;
   --wood: #8a5a2b;
-  --danger: #c0492f;
-  --glass: #b9c9c2;
+  --danger: #b8442c;
+  --glass: #cfe0d8;
+  --brass: #c9a24a;
 
-  --gem: #d9553f; /* 賢者の石 */
-  --stone: #8d8f7a; /* ダンジョンの石壁 */
-  --trail: #c9b68d; /* 足跡 */
+  --gem: #d9553f;
+  --stone: #8d8f7a;
+  --trail: #c9b68d;
 
   /* 和文書体を先頭に置く。欧文だけ西洋書体になると翻訳物のように見えるため、
      見出し・本文とも日本語の書体で拾わせ、欧文はその書体の欧文字面を使う。
-     iOS/macOS＝ヒラギノ、Windows＝游書体／BIZ UD、Android＝Noto（源ノ）。 */
-  /* 末尾の IPA は Linux 向けの保険。総称 serif / sans-serif に落ちると
-     環境によって中国語の書体が当たり、字形が変わってしまうため。 */
+     iOS/macOS＝ヒラギノ、Windows＝游書体／BIZ UD、Android＝Noto（源ノ）。
+     末尾の IPA は Linux 向けの保険。総称に落ちると中国語の書体が当たるため。 */
   --serif: "Hiragino Mincho ProN", "Hiragino Mincho Pro", "Yu Mincho", YuMincho,
     "BIZ UDPMincho", "Noto Serif JP", "Noto Serif CJK JP", "Source Han Serif JP",
     "IPAexMincho", "IPAPMincho", "IPAPGothic", serif;
   --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", YuGothic,
     "BIZ UDPGothic", "Noto Sans JP", "Noto Sans CJK JP", "Source Han Sans JP",
     "IPAexGothic", "IPAPGothic", sans-serif;
-  /* 数字は等幅で揃えたいので欧文の等幅を先に置き、仮名・漢字は和文書体に落とす。 */
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Roboto Mono",
     "Hiragino Sans", "Yu Gothic", "BIZ UDGothic", "Noto Sans JP", "IPAGothic", monospace;
-  --pad: 16px;
+  --pad: 18px;
+
+  /* 額装。外を暗く落とし、内側に金の細い罫を回す。製本の見返しと同じ作り。 */
+  --frame:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.15),
+    inset 0 1px 0 rgba(255, 234, 180, 0.08),
+    0 8px 20px rgba(0, 0, 0, 0.55);
+  --surface: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
 }
 
 * {
@@ -55,14 +67,35 @@ body {
   color: var(--text);
   font-family: var(--sans);
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-text-size-adjust: 100%;
   background-color: var(--bg);
-  /* 羊皮紙の粒と、上からの燭台の灯り */
+  /* 上からの燭台の灯りと、革の目 */
   background-image:
-    radial-gradient(ellipse at 50% -10%, rgba(224, 170, 60, 0.1), transparent 62%),
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.13) 0 2px, transparent 2px 4px);
+    radial-gradient(ellipse 70% 40% at 50% -8%, rgba(230, 187, 86, 0.13), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 2px, transparent 2px 4px);
   background-attachment: fixed;
+}
+
+/* 紙の粒。全面にごく薄く乗せる。均一な塗りのままだと印刷物に見えない。 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.055;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 四隅を沈めて中央に視線を集める。 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  background: radial-gradient(ellipse 85% 65% at 50% 38%, transparent 45%, rgba(0, 0, 0, 0.5));
 }
 
 .app {
@@ -93,20 +126,21 @@ body {
   padding: 11px var(--pad);
   padding-top: max(11px, env(safe-area-inset-top));
   min-height: 54px;
-  background: linear-gradient(180deg, #1f1809 72%, rgba(23, 18, 8, 0.9));
-  border-bottom: 2px solid var(--line);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, #221909 70%, rgba(15, 10, 4, 0.94));
+  border-bottom: 1px solid var(--edge);
+  box-shadow:
+    inset 0 -1px 0 rgba(230, 187, 86, 0.28),
+    0 10px 22px rgba(0, 0, 0, 0.5);
 }
 
 .topbar h1 {
   flex: 1;
   margin: 0;
   font-family: var(--serif);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--gold);
-  text-shadow: 0 1px 0 #000;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,13 +164,27 @@ body {
   color: var(--text);
   text-decoration: none;
   cursor: pointer;
-  background: #332810;
-  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #3a2c14, #241a0b);
+  border: 1px solid var(--edge);
   border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
 .icon-btn:active {
-  background: #453718;
+  background: linear-gradient(180deg, #241a0b, #3a2c14);
+}
+
+/* 金は単色だと塗りに見える。明→地→陰の階調を字面に流して箔にする。 */
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .topbar h1,
+  .section-title {
+    background-image: linear-gradient(180deg, var(--gold-hi) 0%, var(--gold) 52%, #a5762a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
 }
 
 /* ---------- view ---------- */
@@ -150,21 +198,33 @@ body {
 .section-title {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin: 24px 0 11px;
+  gap: 10px;
+  margin: 30px 0 13px;
   font-family: var(--serif);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   color: var(--gold);
 }
 
+.section-title::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, var(--gold-hi), var(--gold-dark));
+  box-shadow: 0 0 6px rgba(230, 187, 86, 0.35);
+}
+
+/* 罫は1本ではなく、金の線とその下の影の2本で引く。 */
 .section-title::after {
   content: '';
   flex: 1;
-  height: 2px;
-  background: linear-gradient(90deg, var(--gold-dark), transparent);
-  opacity: 0.55;
+  height: 3px;
+  background:
+    linear-gradient(90deg, var(--gold-dark), transparent 78%) 0 0 / 100% 1px no-repeat,
+    linear-gradient(90deg, rgba(0, 0, 0, 0.75), transparent 78%) 0 1px / 100% 1px no-repeat;
 }
 
 .section-title:first-child {
@@ -172,23 +232,49 @@ body {
 }
 
 .panel {
-  padding: 14px;
-  background: linear-gradient(180deg, #2b2113, #201809);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow:
-    inset 0 1px 0 rgba(236, 217, 168, 0.07),
-    0 2px 0 rgba(0, 0, 0, 0.3);
+  position: relative;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: var(--frame);
+}
+
+/* 四隅の鉤。額装の留め金のつもり。 */
+.panel:not(.optional-panel)::before,
+.panel:not(.optional-panel)::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgba(230, 187, 86, 0.3);
+  pointer-events: none;
+}
+
+.panel:not(.optional-panel)::before {
+  top: 4px;
+  left: 4px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.panel:not(.optional-panel)::after {
+  right: 4px;
+  bottom: 4px;
+  border-top: none;
+  border-left: none;
 }
 
 .empty {
-  padding: 28px 12px;
+  padding: 30px 14px;
   font-family: var(--serif);
   font-size: 13px;
+  line-height: 1.8;
   color: var(--dim);
   text-align: center;
-  border: 1px dashed var(--line);
-  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(44, 33, 20, 0.4), transparent);
+  border: 1px dashed rgba(230, 187, 86, 0.22);
+  border-radius: 3px;
 }
 
 /* ---------- 試験管（リソース） ---------- */
@@ -200,13 +286,11 @@ body {
 }
 
 .tube-card {
-  padding: 12px;
-  background: linear-gradient(180deg, #2b2113, #201809);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow:
-    inset 0 1px 0 rgba(236, 217, 168, 0.07),
-    0 2px 0 rgba(0, 0, 0, 0.3);
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: var(--frame);
 }
 
 .tube-head {
@@ -250,10 +334,11 @@ body {
 .tube-neck {
   width: 44px;
   height: 7px;
-  background: linear-gradient(180deg, rgba(185, 201, 194, 0.45), rgba(185, 201, 194, 0.12));
-  border: 2px solid var(--glass);
+  background: linear-gradient(180deg, #f0dda6 0%, var(--brass) 40%, #7d6122 100%);
+  border: 1px solid #4a3510;
   border-bottom: none;
-  border-radius: 4px 4px 0 0;
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .tube-body {
@@ -263,10 +348,14 @@ body {
   width: 38px;
   height: 176px;
   overflow: hidden;
-  background: rgba(14, 22, 16, 0.6);
-  border: 2px solid var(--glass);
+  background: linear-gradient(90deg, rgba(8, 14, 10, 0.9), rgba(32, 46, 36, 0.45) 45%,
+    rgba(8, 14, 10, 0.9));
+  border: 2px solid rgba(207, 224, 216, 0.72);
   border-top: none;
   border-radius: 0 0 19px 19px;
+  box-shadow:
+    inset -4px 0 8px rgba(0, 0, 0, 0.55),
+    0 3px 10px rgba(0, 0, 0, 0.5);
 }
 
 .tube-body .liquid {
@@ -276,7 +365,7 @@ body {
 
 /* 消費済み＝濃い薬草色 */
 .liquid-consumed {
-  background: linear-gradient(180deg, #9ad45c 0 2px, #6aa832 2px, #3f7a1f 100%);
+  background: linear-gradient(180deg, #b6e878 0 2px, #7dbb3c 8%, #4b8022 60%, #2d5414 100%);
 }
 
 /* 消費予定＝琥珀。まだ飲んでいないぶんなので斜線で区別する。 */
@@ -407,18 +496,21 @@ body {
 
 .card {
   display: block;
-  padding: 11px 12px;
+  padding: 13px 14px;
   color: inherit;
   text-decoration: none;
-  background: linear-gradient(180deg, #2b2113, #201809);
-  border: 1px solid var(--line);
+  background: var(--surface);
+  border: 1px solid var(--edge);
   border-left: 3px solid var(--line);
-  border-radius: 4px;
-  box-shadow: inset 0 1px 0 rgba(236, 217, 168, 0.06);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.11),
+    inset 0 1px 0 rgba(255, 234, 180, 0.07),
+    0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
 .card:active {
-  background: var(--panel-2);
+  background: linear-gradient(180deg, #362810, #201607);
 }
 
 .card.kind-idea {
@@ -565,16 +657,19 @@ body {
   letter-spacing: 0.06em;
   color: var(--dim);
   cursor: pointer;
-  background: #332810;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: linear-gradient(180deg, #322512, #1e1508);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
   text-align: center;
 }
 
 .filter[aria-pressed='true'] {
-  color: #1c2810;
-  background: var(--green);
-  border-color: var(--green-dark);
+  color: #33230a;
+  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.4);
+  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
+  border-color: var(--gold-deep);
+  box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.5);
 }
 
 /* ---------- フォーム ---------- */
@@ -605,14 +700,16 @@ input,
 select,
 textarea {
   width: 100%;
-  padding: 10px;
+  padding: 11px 12px;
   font-family: inherit;
   font-size: 16px; /* iOS のズーム防止 */
   color: var(--text);
-  background: #150f06;
-  border: 1px solid var(--line);
+  background: #0e0904;
+  border: 1px solid var(--edge);
   border-radius: 3px;
-  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(230, 187, 86, 0.1);
 }
 
 input[type='number'],
@@ -624,7 +721,11 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--gold);
+  border-color: var(--gold-dark);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(230, 187, 86, 0.45),
+    0 0 0 3px rgba(230, 187, 86, 0.12);
 }
 
 .row {
@@ -638,43 +739,68 @@ textarea:focus {
 }
 
 button {
-  padding: 10px 14px;
+  padding: 11px 15px;
   font-family: var(--serif);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--text);
   cursor: pointer;
-  background: #332810;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: linear-gradient(180deg, #362814, #221807);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 button:active {
-  background: #453718;
+  background: linear-gradient(180deg, #221807, #362814);
 }
 
+/* 主要動作は金箔。金属は階調が無いと箔に見えないので、ここだけ諧調を許す。 */
 button.primary {
-  color: #1c2810;
-  background: var(--green);
-  border-color: var(--green-dark);
+  color: #33230a;
+  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.45);
+  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
+  border-color: var(--gold-deep);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 252, 240, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
 button.primary:active {
-  background: var(--green-dark);
+  background: linear-gradient(180deg, #c79a35 0%, var(--gold) 60%, #e2c97f 100%);
+}
+
+/* カードの上で繰り返し出る動作。金は確定動作のために取っておき、
+   ここは薬草色に金の細線だけを回す。 */
+button.act {
+  color: #eaf3d8;
+  background: linear-gradient(180deg, #5c8a2e, #395c1a);
+  border-color: #1d3210;
+  box-shadow:
+    inset 0 1px 0 rgba(226, 245, 190, 0.28),
+    inset 0 0 0 1px rgba(230, 187, 86, 0.22),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+button.act:active {
+  background: linear-gradient(180deg, #395c1a, #5c8a2e);
 }
 
 button.ghost {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
 }
 
 button.ghost:active {
-  background: rgba(236, 217, 168, 0.07);
+  background: rgba(230, 187, 86, 0.09);
 }
 
 button.danger {
-  color: #e5806c;
-  border-color: #6a2f22;
+  color: #e08a72;
+  box-shadow: inset 0 0 0 1px rgba(184, 68, 44, 0.4);
 }
 
 button:disabled {
@@ -839,9 +965,10 @@ button:disabled {
   letter-spacing: 0;
   color: var(--text);
   white-space: nowrap;
-  background: #332810;
-  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #322512, #1e1508);
+  border: 1px solid var(--edge);
   border-radius: 11px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
 }
 
 .chip b {
@@ -852,13 +979,13 @@ button:disabled {
 }
 
 .chip.is-on {
-  color: #1c2810;
-  background: var(--green);
-  border-color: var(--green-dark);
+  color: #33230a;
+  background: linear-gradient(180deg, #f6dd9c, var(--gold) 50%, #b98c2c);
+  border-color: var(--gold-deep);
 }
 
 .chip.is-on b {
-  color: #2f4d1a;
+  color: #6b4d12;
 }
 
 /* カード上のタグは押せないので平たく置く。 */
@@ -1024,11 +1151,12 @@ input[type='range']::-moz-range-thumb {
 /* ---------- ダンジョン ---------- */
 
 .region {
-  margin-bottom: 18px;
-  padding: 10px 0 4px;
-  background: linear-gradient(180deg, #221a0e, #1a1408);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  margin-bottom: 20px;
+  padding: 12px 0 6px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: var(--frame);
 }
 
 .region-stat {
@@ -1095,9 +1223,10 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
-  background: #1d1609;
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
+  background: linear-gradient(180deg, #221a0c, #150f06);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.12);
 }
 
 .map-legend span {
@@ -1129,12 +1258,15 @@ input[type='range']::-moz-range-thumb {
 /* ---------- 大釜 ---------- */
 
 .cauldron {
-  margin-bottom: 10px;
-  padding: 12px;
-  background: linear-gradient(180deg, #2b2113, #201809);
-  border: 1px solid var(--line);
+  margin-bottom: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
   border-left: 3px solid var(--green-dark);
-  border-radius: 4px;
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.11),
+    0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
 .cauldron.is-complete {
@@ -1323,11 +1455,12 @@ input[type='range']::-moz-range-thumb {
 
 .room {
   margin: 6px 0;
-  padding: 8px 10px;
-  background: linear-gradient(180deg, #2e2413, #221a0c);
-  border: 1px solid var(--line);
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
   border-left: 3px solid var(--line);
   border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.1);
 }
 
 .room-idea {
@@ -1441,9 +1574,12 @@ a.room-title {
   width: 54px;
   height: 54px;
   padding: 0;
-  background: var(--green);
-  border: 2px solid var(--green-dark);
+  background: linear-gradient(180deg, #f6dd9c 0%, var(--gold) 46%, #b98c2c 100%);
+  border: 1px solid var(--gold-deep);
   border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 252, 240, 0.6),
+    0 6px 16px rgba(0, 0, 0, 0.6);
 }
 
 .fab .px {
@@ -1452,7 +1588,7 @@ a.room-title {
 }
 
 .fab:active {
-  background: var(--green-dark);
+  background: linear-gradient(180deg, #c79a35, var(--gold));
 }
 
 /* ---------- モーダル ---------- */
@@ -1472,11 +1608,13 @@ a.room-title {
   max-width: 720px;
   padding: 18px var(--pad);
   padding-bottom: calc(18px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, #2f2413, #211909);
-  border: 1px solid var(--line);
+  background: var(--surface);
+  border: 1px solid var(--edge);
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  box-shadow: 0 -4px 0 rgba(0, 0, 0, 0.35);
+  border-radius: 4px 4px 0 0;
+  box-shadow:
+    inset 0 1px 0 rgba(230, 187, 86, 0.3),
+    0 -12px 30px rgba(0, 0, 0, 0.6);
 }
 
 .modal h2 {
@@ -1521,9 +1659,11 @@ a.room-title {
   z-index: 30;
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
-  background: linear-gradient(180deg, #2a2011, #1a1408);
-  border-top: 2px solid var(--line);
-  box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, #211809, #100b05);
+  border-top: 1px solid var(--edge);
+  box-shadow:
+    inset 0 1px 0 rgba(230, 187, 86, 0.26),
+    0 -10px 22px rgba(0, 0, 0, 0.55);
 }
 
 .tab {
@@ -1553,8 +1693,24 @@ a.room-title {
   height: 22px;
 }
 
+.tab {
+  position: relative;
+}
+
 .tab.is-active {
   color: var(--gold);
+}
+
+/* 選んでいるタブの上に金の線を1本渡す。 */
+.tab.is-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 22%;
+  right: 22%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  box-shadow: 0 0 8px rgba(230, 187, 86, 0.6);
 }
 
 .tab.is-active .tab-mark {
@@ -1581,10 +1737,12 @@ a.room-title {
   font-family: var(--serif);
   font-size: 13px;
   color: var(--text);
-  background: linear-gradient(180deg, #3a2d16, #241b0c);
-  border: 1px solid var(--gold-dark);
-  border-radius: 4px;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, #3d2e15, #211807);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 187, 86, 0.35),
+    0 6px 18px rgba(0, 0, 0, 0.6);
   transform: translateX(-50%);
 }
 

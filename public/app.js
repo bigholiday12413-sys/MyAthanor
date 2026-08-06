@@ -196,7 +196,7 @@ function missionCard(mission, { showSource = true } = {}) {
   const due = dueState(mission);
   const actions =
     mission.status === 'active'
-      ? `<button data-act="complete" data-id="${mission.id}" class="primary">完了</button>
+      ? `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>
          <button data-act="abandon" data-id="${mission.id}" class="ghost danger">断念</button>`
       : mission.status === 'abandoned'
         ? `<button data-act="reopen" data-id="${mission.id}" class="ghost">進行中に戻す</button>`
