@@ -147,6 +147,10 @@ addColumn('mission', 'due_date', 'TEXT');
 // ミッションの切り出しやタグをそのまま使いたいので、同じ器に印を付ける形にする。
 addColumn('idea', 'is_spell', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('idea', 'body', 'TEXT');
+// 金庫：月が終わったときのウォレットの余りが積まれていく。初期残高も持てる。
+addColumn('settings', 'vault_initial', 'INTEGER NOT NULL DEFAULT 0');
+// 週の可処分タイムを表で選んだときの塗り。168文字（曜日×24時間）の 0/1。
+addColumn('settings', 'time_grid', 'TEXT');
 // 大釜の期日。素材が自分の期限を持たなければ、これを引き継ぐ。
 addColumn('cauldron', 'start_date', 'TEXT');
 addColumn('cauldron', 'due_date', 'TEXT');

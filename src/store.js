@@ -635,23 +635,97 @@ export function isMissionStatus(status) {
 
 export function getSettings() {
   return db
-    .prepare(`SELECT weekly_time, monthly_money, cooling_half_life_days FROM settings WHERE id = 1`)
+    .prepare(`
+      SELECT weekly_time, monthly_money, cooling_half_life_days, vault_initial, time_grid
+      FROM settings WHERE id = 1
+    `)
     .get();
 }
 
-export function updateSettings({ weekly_time, monthly_money, cooling_half_life_days }) {
+export function updateSettings({
+  weekly_time,
+  monthly_money,
+  cooling_half_life_days,
+  vault_initial,
+}) {
   const current = getSettings();
   db.prepare(`
-    UPDATE settings SET weekly_time = ?, monthly_money = ?, cooling_half_life_days = ?
-    WHERE id = 1
+    UPDATE settings
+       SET weekly_time = ?, monthly_money = ?, cooling_half_life_days = ?, vault_initial = ?
+     WHERE id = 1
   `).run(
     weekly_time === undefined ? current.weekly_time : int(weekly_time),
     monthly_money === undefined ? current.monthly_money : int(monthly_money),
     cooling_half_life_days === undefined
       ? current.cooling_half_life_days
       : int(cooling_half_life_days),
+    vault_initial === undefined ? current.vault_initial : Math.round(Number(vault_initial) || 0),
   );
   return getSettings();
+}
+
+/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+
+// 曜日×24時間の 168 マス。index = 曜日(0=月) * 24 + 時。
+export const GRID_CELLS = 7 * 24;
+
+export function setTimeGrid(grid) {
+  const value = String(grid ?? '');
+  if (!new RegExp(`^[01]{${GRID_CELLS}}$`).test(value)) {
+    throw badRequest(`time_grid must be ${GRID_CELLS} characters of 0 or 1`);
+  }
+  const hours = [...value].filter((cell) => cell === '1').length;
+  db.prepare(`UPDATE settings SET time_grid = ?, weekly_time = ? WHERE id = 1`)
+    .run(value, hours * 60);
+  return getSettings();
+}
+
+// 表をやめて数字で持ちたいときのために、塗りだけ消せるようにする。
+export function clearTimeGrid() {
+  db.prepare(`UPDATE settings SET time_grid = NULL WHERE id = 1`).run();
+  return getSettings();
+}
+
+/* ---------- 金庫 ---------- */
+
+// 月が終わると、その月のウォレットの余り（可処分 − 消費済み）が金庫に積まれる。
+// 進行中の今月はまだ積まない。使いすぎた月は目減りする。
+export function getVault(now = new Date()) {
+  const settings = getSettings();
+  const current = periods.money.of(now);
+  const firstLog = db.prepare(`SELECT MIN(occurred_at) AS at FROM log`).get().at;
+
+  const months = [];
+  if (firstLog) {
+    let period = periods.money.of(new Date(firstLog));
+    let guard = 0;
+    while (period && period.key < current.key && guard < 600) {
+      const budget = resolveBudget('money', period.key);
+      const consumed = consumedIn('money', period);
+      months.push({
+        ...period,
+        budget: budget.amount,
+        budget_source: budget.source,
+        consumed,
+        surplus: budget.amount - consumed,
+      });
+      period = periods.money.shift(period.key, 1);
+      guard += 1;
+    }
+  }
+
+  const deposited = months.reduce((sum, month) => sum + month.surplus, 0);
+  const currentBudget = resolveBudget('money', current.key).amount;
+
+  return {
+    initial: settings.vault_initial,
+    deposited,
+    balance: settings.vault_initial + deposited,
+    // 今月が終わったら積まれる見込み。
+    pending: currentBudget - consumedIn('money', current),
+    current_period: current,
+    months: months.reverse(),
+  };
 }
 
 /* ---------- budget（期間ごとの可処分量） ---------- */

@@ -320,6 +320,29 @@ const SIGIL = {
   palette: { g: GOLD, c: CREAM },
 };
 
+// 金庫＝積み上がった金貨。宝箱（レガシー）とは別物なので硬貨の段で表す。
+const COINS = {
+  rows: [
+    '................',
+    '................',
+    '................',
+    '...oooooooooo...',
+    '...ohhhhhhhho...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oooooooooo...',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: { o: INK, h: '#ffeab4', g: GOLD, d: GOLD_DARK },
+};
+
 // アイデアの温度＝炎。熱さに応じて色を差し替えて使う（icon の第3引数）。
 const FLAME = {
   rows: [
@@ -419,6 +442,7 @@ const SOURCES = {
   gate: GATE,
   chest: CHEST,
   cauldron: CAULDRON,
+  coins: COINS,
   grimoire: GRIMOIRE,
   sigil: SIGIL,
   flame: FLAME,

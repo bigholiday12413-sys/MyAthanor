@@ -347,9 +347,10 @@ async function renderHome() {
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [summary, active] = await Promise.all([
+  const [summary, active, vault] = await Promise.all([
     api('/summary'),
     api('/missions?status=active&sort=due'),
+    api('/vault'),
   ]);
 
   const upcoming = active.slice(0, 5);
@@ -372,6 +373,12 @@ async function renderHome() {
         plannedLabel: '今月予定',
       })}
     </div>
+
+    <a class="card nav-card vault-line" href="#/vault">
+      ${icon('coins')}
+      <span class="vault-line-label">金庫</span>
+      <span class="vault-line-value">${esc(fmtMoney(vault.balance))}</span>
+    </a>
 
     <div class="section-title">現況</div>
     <div class="panel">
@@ -1273,19 +1280,36 @@ async function renderSettings() {
     api(`/budgets?kind=money&past=${budgetWindow.money}`),
   ]);
 
+  // 塗りが無ければ空の表から始める。
+  const grid = (settings.time_grid ?? '').length === 168 ? settings.time_grid : '0'.repeat(168);
+
   viewEl.innerHTML = `
-    <div class="section-title">既定の可処分リソース</div>
+    <div class="section-title">週の可処分タイム</div>
+    <div class="panel" id="time-grid-panel">
+      <div class="tg-top">
+        <span class="tg-total" id="tg-total"></span>
+        <button type="button" class="ghost" id="tg-clear">全部消す</button>
+      </div>
+      ${timeGridMarkup(grid)}
+      <div class="hint">
+        空いている時間を指でなぞって塗ります。塗ったマスの数がそのまま週の可処分タイムになります。${
+          settings.time_grid || !settings.weekly_time
+            ? ''
+            : `<br />いまは ${esc(
+                fmtTime(settings.weekly_time),
+              )}／週（数値で設定）。表を保存すると置き換わります。`
+        }
+      </div>
+      <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
+    </div>
+
+    <div class="section-title">既定の可処分ウォレット</div>
     <form class="panel" id="settings-form">
       <div class="field">
-        <label for="weekly-time">週あたりの可処分タイム（時間）</label>
-        <input id="weekly-time" type="number" step="0.5" min="0"
-               value="${minutesToHours(settings.weekly_time)}" />
-      </div>
-      <div class="field">
-        <label for="monthly-money">月あたりの可処分ウォレット（円）</label>
+        <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
       </div>
-      <div class="hint">個別設定のない期間に使います。</div>
+      <div class="hint">個別設定のない月に使います。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -1306,6 +1330,12 @@ async function renderSettings() {
       <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
     </a>
 
+    <div class="section-title">金庫</div>
+    <a class="card nav-card" href="#/vault">
+      <div class="card-title">${icon('coins')}<span>金庫の初期残高と積立</span></div>
+      <div class="card-meta"><span>月の余りが積まれていきます</span></div>
+    </a>
+
     <div class="section-title">タグ</div>
     <a class="card nav-card" href="#/tags">
       <div class="card-title"><span>タグの整理</span></div>
@@ -1322,7 +1352,6 @@ async function renderSettings() {
       await api('/settings', {
         method: 'PUT',
         body: {
-          weekly_time: hoursToMinutes(document.getElementById('weekly-time').value),
           monthly_money: Math.round(Number(document.getElementById('monthly-money').value || 0)),
         },
       });
@@ -1332,6 +1361,8 @@ async function renderSettings() {
       toast(err.message, true);
     }
   });
+
+  wireTimeGrid(document.getElementById('time-grid-panel'), grid);
 
   document.getElementById('cooling-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1989,6 +2020,177 @@ async function renderSpell(spellId) {
   wireLegacy(viewEl, reload);
 }
 
+/* ---------- 金庫 ---------- */
+
+// 月が終わると、その月のウォレットの余りが金庫に積まれる。
+async function renderVault() {
+  setActiveTab('home');
+  setTopbar({ title: '金庫', back: '#/home' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const vault = await api('/vault');
+
+  viewEl.innerHTML = `
+    <div class="panel vault-head">
+      ${icon('coins', 'vault-mark')}
+      <div class="vault-balance">${esc(fmtMoney(vault.balance))}</div>
+      <div class="vault-note">
+        初期 ${esc(fmtMoney(vault.initial))}
+        ／ 積立 ${vault.deposited >= 0 ? '+' : ''}${esc(fmtMoney(vault.deposited))}
+      </div>
+    </div>
+
+    <div class="stat-line" style="margin-top:12px">
+      <span>${esc(vault.current_period.label)}（進行中）が終わったら</span>
+      <span class="v ${vault.pending < 0 ? 'neg' : ''}">${
+        vault.pending >= 0 ? '+' : ''
+      }${esc(fmtMoney(vault.pending))}</span>
+    </div>
+
+    <div class="section-title">初期残高</div>
+    <form class="panel" id="vault-form">
+      <div class="field">
+        <input id="vault-initial" type="number" step="1000" value="${vault.initial}" />
+      </div>
+      <div class="hint">使い始める前から持っていたぶん。</div>
+      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
+    </form>
+
+    <div class="section-title">月ごとの積立<span class="section-count">${
+      vault.months.length
+    }</span></div>
+    ${
+      vault.months.length
+        ? `<div class="panel">${vault.months
+            .map(
+              (month) => `
+        <div class="vault-row">
+          <div>
+            <div class="vault-month">${esc(month.label)}</div>
+            <div class="vault-detail">可処分 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
+              fmtMoney(month.consumed),
+            )}</div>
+          </div>
+          <div class="vault-surplus ${month.surplus < 0 ? 'neg' : ''}">${
+            month.surplus >= 0 ? '+' : ''
+          }${esc(fmtMoney(month.surplus))}</div>
+        </div>`,
+            )
+            .join('')}</div>`
+        : '<div class="empty">まだ終わった月がありません。</div>'
+    }
+    <div class="hint">使いすぎた月はその分だけ目減りします。</div>
+  `;
+
+  document.getElementById('vault-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api('/settings', {
+        method: 'PUT',
+        body: {
+          vault_initial: Math.round(Number(document.getElementById('vault-initial').value || 0)),
+        },
+      });
+      toast('初期残高を保存しました');
+      await renderVault();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+
+const WEEK_HEAD = ['月', '火', '水', '木', '金', '土', '日'];
+
+// 曜日×24時間。index = 曜日(0=月) * 24 + 時。
+function timeGridMarkup(grid) {
+  const cells = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    cells.push(
+      `<div class="tg-hour ${hour % 6 === 0 ? 'is-mark' : ''}">${
+        hour % 3 === 0 ? hour : ''
+      }</div>`,
+    );
+    for (let day = 0; day < 7; day += 1) {
+      const index = day * 24 + hour;
+      cells.push(
+        `<div class="tg-cell ${grid[index] === '1' ? 'is-on' : ''}" data-cell="${index}"></div>`,
+      );
+    }
+  }
+  return `
+    <div class="tg">
+      <div class="tg-corner"></div>
+      ${WEEK_HEAD.map((day) => `<div class="tg-head">${day}</div>`).join('')}
+      ${cells.join('')}
+    </div>
+  `;
+}
+
+function wireTimeGrid(root, initial) {
+  const grid = [...initial];
+  const total = root.querySelector('#tg-total');
+  const surface = root.querySelector('.tg');
+  let painting = false;
+  let paintTo = '1';
+
+  const refresh = () => {
+    const hours = grid.filter((cell) => cell === '1').length;
+    total.textContent = `${hours}h / 週`;
+  };
+
+  const paint = (cell) => {
+    if (!cell) return;
+    const index = Number(cell.dataset.cell);
+    if (grid[index] === paintTo) return;
+    grid[index] = paintTo;
+    cell.classList.toggle('is-on', paintTo === '1');
+    refresh();
+  };
+
+  surface.addEventListener('pointerdown', (event) => {
+    const cell = event.target.closest('.tg-cell');
+    if (!cell) return;
+    event.preventDefault();
+    painting = true;
+    // 最初に触ったマスの逆の状態を、指を離すまで塗り続ける。
+    paintTo = cell.classList.contains('is-on') ? '0' : '1';
+    surface.setPointerCapture(event.pointerId);
+    paint(cell);
+  });
+
+  // 指の下にあるマスを座標から拾う。捕捉中は pointermove が surface に来るため。
+  surface.addEventListener('pointermove', (event) => {
+    if (!painting) return;
+    paint(document.elementFromPoint(event.clientX, event.clientY)?.closest('.tg-cell'));
+  });
+
+  const stop = () => {
+    painting = false;
+  };
+  surface.addEventListener('pointerup', stop);
+  surface.addEventListener('pointercancel', stop);
+
+  root.querySelector('#tg-clear').addEventListener('click', () => {
+    grid.fill('0');
+    for (const cell of surface.querySelectorAll('.tg-cell')) cell.classList.remove('is-on');
+    refresh();
+  });
+
+  root.querySelector('#tg-save').addEventListener('click', async () => {
+    try {
+      await api('/settings/time-grid', { method: 'PUT', body: { grid: grid.join('') } });
+      toast('週の可処分タイムを保存しました');
+      await renderSettings();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  refresh();
+}
+
 /* ---------- タグの整理 ---------- */
 
 async function renderTags() {
@@ -2395,6 +2597,7 @@ async function route() {
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
     if (hash === '/tags') return await renderTags();
+    if (hash === '/vault') return await renderVault();
     if (hash === '/spells') return await renderSpells();
     if ((match = hash.match(/^\/spell\/(\d+)$/))) {
       return await renderSpell(Number(match[1]));
