@@ -140,6 +140,9 @@ addColumn('idea', 'temperature_at', 'TEXT');
 addColumn('settings', 'cooling_half_life_days', 'INTEGER NOT NULL DEFAULT 30');
 // 大釜に入っている素材（ミッション）。NULL なら単独のミッション。
 addColumn('mission', 'cauldron_id', 'INTEGER');
+// いつから／いつまで。どちらも任意で、YYYY-MM-DD のローカル日付。
+addColumn('mission', 'start_date', 'TEXT');
+addColumn('mission', 'due_date', 'TEXT');
 
 export function transaction(fn) {
   db.exec('BEGIN');

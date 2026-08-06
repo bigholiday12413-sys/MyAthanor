@@ -68,13 +68,18 @@ api.patch('/logs/:id', handle((req, res) => res.json(store.updateLog(id(req), re
 
 /* ミッション */
 api.get('/missions', handle((req, res) => {
-  const { status } = req.query;
+  const { status, sort = 'recent' } = req.query;
   if (status !== undefined && !store.isMissionStatus(status)) {
     const err = new Error('status must be active, abandoned or done');
     err.status = 400;
     throw err;
   }
-  res.json(store.listMissions({ status }));
+  if (!store.isMissionSort(sort)) {
+    const err = new Error('sort must be due or recent');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.listMissions({ status, sort }));
 }));
 
 api.post('/missions', handle((req, res) =>

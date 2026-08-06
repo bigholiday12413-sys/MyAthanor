@@ -346,6 +346,20 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
 
 const MISSION_STATUSES = new Set(['active', 'abandoned', 'done']);
 
+// 期日は任意。空文字と null はどちらも「無し」として扱う。
+function optionalDate(value, label) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = parseDateKey(value);
+  if (!date) throw badRequest(`${label} must be YYYY-MM-DD`);
+  return dateKey(date);
+}
+
+function checkDateOrder(startKey, dueKey) {
+  if (startKey && dueKey && dueKey < startKey) {
+    throw badRequest('due_date must not be before start_date');
+  }
+}
+
 function sourceTitle(type, id) {
   const table = type === 'idea' ? 'idea' : 'log';
   const row = db.prepare(`SELECT title FROM ${table} WHERE id = ?`).get(id);
@@ -370,6 +384,8 @@ export function createMission({
   estimated_time,
   estimated_money,
   cauldron_id,
+  start_date,
+  due_date,
 }) {
   // 大釜に入れる場合は、器と同じ元エントリに揃える。
   let sourceType = source_type;
@@ -387,12 +403,16 @@ export function createMission({
   }
   if (sourceTitle(sourceType, sourceId) === null) throw notFound(sourceType);
 
+  const startKey = optionalDate(start_date, 'start_date');
+  const dueKey = optionalDate(due_date, 'due_date');
+  checkDateOrder(startKey, dueKey);
+
   const { lastInsertRowid } = db
     .prepare(`
       INSERT INTO mission
         (title, source_type, source_id, status, estimated_time, estimated_money,
-         created_at, cauldron_id)
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
+         created_at, cauldron_id, start_date, due_date)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
     `)
     .run(
       requireTitle(title),
@@ -402,6 +422,8 @@ export function createMission({
       int(estimated_money),
       nowIso(),
       cauldron_id ?? null,
+      startKey,
+      dueKey,
     );
   refreshCauldron(cauldron_id);
   return getMission(Number(lastInsertRowid));
@@ -413,39 +435,57 @@ export function getMission(id) {
   return decorate(row);
 }
 
-export function listMissions({ status } = {}) {
+// 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
+const MISSION_ORDER = {
+  due: `ORDER BY (due_date IS NULL), due_date ASC, created_at ASC, id ASC`,
+  recent: `ORDER BY COALESCE(completed_at, created_at) DESC, id DESC`,
+};
+
+export function listMissions({ status, sort = 'recent' } = {}) {
+  const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
   const rows = status
-    ? db.prepare(`
-        SELECT * FROM mission WHERE status = ?
-        ORDER BY COALESCE(completed_at, created_at) DESC, id DESC
-      `).all(status)
-    : db.prepare(`
-        SELECT * FROM mission
-        ORDER BY COALESCE(completed_at, created_at) DESC, id DESC
-      `).all();
+    ? db.prepare(`SELECT * FROM mission WHERE status = ? ${order}`).all(status)
+    : db.prepare(`SELECT * FROM mission ${order}`).all();
   return rows.map(decorate);
+}
+
+export function isMissionSort(sort) {
+  return Object.hasOwn(MISSION_ORDER, sort);
 }
 
 export function listMissionsBySource(source_type, source_id) {
   return db
     .prepare(`
       SELECT * FROM mission WHERE source_type = ? AND source_id = ?
-      ORDER BY created_at ASC, id ASC
+      ORDER BY (due_date IS NULL), due_date ASC, created_at ASC, id ASC
     `)
     .all(source_type, source_id);
 }
 
-export function updateMission(id, { title, estimated_time, estimated_money }) {
+export function updateMission(
+  id,
+  { title, estimated_time, estimated_money, start_date, due_date },
+) {
   const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
   if (!row) throw notFound('mission');
 
-  db.prepare(`UPDATE mission SET title = ?, estimated_time = ?, estimated_money = ? WHERE id = ?`)
-    .run(
-      title === undefined ? row.title : requireTitle(title),
-      estimated_time === undefined ? row.estimated_time : int(estimated_time),
-      estimated_money === undefined ? row.estimated_money : int(estimated_money),
-      id,
-    );
+  const startKey =
+    start_date === undefined ? row.start_date : optionalDate(start_date, 'start_date');
+  const dueKey = due_date === undefined ? row.due_date : optionalDate(due_date, 'due_date');
+  checkDateOrder(startKey, dueKey);
+
+  db.prepare(`
+    UPDATE mission
+       SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?
+     WHERE id = ?
+  `).run(
+    title === undefined ? row.title : requireTitle(title),
+    estimated_time === undefined ? row.estimated_time : int(estimated_time),
+    estimated_money === undefined ? row.estimated_money : int(estimated_money),
+    startKey,
+    dueKey,
+    id,
+  );
   return getMission(id);
 }
 

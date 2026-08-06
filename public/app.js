@@ -121,9 +121,76 @@ for (const el of tabsEl.querySelectorAll('.tab-mark')) {
   el.innerHTML = icon(el.dataset.icon);
 }
 
+/* ---------- ミッションの期日 ---------- */
+
+const todayKey = () => {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
+const daysUntil = (key) =>
+  Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
+
+// 期日はバッジに収めたいので曜日を落とした短い表記を使う
+// （定期イベントの fmtDay は曜日つきで別物）。
+const fmtShortDay = (key) => {
+  const date = new Date(`${key}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? key : `${date.getMonth() + 1}/${date.getDate()}`;
+};
+
+// 期日の状態。進行中のものだけ急かす。
+function dueState(mission) {
+  if (mission.status !== 'active') return null;
+  if (mission.due_date) {
+    const left = daysUntil(mission.due_date);
+    if (left < 0) return { key: 'over', label: `${-left}日超過` };
+    if (left === 0) return { key: 'today', label: '今日まで' };
+    if (left <= 3) return { key: 'soon', label: `あと${left}日` };
+    return { key: 'far', label: `あと${left}日` };
+  }
+  if (mission.start_date) {
+    const until = daysUntil(mission.start_date);
+    if (until > 0) return { key: 'waiting', label: `${until}日後に開始` };
+  }
+  return null;
+}
+
+function dueRange(mission) {
+  if (!mission.start_date && !mission.due_date) return '';
+  const from = mission.start_date ? fmtShortDay(mission.start_date) : '';
+  const to = mission.due_date ? fmtShortDay(mission.due_date) : '';
+  return `${from}${from ? ' ' : ''}→${to ? ' ' : ''}${to}`;
+}
+
+function missionDates(mission) {
+  const range = dueRange(mission);
+  return `
+    <details class="mission-dates">
+      <summary>${range ? esc(range) : '日付を決める'}</summary>
+      <form class="mission-date-form" data-dates="${mission.id}">
+        <div class="row">
+          <div class="field">
+            <label for="from-${mission.id}">いつから</label>
+            <input id="from-${mission.id}" type="date" name="start_date"
+                   value="${esc(mission.start_date ?? '')}" />
+          </div>
+          <div class="field">
+            <label for="to-${mission.id}">いつまで</label>
+            <input id="to-${mission.id}" type="date" name="due_date"
+                   value="${esc(mission.due_date ?? '')}" />
+          </div>
+        </div>
+        <div class="btn-row"><button type="submit">日付を保存</button></div>
+      </form>
+    </details>
+  `;
+}
+
 function missionCard(mission, { showSource = true } = {}) {
   const sourceHref = `#/${mission.source_type}/${mission.source_id}`;
   const done = mission.status === 'done';
+  const due = dueState(mission);
   const actions =
     mission.status === 'active'
       ? `<button data-act="complete" data-id="${mission.id}" class="primary">完了</button>
@@ -136,6 +203,13 @@ function missionCard(mission, { showSource = true } = {}) {
          data-mission="${mission.id}">
       <div class="card-top">
         <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
+        ${
+          due
+            ? `<span class="badge due-${due.key}">${esc(due.label)}</span>`
+            : mission.due_date
+              ? `<span class="badge">〜${esc(fmtShortDay(mission.due_date))}</span>`
+              : ''
+        }
         ${mission.is_legacy ? `<span class="badge now">${icon('chest')}レガシー</span>` : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
@@ -159,13 +233,33 @@ function missionCard(mission, { showSource = true } = {}) {
              </div>`
           : ''
       }
+      ${mission.status === 'active' ? missionDates(mission) : ''}
       ${actions ? `<div class="btn-row">${actions}</div>` : ''}
     </div>
   `;
 }
 
-// ミッションカードの完了／断念／再開ボタンをまとめて処理する。
+// ミッションカードの完了／断念／再開と、期日の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
+  container.addEventListener('submit', async (event) => {
+    const form = event.target.closest('form[data-dates]');
+    if (!form) return;
+    event.preventDefault();
+    try {
+      await api(`/missions/${form.dataset.dates}`, {
+        method: 'PATCH',
+        body: {
+          start_date: form.elements.start_date.value || null,
+          due_date: form.elements.due_date.value || null,
+        },
+      });
+      toast('日付を保存しました');
+      await onChanged();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
   container.addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
@@ -246,7 +340,7 @@ async function renderHome() {
 
   const [summary, active] = await Promise.all([
     api('/summary'),
-    api('/missions?status=active'),
+    api('/missions?status=active&sort=due'),
   ]);
 
   const upcoming = active.slice(0, 5);
@@ -813,6 +907,16 @@ async function renderEntry(kind, entryId) {
           <input id="m-money" type="number" step="1" min="0" value="0" />
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label for="m-from">いつから（任意）</label>
+          <input id="m-from" type="date" />
+        </div>
+        <div class="field">
+          <label for="m-to">いつまで（任意）</label>
+          <input id="m-to" type="date" />
+        </div>
+      </div>
       <div class="btn-row"><button type="submit" class="primary">ミッションを追加</button></div>
     </form>
   `;
@@ -896,6 +1000,8 @@ async function renderEntry(kind, entryId) {
           source_id: entry.id,
           estimated_time: hoursToMinutes(document.getElementById('m-time').value),
           estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
+          start_date: document.getElementById('m-from').value || null,
+          due_date: document.getElementById('m-to').value || null,
         },
       });
       toast('ミッションを追加しました');
@@ -912,12 +1018,13 @@ async function renderEntry(kind, entryId) {
 /* ---------- ミッション ---------- */
 
 let missionFilter = 'active';
+let missionSort = 'due';
 
 async function renderMissions() {
   setActiveTab('missions');
   setTopbar({ title: 'ミッション' });
 
-  const missions = await api(`/missions?status=${missionFilter}`);
+  const missions = await api(`/missions?status=${missionFilter}&sort=${missionSort}`);
   const totals = missions.reduce(
     (acc, m) => ({
       time: acc.time + m.estimated_time,
@@ -935,11 +1042,26 @@ async function renderMissions() {
         )
         .join('')}
     </div>
+    <div class="filters">
+      <button class="filter" data-sort="due" aria-pressed="${
+        missionSort === 'due'
+      }">期限順</button>
+      <button class="filter" data-sort="recent" aria-pressed="${
+        missionSort === 'recent'
+      }">新しい順</button>
+    </div>
     <div class="panel" style="margin-bottom:14px">
       <div class="stat-line">
         <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}</span>
         <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
       </div>
+      ${
+        missionSort === 'due'
+          ? `<div class="stat-line"><span>期限なし</span><span class="v">${
+              missions.filter((m) => !m.due_date).length
+            }件（末尾）</span></div>`
+          : ''
+      }
     </div>
     <div class="list" id="mission-list">
       ${
@@ -950,9 +1072,15 @@ async function renderMissions() {
     </div>
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
     button.addEventListener('click', () => {
       missionFilter = button.dataset.filter;
+      renderMissions();
+    });
+  }
+  for (const button of viewEl.querySelectorAll('.filter[data-sort]')) {
+    button.addEventListener('click', () => {
+      missionSort = button.dataset.sort;
       renderMissions();
     });
   }
