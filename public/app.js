@@ -530,28 +530,93 @@ async function renderMissions() {
 
 /* ---------- 設定 ---------- */
 
+// タイムは週、ウォレットは月を1期間として可処分量を管理する。
+const BUDGET_UI = {
+  time: {
+    title: 'タイム（週別）',
+    unit: '時間',
+    step: '0.5',
+    toInput: (amount) => minutesToHours(amount),
+    fromInput: (value) => hoursToMinutes(value),
+    format: fmtTime,
+  },
+  money: {
+    title: 'ウォレット（月別）',
+    unit: '円',
+    step: '100',
+    toInput: (amount) => amount,
+    fromInput: (value) => Math.round(Number(value || 0)),
+    format: fmtMoney,
+  },
+};
+
+// 一覧に何期間ぶんの過去を含めるか。「さらに過去」で伸びる。
+const budgetWindow = { time: 6, money: 6 };
+
+function budgetSection(kind, rows) {
+  const ui = BUDGET_UI[kind];
+  return `
+    <div class="section-title">${esc(ui.title)}</div>
+    <form class="panel budget-form" data-kind="${kind}">
+      ${rows
+        .map(
+          (row) => `
+        <div class="budget-row">
+          <div>
+            <div class="budget-key">${esc(row.label)}${
+              row.is_current ? '<span class="badge now">現在</span>' : ''
+            }</div>
+            <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}</div>
+          </div>
+          <input type="number" min="0" step="${ui.step}"
+                 data-key="${esc(row.key)}"
+                 data-original="${ui.toInput(row.amount)}"
+                 value="${ui.toInput(row.amount)}"
+                 aria-label="${esc(row.label)} の可処分${esc(ui.unit)}" />
+          ${
+            row.source === 'override'
+              ? `<button type="button" class="ghost" data-reset="${esc(row.key)}">既定へ</button>`
+              : '<div class="budget-src">既定</div>'
+          }
+        </div>`,
+        )
+        .join('')}
+      <div class="btn-row">
+        <button type="button" data-more>さらに過去</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `;
+}
+
 async function renderSettings() {
   setActiveTab('home');
   setTopbar({ title: '設定', back: '#/home' });
 
-  const settings = await api('/settings');
+  const [settings, timeBudgets, moneyBudgets] = await Promise.all([
+    api('/settings'),
+    api(`/budgets?kind=time&past=${budgetWindow.time}`),
+    api(`/budgets?kind=money&past=${budgetWindow.money}`),
+  ]);
 
   viewEl.innerHTML = `
-    <div class="section-title">可処分リソース</div>
+    <div class="section-title">既定の可処分リソース</div>
     <form class="panel" id="settings-form">
       <div class="field">
         <label for="weekly-time">週あたりの可処分タイム（時間）</label>
         <input id="weekly-time" type="number" step="0.5" min="0"
                value="${minutesToHours(settings.weekly_time)}" />
-        <div class="hint">ホームのタンクは月曜始まりの週で集計します</div>
       </div>
       <div class="field">
         <label for="monthly-money">月あたりの可処分ウォレット（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
-        <div class="hint">ウォレットは当月で集計します</div>
       </div>
+      <div class="hint">個別に設定していない期間に適用されます。タイムは月曜始まりの週、ウォレットは暦月で集計します。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
+
+    ${budgetSection('time', timeBudgets)}
+    ${budgetSection('money', moneyBudgets)}
   `;
 
   document.getElementById('settings-form').addEventListener('submit', async (event) => {
@@ -564,11 +629,55 @@ async function renderSettings() {
           monthly_money: Math.round(Number(document.getElementById('monthly-money').value || 0)),
         },
       });
-      toast('設定を保存しました');
+      toast('既定値を保存しました');
+      await renderSettings();
     } catch (err) {
       toast(err.message, true);
     }
   });
+
+  for (const form of viewEl.querySelectorAll('.budget-form')) {
+    const kind = form.dataset.kind;
+    const ui = BUDGET_UI[kind];
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const changed = [...form.querySelectorAll('input[data-key]')].filter(
+        (input) => input.value !== input.dataset.original,
+      );
+      if (changed.length === 0) return toast('変更はありません');
+      try {
+        for (const input of changed) {
+          await api(`/budgets/${kind}/${input.dataset.key}`, {
+            method: 'PUT',
+            body: { amount: ui.fromInput(input.value) },
+          });
+        }
+        toast(`${changed.length}件の期間を保存しました`);
+        await renderSettings();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+
+    form.addEventListener('click', async (event) => {
+      const reset = event.target.closest('button[data-reset]');
+      if (reset) {
+        try {
+          await api(`/budgets/${kind}/${reset.dataset.reset}`, { method: 'DELETE' });
+          toast('既定値に戻しました');
+          await renderSettings();
+        } catch (err) {
+          toast(err.message, true);
+        }
+        return;
+      }
+      if (event.target.closest('button[data-more]')) {
+        budgetWindow[kind] += 8;
+        await renderSettings();
+      }
+    });
+  }
 }
 
 /* ---------- ルーティング ---------- */

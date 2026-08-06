@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS settings (
   monthly_money INTEGER NOT NULL DEFAULT 0
 );
 
+-- 期間ごとの可処分量。行が無い期間は settings の既定値を使う。
+-- period_key は kind='time' なら週の月曜日 (YYYY-MM-DD)、
+-- kind='money' なら月 (YYYY-MM)。
+CREATE TABLE IF NOT EXISTS budget (
+  kind       TEXT NOT NULL CHECK (kind IN ('time', 'money')),
+  period_key TEXT NOT NULL,
+  amount     INTEGER NOT NULL,
+  PRIMARY KEY (kind, period_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_log_occurred_at ON log (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_mission_source ON mission (source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_mission_status ON mission (status);

@@ -83,9 +83,28 @@ api.post('/missions/:id/abandon', handle((req, res) =>
 api.post('/missions/:id/reopen', handle((req, res) =>
   res.json(store.reopenMission(id(req)))));
 
-/* 設定 */
+/* 設定（既定値） */
 api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
 api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
+
+/* 期間ごとの可処分量 */
+api.get('/budgets', handle((req, res) => {
+  const { kind, past, future } = req.query;
+  res.json(store.listBudgets(kind, { past, future }));
+}));
+
+api.put('/budgets/:kind/:key', handle((req, res) => {
+  const { amount } = req.body ?? {};
+  if (amount === undefined) {
+    const err = new Error('amount is required');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.setBudget(req.params.kind, req.params.key, amount));
+}));
+
+api.delete('/budgets/:kind/:key', handle((req, res) =>
+  res.json(store.clearBudget(req.params.kind, req.params.key))));
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));

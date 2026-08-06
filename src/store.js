@@ -1,5 +1,5 @@
 import { db, transaction } from './db.js';
-import { currentWeek, currentMonth } from './period.js';
+import { periods } from './period.js';
 
 // タイムは分、ウォレットは円。どちらも整数で保持する。
 const nowIso = () => new Date().toISOString();
@@ -296,12 +296,112 @@ export function updateSettings({ weekly_time, monthly_money }) {
   return getSettings();
 }
 
+/* ---------- budget（期間ごとの可処分量） ---------- */
+
+// 既定値（settings）のどの列が、どちらのリソースに対応するか。
+const DEFAULT_COLUMN = { time: 'weekly_time', money: 'monthly_money' };
+const SPENT_COLUMN = { time: 'time_spent', money: 'money_spent' };
+
+export function isBudgetKind(kind) {
+  return kind === 'time' || kind === 'money';
+}
+
+function requireKind(kind) {
+  if (!isBudgetKind(kind)) {
+    const err = new Error('kind must be "time" or "money"');
+    err.status = 400;
+    throw err;
+  }
+  return kind;
+}
+
+// 期間キーを正規化した上で検証する。週キーは月曜日でなければ受け付けない。
+function requirePeriod(kind, periodKey) {
+  const period = periods[kind].fromKey(periodKey);
+  if (!period || period.key !== periodKey) {
+    const err = new Error('invalid period key');
+    err.status = 400;
+    throw err;
+  }
+  return period;
+}
+
+// その期間の可処分量。個別設定があればそれを、無ければ既定値を返す。
+export function resolveBudget(kind, periodKey) {
+  requireKind(kind);
+  const row = db
+    .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
+    .get(kind, periodKey);
+  if (row) return { amount: row.amount, source: 'override' };
+  return { amount: getSettings()[DEFAULT_COLUMN[kind]], source: 'default' };
+}
+
+function consumedIn(kind, period) {
+  return db
+    .prepare(`
+      SELECT COALESCE(SUM(${SPENT_COLUMN[kind]}), 0) AS total
+      FROM log WHERE occurred_at >= ? AND occurred_at < ?
+    `)
+    .get(period.start, period.end).total;
+}
+
+// 直近の期間に、個別設定を持つ期間を足して一覧にする。
+export function listBudgets(kind, { past = 5, future = 1 } = {}) {
+  requireKind(kind);
+  const scale = periods[kind];
+  const current = scale.of();
+  const back = Math.min(Math.max(int(past), 0), 60);
+  const ahead = Math.min(Math.max(int(future), 0), 12);
+
+  const found = new Map();
+  for (let offset = -back; offset <= ahead; offset += 1) {
+    const period = scale.shift(current.key, offset);
+    if (period) found.set(period.key, period);
+  }
+  for (const row of db.prepare(`SELECT period_key FROM budget WHERE kind = ?`).all(kind)) {
+    const period = scale.fromKey(row.period_key);
+    if (period) found.set(period.key, period);
+  }
+
+  return [...found.values()]
+    .sort((a, b) => b.start.localeCompare(a.start))
+    .map((period) => {
+      const budget = resolveBudget(kind, period.key);
+      return {
+        ...period,
+        amount: budget.amount,
+        source: budget.source,
+        consumed: consumedIn(kind, period),
+        is_current: period.key === current.key,
+      };
+    });
+}
+
+export function setBudget(kind, periodKey, amount) {
+  requireKind(kind);
+  const period = requirePeriod(kind, periodKey);
+  db.prepare(`
+    INSERT INTO budget (kind, period_key, amount) VALUES (?, ?, ?)
+    ON CONFLICT (kind, period_key) DO UPDATE SET amount = excluded.amount
+  `).run(kind, period.key, int(amount));
+  return { kind, ...period, ...resolveBudget(kind, period.key) };
+}
+
+// 個別設定を消して既定値に戻す。
+export function clearBudget(kind, periodKey) {
+  requireKind(kind);
+  const period = requirePeriod(kind, periodKey);
+  db.prepare(`DELETE FROM budget WHERE kind = ? AND period_key = ?`).run(kind, period.key);
+  return { kind, ...period, ...resolveBudget(kind, period.key) };
+}
+
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
-  const settings = getSettings();
-  const week = currentWeek(now);
-  const month = currentMonth(now);
+  const week = periods.time.of(now);
+  const month = periods.money.of(now);
+  const timeBudget = resolveBudget('time', week.key);
+  const moneyBudget = resolveBudget('money', month.key);
 
   const spent = (period) =>
     db
@@ -335,11 +435,13 @@ export function getSummary(now = new Date()) {
   return {
     time: {
       unit: 'minutes',
-      ...build(settings.weekly_time, spent(week).time, planned.time, week),
+      ...build(timeBudget.amount, spent(week).time, planned.time, week),
+      budget_source: timeBudget.source,
     },
     money: {
       unit: 'jpy',
-      ...build(settings.monthly_money, spent(month).money, planned.money, month),
+      ...build(moneyBudget.amount, spent(month).money, planned.money, month),
+      budget_source: moneyBudget.source,
     },
     active_mission_count: planned.count,
   };

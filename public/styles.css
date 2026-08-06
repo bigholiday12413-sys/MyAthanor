@@ -556,6 +556,67 @@ button:disabled {
   flex: 1;
 }
 
+/* ---------- 期間ごとの可処分量 ---------- */
+
+.budget-row {
+  display: grid;
+  grid-template-columns: 1fr 96px 62px;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.budget-row:first-child {
+  padding-top: 0;
+}
+
+.budget-key {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.budget-consumed {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.budget-row input {
+  padding: 8px;
+  font-size: 15px;
+  text-align: right;
+}
+
+.budget-row button {
+  width: 100%;
+  padding: 7px 2px;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.budget-src {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  text-align: center;
+}
+
+.badge.now {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid #2b5a58;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  vertical-align: 1px;
+}
+
 /* ---------- fab ---------- */
 
 .fab {
