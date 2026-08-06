@@ -1494,15 +1494,38 @@ export function getSummary(now = new Date()) {
       `)
       .get(period.start, period.end);
 
-  // 消費予定は「これからやること」なので期間で絞らず、進行中ミッション全体を対象にする。
-  const planned = db
+  // 消費予定は期限で絞る。期限が期間の終わりまでに来る進行中ミッションが対象。
+  // 期限切れのものも含める。過ぎていても払う／やるぶんなので、視界から消すと危ない。
+  const plannedMissions = (period) =>
+    db
+      .prepare(`
+        SELECT COALESCE(SUM(m.estimated_time), 0) AS time,
+               COALESCE(SUM(m.estimated_money), 0) AS money,
+               COUNT(*) AS count
+        FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
+        WHERE m.status = 'active'
+          AND COALESCE(m.due_date, c.due_date) IS NOT NULL
+          AND COALESCE(m.due_date, c.due_date) <= ?
+      `)
+      .get(dateKey(new Date(new Date(period.end).getTime() - 1)));
+
+  // 期限を持たないミッション。試験管には乗らないので、別枠で見せて見落としを防ぐ。
+  const undated = db
     .prepare(`
-      SELECT COALESCE(SUM(estimated_time), 0) AS time,
-             COALESCE(SUM(estimated_money), 0) AS money,
+      SELECT COALESCE(SUM(m.estimated_time), 0) AS time,
+             COALESCE(SUM(m.estimated_money), 0) AS money,
              COUNT(*) AS count
-      FROM mission WHERE status = 'active'
+      FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
+      WHERE m.status = 'active' AND COALESCE(m.due_date, c.due_date) IS NULL
     `)
     .get();
+
+  const activeCount = db
+    .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
+    .get().count;
+
+  const plannedWeek = plannedMissions(week);
+  const plannedMonth = plannedMissions(month);
 
   // 定期イベントのこれから起きる回も消費予定に含める。
   const recurringWeek = plannedRecurring(week, now);
@@ -1527,15 +1550,25 @@ export function getSummary(now = new Date()) {
   return {
     time: {
       unit: 'minutes',
-      ...build(timeBudget.amount, spent(week).time, planned.time, recurringWeek.time, week),
+      ...build(timeBudget.amount, spent(week).time, plannedWeek.time, recurringWeek.time, week),
       budget_source: timeBudget.source,
+      due_mission_count: plannedWeek.count,
     },
     money: {
       unit: 'jpy',
-      ...build(moneyBudget.amount, spent(month).money, planned.money, recurringMonth.money, month),
+      ...build(
+        moneyBudget.amount,
+        spent(month).money,
+        plannedMonth.money,
+        recurringMonth.money,
+        month,
+      ),
       budget_source: moneyBudget.source,
+      due_mission_count: plannedMonth.count,
     },
-    active_mission_count: planned.count,
+    // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
+    undated: undated,
+    active_mission_count: activeCount,
     recurrence_count: db
       .prepare(`SELECT COUNT(*) AS total FROM recurrence WHERE active = 1`)
       .get().total,

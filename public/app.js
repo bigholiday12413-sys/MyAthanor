@@ -285,7 +285,7 @@ function wireMissionActions(container, onChanged) {
 /* ---------- ホーム ---------- */
 
 // リソースは2色の試験管で示す。下から 消費済み（薬草色）、消費予定（琥珀）。
-function tubeCard({ name, period, data, format }) {
+function tubeCard({ name, period, data, format, plannedLabel = '消費予定' }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
@@ -312,7 +312,7 @@ function tubeCard({ name, period, data, format }) {
             <span class="v">${esc(format(data.consumed))}</span>
           </div>
           <div class="readout-row">
-            <span class="k"><i class="swatch planned"></i>消費予定</span>
+            <span class="k"><i class="swatch planned"></i>${esc(plannedLabel)}</span>
             <span class="v">${esc(format(data.planned))}</span>
           </div>
           <div class="readout-row">
@@ -326,7 +326,7 @@ function tubeCard({ name, period, data, format }) {
         </div>
       </div>
       <div class="projection">
-        <span>全完了時</span>
+        <span>やり切ったら</span>
         <span class="v ${data.remaining < 0 ? 'neg' : ''}">${esc(format(data.remaining))}</span>
       </div>
     </div>
@@ -356,31 +356,55 @@ async function renderHome() {
         period: `週 ${summary.time.period.label}`,
         data: summary.time,
         format: fmtTime,
+        plannedLabel: '今週予定',
       })}
       ${tubeCard({
         name: 'ウォレット',
         period: `月 ${summary.money.period.label}`,
         data: summary.money,
         format: fmtMoney,
+        plannedLabel: '今月予定',
       })}
     </div>
 
     <div class="section-title">現況</div>
     <div class="panel">
-      <div class="stat-line"><span>進行中ミッション</span><span class="v">${summary.active_mission_count}</span></div>
+      <div class="stat-line">
+        <span>進行中ミッション</span>
+        <span class="v">${summary.active_mission_count}</span>
+      </div>
+      <div class="stat-line">
+        <span>うち今週まで／今月まで</span>
+        <span class="v">${summary.time.due_mission_count} / ${summary.money.due_mission_count}</span>
+      </div>
       ${
         summary.time.planned_recurring || summary.money.planned_recurring
           ? `<div class="stat-line">
-               <span><a class="link" href="#/recurrences">うち定期イベント →</a></span>
+               <span><a class="link" href="#/recurrences">定期イベント →</a></span>
                <span class="v">${esc(fmtTime(summary.time.planned_recurring))} · ${esc(
                  fmtMoney(summary.money.planned_recurring),
                )}</span>
              </div>`
           : ''
       }
-      <div class="stat-line"><span>全完了時タイム残</span><span class="v">${esc(fmtTime(summary.time.remaining))}</span></div>
-      <div class="stat-line"><span>全完了時ウォレット残</span><span class="v">${esc(fmtMoney(summary.money.remaining))}</span></div>
+      <div class="stat-line"><span>やり切った時のタイム残</span><span class="v">${esc(fmtTime(summary.time.remaining))}</span></div>
+      <div class="stat-line"><span>やり切った時のウォレット残</span><span class="v">${esc(fmtMoney(summary.money.remaining))}</span></div>
     </div>
+
+    ${
+      // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
+      summary.undated.time || summary.undated.money
+        ? `<div class="panel warn">
+             <div class="stat-line">
+               <span><a class="link" href="#/missions">期限なしの見積 →</a></span>
+               <span class="v neg">${esc(fmtTime(summary.undated.time))} · ${esc(
+                 fmtMoney(summary.undated.money),
+               )}</span>
+             </div>
+             <div class="hint">試験管には乗っていません。期限を入れると今週／今月に算入されます。</div>
+           </div>`
+        : ''
+    }
 
     <div class="section-title">進行中のミッション</div>
     <div class="list" id="home-missions">
