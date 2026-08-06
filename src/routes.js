@@ -1,0 +1,91 @@
+import { Router } from 'express';
+import * as store from './store.js';
+
+export const api = Router();
+
+// 同期的な store の例外をそのまま JSON エラーに落とす。
+function handle(fn) {
+  return (req, res, next) => {
+    try {
+      fn(req, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+function id(req) {
+  const value = Number(req.params.id);
+  if (!Number.isInteger(value) || value <= 0) {
+    const err = new Error('invalid id');
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+/* ストリーム */
+api.get('/stream', handle((req, res) => {
+  const type = req.query.type ?? 'all';
+  if (!['all', 'idea', 'log'].includes(type)) {
+    const err = new Error('type must be all, idea or log');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.listStream({ type, limit: req.query.limit ?? 200 }));
+}));
+
+/* 新規追加（種別を選んでテキストのみ） */
+api.post('/entries', handle((req, res) => {
+  const { kind, title } = req.body ?? {};
+  if (kind === 'idea') return res.status(201).json(store.createIdea({ title }));
+  if (kind === 'log') return res.status(201).json(store.createLog({ title }));
+  const err = new Error('kind must be "idea" or "log"');
+  err.status = 400;
+  throw err;
+}));
+
+/* アイデア */
+api.post('/ideas', handle((req, res) => res.status(201).json(store.createIdea(req.body ?? {}))));
+api.get('/ideas/:id', handle((req, res) => res.json(store.getIdea(id(req)))));
+api.patch('/ideas/:id', handle((req, res) => res.json(store.updateIdea(id(req), req.body ?? {}))));
+
+/* ログ */
+api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.body ?? {}))));
+api.get('/logs/:id', handle((req, res) => res.json(store.getLog(id(req)))));
+api.patch('/logs/:id', handle((req, res) => res.json(store.updateLog(id(req), req.body ?? {}))));
+
+/* ミッション */
+api.get('/missions', handle((req, res) => {
+  const { status } = req.query;
+  if (status !== undefined && !store.isMissionStatus(status)) {
+    const err = new Error('status must be active, abandoned or done');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.listMissions({ status }));
+}));
+
+api.post('/missions', handle((req, res) =>
+  res.status(201).json(store.createMission(req.body ?? {}))));
+
+api.get('/missions/:id', handle((req, res) => res.json(store.getMission(id(req)))));
+
+api.patch('/missions/:id', handle((req, res) =>
+  res.json(store.updateMission(id(req), req.body ?? {}))));
+
+api.post('/missions/:id/complete', handle((req, res) =>
+  res.json(store.completeMission(id(req)))));
+
+api.post('/missions/:id/abandon', handle((req, res) =>
+  res.json(store.abandonMission(id(req)))));
+
+api.post('/missions/:id/reopen', handle((req, res) =>
+  res.json(store.reopenMission(id(req)))));
+
+/* 設定 */
+api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
+api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
+
+/* ホームのサマリ */
+api.get('/summary', handle((_req, res) => res.json(store.getSummary())));
