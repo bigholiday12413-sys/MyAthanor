@@ -31,6 +31,37 @@ DB は初回起動時に自動作成される。バックアップは `data/` �
 （要件どおり Tailscale のネットワーク層制限のみを前提とする）ので、
 **Tailnet の外に公開しないこと**。
 
+### 見本版（GitHub Pages）
+
+サーバを立てずに、URL を開くだけで触れる見本を `main` への push ごとに出す。
+スマホから見た目と操作感を確かめるためのもの。
+
+```
+https://<user>.github.io/MyAthanor/
+```
+
+**初回だけリポジトリ側の設定が要る。**
+Settings → Pages → Source を **GitHub Actions** にする。
+`main` に入る前に見たいときは、Actions → Pages → Run workflow でブランチを選べば出る。
+
+仕組みは「本体のコードをそのまま持っていき、DB の1ファイルだけ差し替える」。
+
+- `src/store.js` は `node:sqlite` を直接は触らず、`./db.js` の `db` を使っているだけ。
+  そこへ WASM の SQLite（sql.js）を同じ形でかぶせた `db.js` を置くと、
+  **store.js も routes.js も1行も変えずにブラウザで動く**
+- `/api` への fetch を横取りして `src/routes.js` に渡す。express の `Router` は
+  使っている範囲だけ真似たものに差し替える（`demo/express.js`）
+- つまり**見本版と本体でロジックが別物にならない**。画面・集計・状態遷移は同じものが走る
+- データは端末の localStorage に残り、初回だけ見本を入れる。「最初に戻す」で消せる
+- スキーマは `src/schema.js` に切り出して両方から使う。片方だけ列が増えることがない
+
+```bash
+npm run build:demo   # site/ に組み立てる
+```
+
+見本の日付は「今」から逆算して入れている。置いた日付を焼き込むと、
+時間が経つほど古びて、期限や試験管の見え方が変わってしまうため。
+
 ### 常時起動させる
 
 ノートPC で常駐させる場合の systemd user unit の例:
@@ -55,13 +86,16 @@ loginctl enable-linger "$USER"   # ログアウト後も動かす
 
 ```
 server.js          Express アプリ（API + 静的配信 + SPA フォールバック）
-src/db.js          SQLite 接続とスキーマ
+src/db.js          SQLite 接続
+src/schema.js      スキーマ（本体と見本版で共用）
 src/period.js      週（月曜始まり）／月の集計期間と日付ユーティリティ
 src/store.js       データアクセスと状態遷移
 src/routes.js      REST API
 public/app.js      Web UI（ビルド不要の ES モジュール）
 public/icons.js    ドット絵アイコン（16x16 のグリッドから SVG を生成）
 public/styles.css  見た目
+demo/              見本版（GitHub Pages）だけで使う差し替え部品
+scripts/           見本版の組み立て
 ```
 
 依存は Express のみ。SQLite は Node 22 標準の `node:sqlite` を使うため
