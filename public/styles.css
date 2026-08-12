@@ -1145,12 +1145,20 @@ input[type='range']::-moz-range-thumb {
   color: var(--gold);
 }
 
-/* 地図は横に伸びるので、区画の中だけで横スクロールさせる。 */
+/* 地図は横に伸びるので、区画の中だけで横スクロールさせる。
+   背景は手つかずの岩。ここを一番暗くしないと、彫り抜いた床が沈んで見える。 */
 .map-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 0 8px;
-  border-top: 1px dotted var(--line-soft);
+  margin: 2px 0 0;
+  padding: 0;
+  background: #100b05;
+  border-top: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+}
+
+.map-scroll + .map-scroll {
+  margin-top: 12px;
 }
 
 .map {
@@ -1168,12 +1176,17 @@ input[type='range']::-moz-range-thumb {
 }
 
 .map-room {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .map-corridor {
   font-size: 9px;
   fill: var(--dim);
+}
+
+/* 掘削中の廊下だけ、名前も灯りの色で拾う。 */
+.map-corridor.is-active {
+  fill: var(--gold);
 }
 
 .map-cauldron {
@@ -1184,6 +1197,23 @@ input[type='range']::-moz-range-thumb {
 .map-dead {
   font-size: 9px;
   fill: var(--dim);
+}
+
+.map-dead.is-active {
+  fill: var(--gold);
+}
+
+.map-entry {
+  font-size: 9px;
+  fill: var(--gold-dark);
+}
+
+.map-door text {
+  fill: var(--text);
+}
+
+.map-door:active text {
+  fill: var(--gold);
 }
 
 .map-legend {
@@ -1212,19 +1242,10 @@ input[type='range']::-moz-range-thumb {
   height: 13px;
 }
 
-.map-legend .rule {
-  width: 18px;
-  height: 0;
-  border-top: 3px solid #8d8f7a;
-}
-
-.map-legend .rule.active {
-  border-top-style: dashed;
-  border-top-color: var(--gold);
-}
-
-.map-legend .rule.abandoned {
-  border-top: 2px dotted #5b4a2c;
+.map-legend .swatch {
+  flex: none;
+  width: 24px;
+  height: 12px;
 }
 
 /* ---------- 大釜 ---------- */
@@ -2098,6 +2119,11 @@ textarea {
   font-family: var(--serif);
   font-size: 13px;
   color: var(--text);
+}
+
+/* display を敷いているので、hidden を明示的に打ち消さないと出っぱなしになる。 */
+.update-badge[hidden] {
+  display: none;
 }
 
 .update-badge button {

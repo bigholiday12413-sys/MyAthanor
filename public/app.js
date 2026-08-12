@@ -2299,14 +2299,42 @@ function wireLegacy(container, onChanged) {
 
 /* ---------- ダンジョン ----------
 
-   たまっていく情報を「道」として地図にする。
-     部屋 = アイデア／ログ、通路 = ミッション、大釜 = 通路の束、宝箱 = レガシー。
+   たまっていく情報を、上から見おろした平面図として描く。
+     部屋 = アイデア／ログ、廊下 = ミッション、大釜の間 = 通路の束、宝箱 = レガシー。
      縦 = 深さ（子は必ず親より後に生まれるので、下へ行くほど後の時間）。
-     横 = 枝分かれ。区画 = タグ。                                            */
+     横 = 枝分かれ。区画 = タグ。
+     入口から掘削中の先端までは灯りを点し、いまたどるべき道が一目で分かるようにする。 */
 
 let dungeonFilter = 'all';
 
-const MAP = { row: 56, col: 100, padX: 14, padY: 16, icon: 18 };
+// 平面図の寸法。壁は帯として描き、床はその内側に残った幅で決まる。
+const MAP = {
+  col: 136, // 枝分かれの間隔
+  row: 96, // 深さの間隔。廊下の札を横帯とぶつけずに置ける高さで決めている。
+  padX: 14,
+  padY: 32, // 上に入口の階段を置く分だけ空ける
+  roomW: 114,
+  roomH: 40,
+  deadW: 52,
+  deadH: 24,
+  hall: 13, // 廊下の床幅
+  wall: 3, // 壁の厚み（片側）
+  icon: 16,
+};
+
+// 岩と石畳。ぼかしは使わず、帯と1pxの縁だけで奥行きを出す。
+// 岩＜瓦礫＜床＜灯りの床＜壁 の順に明るくして、彫り抜かれた形が読めるようにする。
+const STONE = {
+  rock: '#100b05',
+  edge: '#080502',
+  wall: '#3b2d18',
+  wallDim: '#2a2013',
+  floor: '#211809',
+  grout: '#2e2211',
+  lit: '#2c1f0a',
+  litGrout: '#45330f',
+  rubble: '#16110a',
+};
 
 const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
 
@@ -2315,12 +2343,21 @@ const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
 // 素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。
 function layoutRoad(root) {
   const nodes = [];
-  let nextLane = 0;
+  let nextId = 0;
+
+  // レーンは深さごとに詰めて配る。全体で通し番号にすると、浅いところに1部屋あるだけで
+  // 地図が横に伸びてしまう。同じ段に空きがあれば必ずそこへ寄せる。
+  const filled = [];
+  const laneFor = (depth, atLeast = 0) => {
+    const lane = Math.max(filled[depth] ?? 0, atLeast);
+    filled[depth] = lane + 1;
+    return lane;
+  };
 
   const placeCorridor = (corridor, depth) => {
     const child = corridor.room
       ? place(corridor.room, depth)
-      : { kind: 'dead', depth, lane: nextLane++, children: [] };
+      : { kind: 'dead', id: nextId++, depth, lane: laneFor(depth), children: [] };
     if (!corridor.room) nodes.push(child);
     child.corridor = corridor;
     return child;
@@ -2329,13 +2366,12 @@ function layoutRoad(root) {
   const placeCauldron = (bundle, depth) => {
     const branching = bundle.corridors.filter((c) => c.room && hasBranch(c.room));
     const children = branching.map((corridor) => placeCorridor(corridor, depth + 1));
-    const lane = children.length
-      ? (children[0].lane + children[children.length - 1].lane) / 2
-      : nextLane++;
+    const lane = laneFor(depth, children[0]?.lane ?? 0);
     const done = bundle.corridors.filter((c) => c.mission.status === 'done').length;
     const needed = bundle.corridors.filter((c) => c.mission.status !== 'abandoned').length;
     const node = {
       kind: 'cauldron',
+      id: nextId++,
       cauldron: bundle.cauldron,
       done,
       needed,
@@ -2353,10 +2389,10 @@ function layoutRoad(root) {
       ...room.corridors.map((corridor) => placeCorridor(corridor, depth + 1)),
       ...room.cauldrons.map((bundle) => placeCauldron(bundle, depth + 1)),
     ];
-    const lane = children.length
-      ? (children[0].lane + children[children.length - 1].lane) / 2
-      : nextLane++;
-    const node = { kind: 'room', room, depth, lane, children };
+    // 親は最初の子の真上に置く。中央に寄せると樹形図に見えてしまうので、
+    // 左に揃えて幹をまっすぐ通し、入口が必ず左上に来るようにする。
+    const lane = laneFor(depth, children[0]?.lane ?? 0);
+    const node = { kind: 'room', id: nextId++, room, depth, lane, children };
     for (const child of children) child.parent = node;
     nodes.push(node);
     return node;
@@ -2366,32 +2402,45 @@ function layoutRoad(root) {
 
   const maxLane = Math.max(...nodes.map((n) => n.lane));
   const maxDepth = Math.max(...nodes.map((n) => n.depth));
+  // レーンと深さを、部屋の中心の座標に置き換える。
   for (const node of nodes) {
-    node.x = MAP.padX + node.lane * MAP.col + MAP.icon;
-    node.y = MAP.padY + node.depth * MAP.row;
+    node.w = node.kind === 'dead' ? MAP.deadW : MAP.roomW;
+    node.h = node.kind === 'dead' ? MAP.deadH : MAP.roomH;
+    node.x = Math.round(MAP.padX + node.lane * MAP.col + MAP.roomW / 2);
+    node.y = Math.round(MAP.padY + node.depth * MAP.row + MAP.roomH / 2);
   }
   return {
     nodes,
-    width: MAP.padX * 2 + maxLane * MAP.col + MAP.col,
-    height: MAP.padY * 2 + maxDepth * MAP.row,
+    width: MAP.padX * 2 + maxLane * MAP.col + MAP.roomW,
+    height: MAP.padY * 2 + maxDepth * MAP.row + MAP.roomH,
   };
 }
 
-const CORRIDOR_STYLE = {
-  done: { stroke: '#8d8f7a', width: 3, dash: '' },
-  active: { stroke: '#e0aa3c', width: 3, dash: '6 5' },
-  abandoned: { stroke: '#5b4a2c', width: 2, dash: '2 5' },
+// 崩落した廊下だけ、壁ごと途切れさせて描く。
+const HALL_STYLE = {
+  done: { wall: STONE.wall, dash: '' },
+  active: { wall: STONE.wall, dash: '' },
+  abandoned: { wall: STONE.wallDim, dash: '8 7' },
 };
+
+// 部屋の入口に立てる標。灯りの道より目立たない明度に落としてある。
+const ROOM_ACCENT = { idea: '#a33f2e', log: '#8a7a55' };
 
 function clip(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-// 親から子へ、直角に折れる通路を引く。
-function corridorPath(parent, child) {
-  const midY = parent.y + MAP.row / 2;
-  return `M ${parent.x} ${parent.y + 12} V ${midY} H ${child.x} V ${child.y - 12}`;
+// 親の部屋の下辺から子の部屋の上辺へ、直角に折れる廊下を引く。
+// 端は壁の厚みだけ部屋へ食い込ませ、あとから床を重ねて継ぎ目を消す。
+function hallPath(parent, child) {
+  const from = parent.y + parent.h / 2 - MAP.wall;
+  const to = child.y - child.h / 2 + MAP.wall;
+  const mid = hallMidY(parent, child);
+  return `M ${parent.x} ${from} V ${mid} H ${child.x} V ${to}`;
 }
+
+const hallMidY = (parent, child) =>
+  Math.round((parent.y + parent.h / 2 + (child.y - child.h / 2)) / 2);
 
 function mapPixel(name, x, y, size, overrides = null) {
   const scale = size / 16;
@@ -2399,82 +2448,176 @@ function mapPixel(name, x, y, size, overrides = null) {
     shape-rendering="crispEdges">${iconBody(name, overrides)}</g>`;
 }
 
+// 石畳の目地。床は単色で塗らず、必ずこの継ぎ目を入れて縮尺の手がかりにする。
+function flagstones(uid) {
+  const tile = (id, floor, grout) => `
+    <pattern id="${id}" width="14" height="14" patternUnits="userSpaceOnUse">
+      <rect width="14" height="14" fill="${floor}" />
+      <path d="M0 13 H14 M13 0 V14" stroke="${grout}" stroke-width="1" />
+    </pattern>`;
+  return `<defs>
+    ${tile(`${uid}-floor`, STONE.floor, STONE.grout)}
+    ${tile(`${uid}-lit`, STONE.lit, STONE.litGrout)}
+  </defs>`;
+}
+
+// 凡例の廊下も、地図と同じ「壁の帯に床が挟まる」断面で見せる。
+function hallSwatch(kind) {
+  const floor = kind === 'abandoned' ? STONE.rubble : kind === 'lit' ? STONE.lit : STONE.floor;
+  const wall = kind === 'abandoned' ? STONE.wallDim : STONE.wall;
+  return `<svg class="swatch" viewBox="0 0 24 12" width="24" height="12"
+    shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+    <rect width="24" height="12" fill="${wall}" />
+    <rect y="3" width="24" height="6" fill="${floor}" />
+    ${kind === 'lit' ? '<path d="M0 6 H24" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 6" />' : ''}
+    ${kind === 'abandoned' ? `<rect x="9" width="5" height="12" fill="${STONE.rock}" />` : ''}
+  </svg>`;
+}
+
+let mapSeq = 0;
+
 function roadMap(root) {
   const { nodes, width, height } = layoutRoad(root);
-  const parts = [];
+  const uid = `fp${(mapSeq += 1)}`;
 
-  // 通路（先に描いて部屋の下に敷く）
+  // 入口から、いちばん奥の掘削中の先端まで。灯すのはこの1本だけにする。
+  // 掘削中を全部灯すと地図が金色に埋まって、かえってどこへ向かうのか分からなくなる。
+  const frontier = nodes
+    .filter((node) => node.corridor?.mission.status === 'active')
+    .sort((a, b) => (b.depth !== a.depth ? b.depth - a.depth : a.lane - b.lane))[0];
+  const lit = new Set();
+  for (let n = frontier; n; n = n.parent) lit.add(n.id);
+
+  // 岩を彫り抜いた形に見せるため、縁 → 壁 → 床 の順で全体を重ね塗りする。
+  // 部屋と廊下の継ぎ目は、あとから塗る床が覆って自然に消える。
+  const edges = [];
+  const walls = [];
+  const floors = [];
+  const ink = [];
+  // 廊下の名前は部屋の外へ出るので、右端がどこまで伸びたかを見て図の幅を決める。
+  let reach = width - MAP.padX;
+
+  const floorOf = (id) => `url(#${uid}-${lit.has(id) ? 'lit' : 'floor'})`;
+  const band = (d, grow, paint, dash) =>
+    `<path d="${d}" fill="none" stroke="${paint}" stroke-width="${MAP.hall + grow * 2}"${
+      dash ? ` stroke-dasharray="${dash}"` : ''
+    } />`;
+  const box = (node, grow, paint) =>
+    `<rect x="${node.x - node.w / 2 - grow}" y="${node.y - node.h / 2 - grow}" width="${
+      node.w + grow * 2
+    }" height="${node.h + grow * 2}" fill="${paint}" />`;
+
+  /* 廊下 */
   for (const node of nodes) {
     if (!node.parent) continue;
-    const style = CORRIDOR_STYLE[node.kind === 'cauldron' ? 'done' : node.corridor.mission.status];
-    parts.push(
-      `<path d="${corridorPath(node.parent, node)}" fill="none" stroke="${style.stroke}"
-        stroke-width="${style.width}" ${style.dash ? `stroke-dasharray="${style.dash}"` : ''}
-        stroke-linecap="square" />`,
-    );
-    if (node.kind !== 'cauldron') {
-      // 通路の名前は縦の区間に添える
-      parts.push(
-        `<text class="map-corridor" x="${node.x + 8}" y="${node.y - 17}">${esc(
-          clip(node.corridor.mission.title, 6),
-        )}</text>`,
-      );
-      if (node.corridor.mission.is_legacy) {
-        parts.push(mapPixel('chest', node.x - 9, node.y - 24, 13));
-      }
+    const status = node.kind === 'cauldron' ? 'done' : node.corridor.mission.status;
+    const style = HALL_STYLE[status];
+    const d = hallPath(node.parent, node);
+    edges.push(band(d, MAP.wall + 1, STONE.edge, style.dash));
+    walls.push(band(d, MAP.wall, style.wall, style.dash));
+    floors.push(band(d, 0, status === 'abandoned' ? STONE.rubble : floorOf(node.id), style.dash));
+    // 灯りの道は床に金の点線を落として、目でたどれるようにする。
+    if (lit.has(node.id)) {
+      floors.push(`<path d="${d}" fill="none" stroke="var(--gold)" stroke-width="2"
+        stroke-dasharray="4 4" />`);
     }
+
+    if (node.kind === 'cauldron') continue;
+
+    // 廊下の名前は、行き着く部屋のすぐ上、縦に降りてくる区間の脇に置く。
+    // 部屋ごとに札の位置が決まるので、枝が増えても札同士がぶつからない。
+    const lx = node.x + MAP.hall / 2 + MAP.wall + 7;
+    const ly = node.y - node.h / 2 - 8;
+    const label = clip(node.corridor.mission.title, 7);
+    reach = Math.max(reach, lx + label.length * 9.2);
+    ink.push(
+      `<text class="map-corridor${status === 'active' ? ' is-active' : ''}" x="${lx}" y="${ly}">${esc(
+        label,
+      )}</text>`,
+    );
+    if (node.corridor.mission.is_legacy) ink.push(mapPixel('chest', lx - 11, ly - 4, 12));
   }
 
-  // 部屋・大釜・行き止まり
+  /* 部屋・大釜の間・行き止まり */
   for (const node of nodes) {
+    const left = node.x - node.w / 2;
+    const top = node.y - node.h / 2;
+
+    if (node.kind === 'dead') {
+      const digging = node.corridor.mission.status === 'active';
+      edges.push(box(node, MAP.wall + 1, STONE.edge));
+      walls.push(box(node, MAP.wall, digging ? STONE.wall : STONE.wallDim));
+      floors.push(box(node, 0, digging ? floorOf(node.id) : STONE.rubble));
+      ink.push(
+        `<text class="map-dead${digging ? ' is-active' : ''}" x="${node.x}" y="${
+          node.y + 4
+        }" text-anchor="middle">${digging ? '掘削中' : '崩落'}</text>`,
+      );
+      continue;
+    }
+
+    edges.push(box(node, MAP.wall + 1, STONE.edge));
+    walls.push(box(node, MAP.wall, STONE.wall));
+    floors.push(box(node, 0, floorOf(node.id)));
+
     if (node.kind === 'cauldron') {
-      parts.push(
-        mapPixel('cauldron', node.x, node.y, MAP.icon),
-        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y}">${esc(
-          clip(node.cauldron.title, 5),
+      floors.push(`<rect x="${left}" y="${top}" width="3" height="${node.h}"
+        fill="var(--green)" />`);
+      ink.push(
+        mapPixel('cauldron', left + 18, node.y, MAP.icon),
+        `<text class="map-room" x="${left + 30}" y="${node.y - 2}">${esc(
+          clip(node.cauldron.title, 7),
         )}</text>`,
-        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y + 11}">${node.done}/${
+        `<text class="map-cauldron" x="${left + 30}" y="${node.y + 11}">${node.done}/${
           node.needed
         } ${node.cauldron.complete ? '錬成完了' : '錬成中'}</text>`,
       );
       continue;
     }
 
-    if (node.kind === 'dead') {
-      const digging = node.corridor.mission.status === 'active';
-      parts.push(
-        `<circle cx="${node.x}" cy="${node.y}" r="6" fill="#120e06"
-          stroke="${digging ? '#e0aa3c' : '#5b4a2c'}" stroke-width="2"
-          stroke-dasharray="3 3" />`,
-        `<text class="map-dead" x="${node.x + 12}" y="${node.y + 4}">${
-          digging ? '掘削中' : '崩落'
-        }</text>`,
-      );
-      continue;
-    }
-
     const room = node.room;
+    floors.push(`<rect x="${left}" y="${top}" width="3" height="${node.h}"
+      fill="${ROOM_ACCENT[room.type] ?? STONE.wall}" />`);
     if (room.is_legacy) {
-      parts.push(
-        `<circle cx="${node.x}" cy="${node.y}" r="15" fill="rgba(224,170,60,.14)"
-          stroke="#a97c22" stroke-width="1" />`,
-      );
+      floors.push(`<rect x="${left + 2}" y="${top + 2}" width="${node.w - 4}" height="${
+        node.h - 4
+      }" fill="none" stroke="var(--gold-dark)" stroke-width="1" />`);
     }
-    parts.push(
-      `<a href="#/${room.type}/${room.id}">`,
-      mapPixel(KIND_ICON[room.type], node.x, node.y, MAP.icon),
-      `<text class="map-room" x="${node.x + 13}" y="${node.y + 4}">${esc(
-        clip(room.title, 7),
+    ink.push(
+      `<a href="#/${room.type}/${room.id}" class="map-door">`,
+      mapPixel(KIND_ICON[room.type], left + 18, node.y, MAP.icon),
+      `<text class="map-room" x="${left + 30}" y="${node.y + 4}">${esc(
+        clip(room.title, room.is_legacy ? 7 : 8),
       )}</text>`,
       '</a>',
     );
-    if (room.is_legacy) parts.push(mapPixel('chest', node.x + 11, node.y - 11, 13));
+    // 宝箱は右端の中ほど。上隅に置くと題字の並びに掛かる。
+    if (room.is_legacy) ink.push(mapPixel('chest', left + node.w - 11, node.y, 12));
   }
 
+  /* 入口の階段 */
+  const entry = nodes.find((node) => !node.parent);
+  const mouth = entry.y - entry.h / 2;
+  const stair = `M ${entry.x} ${mouth - 24} V ${mouth}`;
+  edges.push(band(stair, MAP.wall + 1, STONE.edge));
+  walls.push(band(stair, MAP.wall, STONE.wall));
+  floors.push(band(stair, 0, `url(#${uid}-lit)`));
+  for (let step = 0; step < 3; step += 1) {
+    const y = mouth - 20 + step * 6;
+    ink.push(`<path d="M ${entry.x - MAP.hall / 2} ${y} H ${entry.x + MAP.hall / 2}"
+      stroke="${STONE.litGrout}" stroke-width="2" />`);
+  }
+  ink.push(
+    `<text class="map-entry" x="${entry.x + MAP.hall / 2 + MAP.wall + 7}" y="${mouth - 11}">入口</text>`,
+  );
+
+  const w = Math.ceil(Math.max(width, reach + MAP.padX));
   return `
     <div class="map-scroll">
-      <svg class="map" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"
-           role="img" aria-label="${esc(root.title)} の道">${parts.join('')}</svg>
+      <svg class="map" viewBox="0 0 ${w} ${height}" width="${w}" height="${height}"
+           shape-rendering="crispEdges" role="img" aria-label="${esc(root.title)} の平面図">
+        ${flagstones(uid)}${edges.join('')}${walls.join('')}${floors.join('')}${ink.join('')}
+      </svg>
     </div>
   `;
 }
@@ -2498,11 +2641,12 @@ async function renderDungeon() {
     </div>
 
     <div class="map-legend">
-      <span>${icon('stone')}アイデア</span>
-      <span>${icon('footsteps')}ログ</span>
-      <span><i class="rule done"></i>通った道</span>
-      <span><i class="rule active"></i>掘削中</span>
-      <span><i class="rule abandoned"></i>崩落</span>
+      <span>${icon('stone')}アイデアの部屋</span>
+      <span>${icon('footsteps')}ログの部屋</span>
+      <span>${icon('cauldron')}大釜の間</span>
+      <span>${hallSwatch('done')}通った廊下</span>
+      <span>${hallSwatch('lit')}灯りの道</span>
+      <span>${hallSwatch('abandoned')}崩落</span>
       <span>${icon('chest')}宝箱</span>
     </div>
 
