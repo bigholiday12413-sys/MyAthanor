@@ -1657,6 +1657,59 @@ a.room-title {
   color: var(--gold);
 }
 
+/* 書き留めたものの控え。閉じるまで積み上がる。 */
+.caught {
+  max-height: 34dvh;
+  margin-top: 4px;
+  overflow-y: auto;
+  border-top: 1px dotted var(--line-soft);
+}
+
+.caught[hidden] {
+  display: none;
+}
+
+.caught-head {
+  padding: 9px 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+.caught-head b {
+  font-weight: 400;
+  color: var(--gold);
+}
+
+.caught-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 14px;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--line-soft);
+}
+
+.caught-row:last-child {
+  border-bottom: none;
+}
+
+.caught-row .px {
+  width: 15px;
+  height: 15px;
+}
+
+.caught-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .seg-toggle {
   display: flex;
   gap: 6px;

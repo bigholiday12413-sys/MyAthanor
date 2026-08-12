@@ -492,7 +492,6 @@ async function renderStream() {
         : ''
     }
     ${body}
-    <button class="fab" id="fab" aria-label="新規追加">${icon('plus')}</button>
   `;
 
   for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
@@ -513,7 +512,6 @@ async function renderStream() {
       renderStream();
     });
   }
-  document.getElementById('fab').addEventListener('click', openNewEntryModal);
 }
 
 function streamCard(item) {
@@ -585,61 +583,130 @@ function groupedByTag(items) {
     .join('');
 }
 
-function openNewEntryModal() {
-  let kind = 'idea';
+/* 思いついた時点では、種別も詳細もまだ決まっていないことが多い。
+   ここでは題だけを受け取り、入れても閉じずに次を待つ。
+   詳細は後からストリームで開いて足せばよい。 */
+
+// 続けて書くときは種別が変わらないことがほとんどなので、前に選んだものを覚えておく。
+let captureKind = 'idea';
+
+function openCapture() {
+  if (document.querySelector('.modal-backdrop')) return;
+
+  const caught = [];
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
-    <form class="modal" id="new-entry">
-      <h2>新規追加</h2>
+    <form class="modal" id="capture">
+      <h2>書き留める</h2>
       <div class="field">
-        <label>種別</label>
         <div class="seg-toggle" id="kind-toggle">
-          <button type="button" data-kind="idea" aria-pressed="true">${icon('stone')}アイデア</button>
-          <button type="button" data-kind="log" aria-pressed="false">${icon('footsteps')}ログ</button>
+          <button type="button" data-kind="idea"
+            aria-pressed="${captureKind === 'idea'}">${icon('stone')}アイデア</button>
+          <button type="button" data-kind="log"
+            aria-pressed="${captureKind === 'log'}">${icon('footsteps')}ログ</button>
         </div>
       </div>
       <div class="field">
-        <label for="entry-title">テキスト</label>
-        <input id="entry-title" autocomplete="off" placeholder="したいこと／起きたこと" />
+        <input id="capture-title" autocomplete="off" enterkeyhint="done"
+          placeholder="したいこと／起きたこと" />
+        <div class="hint">題だけで構いません。入れても閉じないので続けて書けます。
+          複数行を貼れば1行ずつ入ります。</div>
       </div>
+      <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
-        <button type="button" class="ghost" data-close>キャンセル</button>
-        <button type="submit" class="primary">追加</button>
+        <button type="button" class="ghost" data-close>閉じる</button>
+        <button type="submit" class="primary">入れる</button>
       </div>
     </form>
   `;
   document.body.appendChild(backdrop);
 
-  const input = backdrop.querySelector('#entry-title');
+  const input = backdrop.querySelector('#capture-title');
+  const caughtEl = backdrop.querySelector('#caught');
   input.focus();
 
-  const close = () => backdrop.remove();
+  // 入れたものがあれば、閉じたときに下の画面へ反映する。
+  const close = () => {
+    backdrop.remove();
+    if (caught.length) route();
+  };
+
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop || event.target.hasAttribute('data-close')) close();
+  });
+
+  backdrop.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
   });
 
   backdrop.querySelector('#kind-toggle').addEventListener('click', (event) => {
     const button = event.target.closest('button[data-kind]');
     if (!button) return;
-    kind = button.dataset.kind;
+    captureKind = button.dataset.kind;
     for (const b of backdrop.querySelectorAll('#kind-toggle button')) {
-      b.setAttribute('aria-pressed', String(b.dataset.kind === kind));
+      b.setAttribute('aria-pressed', String(b.dataset.kind === captureKind));
     }
+    input.focus();
   });
 
-  backdrop.querySelector('#new-entry').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const title = input.value.trim();
-    if (!title) return input.focus();
-    try {
-      const created = await api('/entries', { method: 'POST', body: { kind, title } });
-      close();
-      toast(`${KIND_LABEL[kind]}を追加しました`);
-      location.hash = `#/${kind}/${created.id}`;
-    } catch (err) {
-      toast(err.message, true);
+  // 入れたものを新しい順に控える。題を押せばその場で詳細へ行ける。
+  function paintCaught() {
+    caughtEl.hidden = caught.length === 0;
+    caughtEl.innerHTML = `
+      <div class="caught-head">入れたもの <b>${caught.length}</b></div>
+      ${caught
+        .map(
+          (item) => `<a class="caught-row" href="#/${item.kind}/${item.id}">
+            ${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span>
+          </a>`,
+        )
+        .join('')}
+    `;
+  }
+
+  // 1行につき1つとして入れる。
+  async function put(raw) {
+    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) return input.focus();
+
+    // 打ち終えた文字はすぐ引き取る。保存を待たせると次が打てない。
+    input.value = '';
+    input.focus();
+    const kind = captureKind;
+
+    for (const title of lines) {
+      try {
+        const created = await api('/entries', { method: 'POST', body: { kind, title } });
+        caught.unshift({ kind, id: created.id, title });
+      } catch (err) {
+        toast(err.message, true);
+      }
     }
+    paintCaught();
+  }
+
+  // 変換の確定で送ってしまうと、打ちかけの文字が入る。変換中は受け取らない。
+  let composing = false;
+  input.addEventListener('compositionstart', () => {
+    composing = true;
+  });
+  input.addEventListener('compositionend', () => {
+    composing = false;
+  });
+
+  // 1行の入力欄は改行を持てないので、複数行の貼り付けはここで受けて割る。
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData?.getData('text') ?? '';
+    if (!/[\r\n]/.test(text)) return;
+    event.preventDefault();
+    put(text);
+  });
+
+  backdrop.querySelector('#capture').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (composing) return;
+    put(input.value);
   });
 }
 
@@ -2823,6 +2890,20 @@ window.addEventListener('keydown', (event) => {
   if (event.target.closest('input, textarea, select')) return;
   if (event.key === 'ArrowRight') goToPage(page + 1);
   if (event.key === 'ArrowLeft') goToPage(page - 1);
+});
+
+/* 書き留めるボタンはシェルに置く。思いつくのはどの画面を見ている時でも同じなので、
+   ストリームまで移動してから、では間に合わない。 */
+const fabEl = document.getElementById('fab');
+fabEl.innerHTML = icon('plus');
+fabEl.addEventListener('click', openCapture);
+
+// 物理キーボードがあるときは n でも開く。文字を打っている最中は邪魔しない。
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'n' || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest('input, textarea, select')) return;
+  event.preventDefault();
+  openCapture();
 });
 
 /* ---------- ルーティング ---------- */
