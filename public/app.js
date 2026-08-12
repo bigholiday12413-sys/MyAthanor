@@ -2728,10 +2728,108 @@ async function renderDungeon() {
   wireLegacy(viewEl, renderDungeon);
 }
 
+/* ---------- ページ送り ----------
+
+   縦に流さず、1画面ぶんずつ横へ送る。中身は #view の段組みに流し込むので、
+   各画面の描画側には手を入れずに済む。段の送りは scrollLeft でやる。
+   overflow:hidden でも JS からの代入は効くので、指では動かないまま送れる。 */
+
+const pagerEl = document.getElementById('pager');
+const pageCountEl = document.getElementById('page-count');
+const prevEl = document.getElementById('page-prev');
+const nextEl = document.getElementById('page-next');
+
+let page = 0;
+let pageTotal = 1;
+
+function pageMetrics() {
+  const style = getComputedStyle(viewEl);
+  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const gap = parseFloat(style.columnGap) || 0;
+  const width = Math.max(1, viewEl.clientWidth - padX);
+  return { width, gap, step: width + gap, padX };
+}
+
+function goToPage(next) {
+  const { step } = pageMetrics();
+  page = Math.min(Math.max(next, 0), pageTotal - 1);
+  viewEl.scrollLeft = page * step;
+  pageCountEl.textContent = `${page + 1} / ${pageTotal}`;
+  prevEl.disabled = page === 0;
+  nextEl.disabled = page === pageTotal - 1;
+}
+
+// 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
+let toFirstPage = true;
+
+// 中身が変わるたびに、何ページに割れたかを測り直す。
+function refitPages() {
+  const { width, gap, step, padX } = pageMetrics();
+  viewEl.style.columnWidth = `${width}px`;
+  const flowed = Math.max(0, viewEl.scrollWidth - padX);
+  const total = Math.max(1, Math.round((flowed + gap) / step));
+  const split = total !== pageTotal;
+
+  pageTotal = total;
+  pagerEl.hidden = pageTotal < 2;
+  document.body.classList.toggle('is-paged', pageTotal > 1);
+  goToPage(toFirstPage || split ? 0 : page);
+  toFirstPage = false;
+}
+
+let refitTimer = null;
+let settleTimer = null;
+function scheduleRefit() {
+  cancelAnimationFrame(refitTimer);
+  refitTimer = requestAnimationFrame(refitPages);
+  // 図版や書体が遅れて寸法を決めることがある。落ち着いた頃にもう一度だけ測る。
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(refitPages, 250);
+}
+
+prevEl.addEventListener('click', () => goToPage(page - 1));
+nextEl.addEventListener('click', () => goToPage(page + 1));
+
+// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て測り直す。
+new MutationObserver(scheduleRefit).observe(viewEl, { childList: true, subtree: true });
+window.addEventListener('resize', scheduleRefit);
+
+/* 指で横に払ってもページを送る。
+   地図・時間の表・文字入力の中では、そちらの操作を邪魔しないよう手を出さない。 */
+const KEEPS_TOUCH = '.map-scroll, .tg, input, textarea, select, .tag-bar, .filters';
+let swipe = null;
+
+viewEl.addEventListener('pointerdown', (event) => {
+  if (event.target.closest(KEEPS_TOUCH)) return;
+  swipe = { x: event.clientX, y: event.clientY };
+});
+
+viewEl.addEventListener('pointerup', (event) => {
+  if (!swipe) return;
+  const dx = event.clientX - swipe.x;
+  const dy = event.clientY - swipe.y;
+  swipe = null;
+  // 横に払ったときだけ。縦の動きが勝っていれば、ただの押し損ねとみなす。
+  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  goToPage(page + (dx < 0 ? 1 : -1));
+});
+
+viewEl.addEventListener('pointercancel', () => {
+  swipe = null;
+});
+
+// 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
+window.addEventListener('keydown', (event) => {
+  if (event.target.closest('input, textarea, select')) return;
+  if (event.key === 'ArrowRight') goToPage(page + 1);
+  if (event.key === 'ArrowLeft') goToPage(page - 1);
+});
+
 /* ---------- ルーティング ---------- */
 
 async function route() {
   const hash = location.hash.replace(/^#/, '') || '/home';
+  toFirstPage = true;
   try {
     let match;
     if (hash === '/home') return await renderHome();

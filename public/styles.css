@@ -57,11 +57,15 @@
   box-sizing: border-box;
 }
 
+/* 画面はめくるもので、流すものではない。ページ自体は動かさず、
+   中身を1画面ぶんずつ横に送る。だから縦スクロールは根元で止めておく。 */
 html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -92,7 +96,7 @@ body::after {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100dvh;
   max-width: 720px;
   margin: 0 auto;
 }
@@ -167,10 +171,47 @@ body::after {
 
 /* ---------- view ---------- */
 
+/* 中身は段組みに流し込む。1段＝1画面なので、各画面のマークアップには手を入れずに
+   ページが割れる。送りは scrollLeft で行う（overflow:hidden でも JS からは動く）。 */
 .view {
   flex: 1;
+  min-height: 0;
   padding: var(--pad);
-  padding-bottom: 100px;
+  overflow: hidden;
+  column-gap: calc(var(--pad) * 2);
+  column-fill: auto;
+}
+
+/* 枠のあるものはページの境で割らない。断ち切られると別物に見えてしまう。
+   ただし大釜のように1画面近い高さになりうる容器まで割らないと、
+   入りきらないぶんが丸ごと次ページへ送られて、前のページが白く空く。
+   そういう容器は割れるようにしておき、枠は割れた先にも引き直す。 */
+.card,
+.panel,
+.region,
+.map-legend,
+.tubes,
+.tg,
+.vault-row,
+.material,
+.budget-row,
+.occurrence-row,
+.stat-line,
+.filters,
+.tag-bar {
+  break-inside: avoid;
+}
+
+.cauldron,
+.floor,
+.list {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* 見出しだけが前のページに取り残されないようにする。 */
+.section-title {
+  break-after: avoid;
 }
 
 .section-title {
@@ -1147,9 +1188,12 @@ input[type='range']::-moz-range-thumb {
 
 /* 地図は横に伸びるので、区画の中だけで横スクロールさせる。
    背景は手つかずの岩。ここを一番暗くしないと、彫り抜いた床が沈んで見える。 */
+/* 地図だけは枠の中で動かす。ページを割ると道が断ち切れて読めなくなるので、
+   1枚の紙に載せたまま、覗き窓を動かして見る。 */
 .map-scroll {
-  overflow-x: auto;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
+  max-height: min(340px, 38dvh);
   margin: 2px 0 0;
   padding: 0;
   background: #100b05;
@@ -1553,7 +1597,7 @@ a.room-title {
 .fab {
   position: fixed;
   right: max(16px, calc(50vw - 344px));
-  bottom: calc(80px + env(safe-area-inset-bottom));
+  bottom: calc(70px + env(safe-area-inset-bottom));
   z-index: 20;
   display: flex;
   align-items: center;
@@ -1594,6 +1638,8 @@ a.room-title {
 .modal {
   width: 100%;
   max-width: 720px;
+  max-height: 88dvh;
+  overflow-y: auto;
   padding: 18px var(--pad);
   padding-bottom: calc(18px + env(safe-area-inset-bottom));
   background: var(--surface);
@@ -1637,11 +1683,9 @@ a.room-title {
 
 /* ---------- タブ ---------- */
 
+/* シェルは flex の柱なので、タブはもう浮かせない。下端に居座るだけでよい。 */
 .tabs {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  flex: none;
   z-index: 30;
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
@@ -1700,6 +1744,46 @@ a.room-title {
   opacity: 1;
 }
 
+/* ---------- ページ送り ---------- */
+
+.pager {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 5px var(--pad);
+  background: #1b1308;
+  border-top: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--gold-deep);
+}
+
+.pager[hidden] {
+  display: none;
+}
+
+.pager-arrow {
+  width: 46px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.pager-arrow:disabled {
+  color: var(--line);
+  border-color: var(--line-soft);
+  background: #191106;
+}
+
+.pager-count {
+  min-width: 58px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  text-align: center;
+}
+
 /* ---------- その他 ---------- */
 
 .link {
@@ -1710,9 +1794,15 @@ a.room-title {
   border-bottom: 1px dotted var(--gold-dark);
 }
 
+/* ページ送りが出ているぶんだけ、下に浮かせているものを持ち上げる。 */
+body.is-paged .fab,
+body.is-paged .toast {
+  bottom: calc(102px + env(safe-area-inset-bottom));
+}
+
 .toast {
   position: fixed;
-  bottom: calc(92px + env(safe-area-inset-bottom));
+  bottom: calc(70px + env(safe-area-inset-bottom));
   left: 50%;
   z-index: 50;
   max-width: 90vw;
