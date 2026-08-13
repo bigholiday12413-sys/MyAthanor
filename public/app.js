@@ -414,7 +414,6 @@ async function renderHome() {
                  fmtMoney(summary.undated.money),
                )}</span>
              </div>
-             <div class="hint">試験管には乗っていません。期限を入れると今週／今月に算入されます。</div>
            </div>`
         : ''
     }
@@ -459,7 +458,7 @@ async function renderStream() {
       : `<div class="list">${
           items.length
             ? items.map(streamCard).join('')
-            : '<div class="empty">まだ記録がありません。＋から追加してください。</div>'
+            : '<div class="empty">まだ記録がありません</div>'
         }</div>`;
 
   viewEl.innerHTML = `
@@ -570,7 +569,7 @@ function groupedByTag(items) {
 
   const sections = [...groups.values()].sort((a, b) => b.items.length - a.items.length);
   if (untagged.length) sections.push({ name: '未分類', items: untagged });
-  if (sections.length === 0) return '<div class="empty">まだ記録がありません。</div>';
+  if (sections.length === 0) return '<div class="empty">まだ記録がありません</div>';
 
   return sections
     .map(
@@ -610,8 +609,6 @@ function openCapture() {
       <div class="field">
         <input id="capture-title" autocomplete="off" enterkeyhint="done"
           placeholder="したいこと／起きたこと" />
-        <div class="hint">題だけで構いません。入れても閉じないので続けて書けます。
-          複数行を貼れば1行ずつ入ります。</div>
       </div>
       <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
@@ -1358,15 +1355,13 @@ async function renderSettings() {
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
-      <div class="hint">
-        空いている時間を指でなぞって塗ります。塗ったマスの数がそのまま週の可処分タイムになります。${
-          settings.time_grid || !settings.weekly_time
-            ? ''
-            : `<br />いまは ${esc(
-                fmtTime(settings.weekly_time),
-              )}／週（数値で設定）。表を保存すると置き換わります。`
-        }
-      </div>
+      ${
+        settings.time_grid || !settings.weekly_time
+          ? ''
+          : `<div class="hint">いまは ${esc(
+              fmtTime(settings.weekly_time),
+            )}／週（数値で設定）。保存すると置き換わります。</div>`
+      }
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
@@ -1376,7 +1371,6 @@ async function renderSettings() {
         <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
       </div>
-      <div class="hint">個別設定のない月に使います。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -1387,7 +1381,7 @@ async function renderSettings() {
         <input id="half-life" type="number" step="1" min="0"
                value="${settings.cooling_half_life_days}" />
       </div>
-      <div class="hint">この日数ごとに熱が半分になります。0 で冷めません。</div>
+      <div class="hint">0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -1649,7 +1643,7 @@ async function renderRecurrences() {
     <div class="section-title">新しく登録</div>
     <form class="panel" id="recurrence-new">
       ${recurrenceFields()}
-      <div class="hint">開始日から今日までのぶんは登録時にログになります。</div>
+      <div class="hint">開始日から今日までのぶんはログになります。</div>
       <div class="btn-row"><button type="submit" class="primary">登録</button></div>
     </form>
   `;
@@ -1734,7 +1728,6 @@ async function renderRecurrence(recurrenceId) {
       <div class="btn-row">
         <button type="button" class="ghost danger" id="delete-recurrence">この定期イベントを削除</button>
       </div>
-      <div class="hint">生成済みのログは残ります。</div>
     </form>
 
     <div class="section-title">直近の回</div>
@@ -1887,7 +1880,7 @@ async function renderSpells() {
         </a>`,
               )
               .join('')
-          : '<div class="empty">まだ何も書かれていません。</div>'
+          : '<div class="empty">まだ何も書かれていません</div>'
       }
     </div>
   `;
@@ -2119,7 +2112,6 @@ async function renderVault() {
       <div class="field">
         <input id="vault-initial" type="number" step="1000" value="${vault.initial}" />
       </div>
-      <div class="hint">使い始める前から持っていたぶん。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
@@ -2144,9 +2136,8 @@ async function renderVault() {
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだ終わった月がありません。</div>'
+        : '<div class="empty">まだ終わった月がありません</div>'
     }
-    <div class="hint">使いすぎた月はその分だけ目減りします。</div>
   `;
 
   document.getElementById('vault-form').addEventListener('submit', async (event) => {
@@ -2288,9 +2279,8 @@ async function renderTags() {
               )
               .join('')}
             <div class="btn-row"><button type="submit" class="primary">名前を保存</button></div>
-            <div class="hint">削除してもタグが外れるだけで、項目は残ります。</div>
           </form>`
-        : '<div class="empty">タグはまだありません。<br />アイデアやログの詳細から付けられます。</div>'
+        : '<div class="empty">タグはまだありません</div>'
     }
   `;
 
@@ -2707,15 +2697,18 @@ async function renderDungeon() {
       }">宝箱のある道</button>
     </div>
 
-    <div class="map-legend">
-      <span>${icon('stone')}アイデアの部屋</span>
-      <span>${icon('footsteps')}ログの部屋</span>
-      <span>${icon('cauldron')}大釜の間</span>
-      <span>${hallSwatch('done')}通った廊下</span>
-      <span>${hallSwatch('lit')}灯りの道</span>
-      <span>${hallSwatch('abandoned')}崩落</span>
-      <span>${icon('chest')}宝箱</span>
-    </div>
+    <details class="optional">
+      <summary>凡例</summary>
+      <div class="map-legend">
+        <span>${icon('stone')}アイデアの部屋</span>
+        <span>${icon('footsteps')}ログの部屋</span>
+        <span>${icon('cauldron')}大釜の間</span>
+        <span>${hallSwatch('done')}通った廊下</span>
+        <span>${hallSwatch('lit')}灯りの道</span>
+        <span>${hallSwatch('abandoned')}崩落</span>
+        <span>${icon('chest')}宝箱</span>
+      </div>
+    </details>
 
     ${
       regions.length
@@ -2782,7 +2775,7 @@ async function renderDungeon() {
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだ宝箱はありません。<br />ログや完了したミッションから、得たものが大きかったと思うものを選んでください。</div>'
+        : '<div class="empty">まだ宝箱はありません</div>'
     }
   `;
 
