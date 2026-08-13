@@ -1289,17 +1289,15 @@ input[type='range']::-moz-range-thumb {
   color: var(--gold);
 }
 
-/* 地図は横に伸びるので、区画の中だけで横スクロールさせる。
-   背景は手つかずの岩。ここを一番暗くしないと、彫り抜いた床が沈んで見える。 */
-/* 地図だけは枠の中で動かす。ページを割ると道が断ち切れて読めなくなるので、
-   1枚の紙に載せたまま、覗き窓を動かして見る。 */
+/* 盤は画面より大きくなるので、区画の中だけで動かす。
+   地はいちばん暗くしておく。節と軌道の光がここに乗る。 */
 .map-scroll {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  max-height: min(340px, 38dvh);
+  max-height: min(360px, 42dvh);
   margin: 2px 0 0;
   padding: 0;
-  background: #100b05;
+  background: #080502;
   border-top: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
 }
@@ -1322,17 +1320,22 @@ input[type='range']::-moz-range-thumb {
   fill: var(--text);
 }
 
-.map-room {
+/* 節の名。中心から外へ向けて置く。 */
+.map-node {
   font-size: 10px;
 }
 
-.map-corridor {
+.map-node.is-legacy {
+  fill: var(--gold);
+}
+
+/* 軌道の名。節より一段落とす。 */
+.map-track {
   font-size: 9px;
   fill: var(--dim);
 }
 
-/* 掘削中の廊下だけ、名前も灯りの色で拾う。 */
-.map-corridor.is-active {
+.map-track.is-active {
   fill: var(--gold);
 }
 
@@ -1350,17 +1353,8 @@ input[type='range']::-moz-range-thumb {
   fill: var(--gold);
 }
 
-.map-entry {
-  font-size: 9px;
-  fill: var(--gold-dark);
-}
-
-.map-door text {
-  fill: var(--text);
-}
-
-.map-door:active text {
-  fill: var(--gold);
+.map-door:active .px {
+  opacity: 0.6;
 }
 
 .map-legend {
@@ -1372,7 +1366,7 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
-  background: #1d1509;
+  background: #120c05;
   border: 1px solid var(--edge);
   border-radius: 2px;
   box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.12);
@@ -1393,6 +1387,11 @@ input[type='range']::-moz-range-thumb {
   flex: none;
   width: 24px;
   height: 12px;
+}
+
+.map-legend .swatch-node {
+  width: 22px;
+  height: 22px;
 }
 
 /* ---------- 大釜 ---------- */
