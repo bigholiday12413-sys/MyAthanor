@@ -1,6 +1,108 @@
 /* MyAthanor — 中世ファンタジー調のUI。
    緑（薬草）・茶（革と木）・黄金（金貨）を基調に、絵情報はドット絵で持つ。 */
 
+/* ---------- 書体 ----------
+
+   Kaisei Opti。元の TTF は1つ4MB超あるので、WOFF2 に詰め直したうえで
+   符号位置で切り分けてある（scripts/build-fonts.py）。
+   ふだんの画面は base だけで足りて、漢字は書いた字に当たったぶんだけ落ちてくる。
+
+   積んであるのは Regular(400) と Bold(700) だけ。CSS に出てくる太さがこの2つで、
+   Medium(500) は 15px では Regular と見分けが付かなかったため入れていない。
+   swap を指定してあるので、届くまではシステムの明朝で読める。 */
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-400-base.woff2") format("woff2");
+  unicode-range: U+0-2FFF, U+3000-30FF, U+3100-4DFF, U+A000-FEFF, U+FF00-FFEF,
+    U+2F800-2FA1F;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-400-kanji1.woff2") format("woff2");
+  unicode-range: U+4E00-5FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-400-kanji2.woff2") format("woff2");
+  unicode-range: U+6000-6FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-400-kanji3.woff2") format("woff2");
+  unicode-range: U+7000-7FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-400-kanji4.woff2") format("woff2");
+  unicode-range: U+8000-9FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-700-base.woff2") format("woff2");
+  unicode-range: U+0-2FFF, U+3000-30FF, U+3100-4DFF, U+A000-FEFF, U+FF00-FFEF,
+    U+2F800-2FA1F;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-700-kanji1.woff2") format("woff2");
+  unicode-range: U+4E00-5FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-700-kanji2.woff2") format("woff2");
+  unicode-range: U+6000-6FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-700-kanji3.woff2") format("woff2");
+  unicode-range: U+7000-7FFF;
+}
+
+@font-face {
+  font-family: "Kaisei Opti";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/kaisei-opti-700-kanji4.woff2") format("woff2");
+  unicode-range: U+8000-9FFF;
+}
+
 :root {
   /* 夜の深さ。面は暗く沈め、パネルだけを灯りの下に置く。 */
   --bg: #0d0904;
@@ -30,15 +132,16 @@
   --stone: #8d8f7a;
   --trail: #c9b68d;
 
-  /* 和文書体を先頭に置く。欧文だけ西洋書体になると翻訳物のように見えるため、
-     見出し・本文とも日本語の書体で拾わせ、欧文はその書体の欧文字面を使う。
+  /* 見出しも本文も Kaisei Opti で拾う。
+     後ろに積んだ和文書体は、書体が届くまでのあいだと、字が欠けたときの受け皿。
+     欧文だけ西洋書体になると翻訳物のように見えるので、和文を先頭に置く。
      iOS/macOS＝ヒラギノ、Windows＝游書体／BIZ UD、Android＝Noto（源ノ）。
      末尾の IPA は Linux 向けの保険。総称に落ちると中国語の書体が当たるため。 */
-  --serif: "Hiragino Mincho ProN", "Hiragino Mincho Pro", "Yu Mincho", YuMincho,
-    "BIZ UDPMincho", "Noto Serif JP", "Noto Serif CJK JP", "Source Han Serif JP",
+  --serif: "Kaisei Opti", "Hiragino Mincho ProN", "Hiragino Mincho Pro", "Yu Mincho",
+    YuMincho, "BIZ UDPMincho", "Noto Serif JP", "Noto Serif CJK JP", "Source Han Serif JP",
     "IPAexMincho", "IPAPMincho", "IPAPGothic", serif;
-  --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", YuGothic,
-    "BIZ UDPGothic", "Noto Sans JP", "Noto Sans CJK JP", "Source Han Sans JP",
+  --sans: "Kaisei Opti", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic",
+    YuGothic, "BIZ UDPGothic", "Noto Sans JP", "Noto Sans CJK JP", "Source Han Sans JP",
     "IPAexGothic", "IPAPGothic", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Roboto Mono",
     "Hiragino Sans", "Yu Gothic", "BIZ UDGothic", "Noto Sans JP", "IPAGothic", monospace;

@@ -20,6 +20,9 @@ for (const file of ['app.js', 'icons.js', 'styles.css']) {
   await cp(join(root, 'public', file), join(site, file));
 }
 
+/* 書体。styles.css からは相対で引いているので、同じ並びのまま置く。 */
+await cp(join(root, 'public', 'fonts'), join(site, 'fonts'), { recursive: true });
+
 /* サーバ側のロジック。db.js だけは持っていかない。 */
 for (const file of ['store.js', 'routes.js', 'period.js', 'schema.js']) {
   await cp(join(root, 'src', file), join(site, 'src', file));
