@@ -1064,6 +1064,47 @@ async function renderEntry(kind, entryId) {
     : entry.missions;
 
   viewEl.innerHTML = `
+    ${/* いちばん使うのはミッションを足すこと。1ページ目に置く。 */ ''}
+    <div class="section-title">ミッションを追加</div>
+    <form class="panel" id="mission-form">
+      <div class="field">
+        <input id="m-title" autocomplete="off" placeholder="切り出すミッション" />
+      </div>
+      <details class="optional">
+        <summary>見積と日付</summary>
+        <div class="row">
+          <div class="field">
+            <label for="m-time">タイム（時間）</label>
+            <input id="m-time" type="number" step="0.25" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="m-money">ウォレット（円）</label>
+            <input id="m-money" type="number" step="1" min="0" value="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="m-from">いつから</label>
+            <input id="m-from" type="date" />
+          </div>
+          <div class="field">
+            <label for="m-to">いつまで</label>
+            <input id="m-to" type="date" />
+          </div>
+        </div>
+      </details>
+      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
+    </form>
+
+    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
+    <div class="list" id="entry-missions">
+      ${
+        loose.length
+          ? loose.map((m) => missionCard(m, { showSource: false })).join('')
+          : '<div class="empty">ミッションはありません</div>'
+      }
+    </div>
+
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
     <form class="panel" id="entry-form">
       <div class="field">
@@ -1149,15 +1190,6 @@ async function renderEntry(kind, entryId) {
         : ''
     }
 
-    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
-    <div class="list" id="entry-missions">
-      ${
-        loose.length
-          ? loose.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">ミッションはありません</div>'
-      }
-    </div>
-
     ${SHOW.temperature && kind === 'idea' ? temperaturePanel(entry) : ''}
 
     <div class="section-title">タグ</div>
@@ -1183,36 +1215,6 @@ async function renderEntry(kind, entryId) {
       </datalist>
     </form>
 
-    <div class="section-title">ミッションを追加</div>
-    <form class="panel" id="mission-form">
-      <div class="field">
-        <input id="m-title" autocomplete="off" placeholder="切り出すミッション" />
-      </div>
-      <details class="optional">
-        <summary>見積と日付</summary>
-        <div class="row">
-          <div class="field">
-            <label for="m-time">タイム（時間）</label>
-            <input id="m-time" type="number" step="0.25" min="0" value="0" />
-          </div>
-          <div class="field">
-            <label for="m-money">ウォレット（円）</label>
-            <input id="m-money" type="number" step="1" min="0" value="0" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="m-from">いつから</label>
-            <input id="m-from" type="date" />
-          </div>
-          <div class="field">
-            <label for="m-to">いつまで</label>
-            <input id="m-to" type="date" />
-          </div>
-        </div>
-      </details>
-      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
-    </form>
   `;
 
   const goodsToggle = document.getElementById('goods-toggle');
