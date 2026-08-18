@@ -32,10 +32,10 @@ jobs:
 
       - run: npm run build:demo
 
-      # Pages がまだ有効でなければ、ここで有効にする（設定画面を触らずに済む）。
+      # ここで Pages を有効にはできない。サイトの作成はリポジトリの管理権限が要り、
+      # workflow の GITHUB_TOKEN には無いため（pages: write は配信までしか届かない）。
+      # 有効にするのは人の手で一度だけ。Settings → Pages → Source を GitHub Actions に。
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
