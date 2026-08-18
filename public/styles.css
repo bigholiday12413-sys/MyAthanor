@@ -298,71 +298,34 @@ body::after {
 
 /* ---------- view ---------- */
 
-/* 中身は段組みに流し込む。1段＝1画面なので、各画面のマークアップには手を入れずに
-   ページが割れる。送りは scrollLeft で行う（overflow:hidden でも JS からは動く）。 */
+/* 画面は縦に流す。1画面ぶんずつ横へ送る作りを持っていたが、やめた。
+   組んである画面ほど枠が境で割れず、段の末尾に白が残って、同じ中身が
+   3ページにも4ページにもなる。どのページに何が居るのかも覚えていられない。
+   順に下へ辿れるほうが、探す手数が少なくて済む。 */
 .view {
   flex: 1;
   min-height: 0;
   padding: var(--pad);
   overflow: hidden;
-  column-gap: calc(var(--pad) * 2);
-  column-fill: auto;
 }
 
-/* 盤の画面。段にも割らず流しもせず、残りの高さを全部盤に渡す。 */
+/* 盤の画面。流さず、残りの高さを全部盤に渡す。
+   盤は枠の中で自分で繰るので、外側まで動くと二重になる。 */
 .view.is-board {
   display: flex;
   flex-direction: column;
-  column-width: auto !important;
-  columns: auto;
   overflow: hidden;
 }
 
-/* 2ページぶんまでは段に割らず、そのまま縦へ流す。
-   1画面に少し足りないだけで送らせるより、指で流したほうが早い。 */
 .view.is-scroll {
-  column-width: auto !important;
-  columns: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   /* 縦に流すことを明示する。書かないと、この指づかいを誰が取るのかの判断が
-     ブラウザ任せになり、外側（めくり）に持っていかれることがある。
-     つまむ拡大は残す。取り上げると字を大きくして読む手が塞がる。 */
+     ブラウザ任せになる。つまむ拡大は残す。取り上げると字を大きくして読む手が塞がる。 */
   touch-action: pan-y pinch-zoom;
   /* 末尾が「書き留める」の下に隠れないよう、そのぶん空けておく。 */
   padding-bottom: calc(var(--pad) + 62px);
-}
-
-/* 枠のあるものはページの境で割らない。断ち切られると別物に見えてしまう。
-   ただし大釜のように1画面近い高さになりうる容器まで割らないと、
-   入りきらないぶんが丸ごと次ページへ送られて、前のページが白く空く。
-   そういう容器は割れるようにしておき、枠は割れた先にも引き直す。 */
-.card,
-.panel,
-.map-legend,
-.tubes,
-.tg,
-.vault-row,
-.material,
-.budget-row,
-.occurrence-row,
-.stat-line,
-.filters,
-.filter-bar {
-  break-inside: avoid;
-}
-
-.cauldron,
-.floor,
-.list {
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-/* 見出しだけが前のページに取り残されないようにする。 */
-.section-title {
-  break-after: avoid;
 }
 
 .section-title {
@@ -2245,47 +2208,6 @@ a.room-title {
 
 /* ---------- ページ送り ---------- */
 
-.pager {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  padding: 0 var(--pad);
-  background: var(--chrome);
-  border-top: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--edge);
-}
-
-.pager[hidden] {
-  display: none;
-}
-
-/* 横払いでも送れるが、送れると分かる前に狙うのはこの矢印なので、
-   ここだけは指の幅（44px）を切らせない。 */
-.pager-arrow {
-  width: 52px;
-  height: 44px;
-  padding: 0;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--green-dark);
-}
-
-.pager-arrow:disabled {
-  color: #b0b0a2;
-  border-color: var(--line-soft);
-  background: #f1f0e8;
-}
-
-.pager-count {
-  min-width: 58px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--dim);
-  text-align: center;
-}
-
 /* ---------- その他 ---------- */
 
 .link {
@@ -2296,12 +2218,6 @@ a.room-title {
   color: var(--green-dark);
   text-decoration: none;
   border-bottom: 1px dotted var(--green-dark);
-}
-
-/* ページ送りが出ているぶんだけ、下に浮かせているものを持ち上げる。 */
-body.is-paged .fab,
-body.is-paged .toast {
-  bottom: calc(102px + env(safe-area-inset-bottom));
 }
 
 .toast {
@@ -2715,7 +2631,8 @@ textarea {
 
 .tg-top button {
   flex: none;
-  padding: 6px 10px;
+  min-height: 44px;
+  padding: 6px 12px;
   font-size: 11px;
   letter-spacing: 0;
 }
@@ -2724,11 +2641,22 @@ textarea {
   display: grid;
   grid-template-columns: 22px repeat(7, 1fr);
   gap: 1px;
-  /* なぞって塗るあいだ画面がスクロールしないようにする。
-     時刻の目盛り側は通常どおり触れるので、そこを持てばスクロールできる。 */
-  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* 塗るあいだだけ指を取る。表は画面の半分以上を覆うので、いつでも取っていると
+   流す場所が無くなり、掴んだつもりで週が塗り変わってしまう。 */
+.tg.is-paint {
+  touch-action: none;
+}
+
+/* 塗る最中だと分かるようにする。押されたままの札に見せる。 */
+#tg-paint[aria-pressed='true'] {
+  color: #f4f4ec;
+  background: var(--green);
+  border-color: var(--green-deep);
+  box-shadow: inset 2px 2px 0 var(--green-hi), inset -2px -2px 0 var(--green-dark);
 }
 
 .tg-corner {
@@ -2751,7 +2679,6 @@ textarea {
   color: var(--dim);
   text-align: right;
   padding-right: 3px;
-  touch-action: auto;
 }
 
 .tg-hour.is-mark {

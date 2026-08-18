@@ -817,7 +817,7 @@ async function renderStream() {
   const items = await api(`/stream?type=${streamFilter}`);
 
   const body =
-    `<div class="list flow">${
+    `<div class="list">${
           items.length
             ? items.map(streamCard).join('')
             : '<div class="empty">まだ記録がありません</div>'
@@ -1560,7 +1560,7 @@ async function renderMissions() {
         </div>`;
       })()
     }
-    <div class="list flow" id="mission-list">
+    <div class="list" id="mission-list">
       ${
         missions.length
           ? missions.map((m) => missionCard(m)).join('')
@@ -1675,6 +1675,8 @@ async function renderSettings() {
     <div class="panel" id="time-grid-panel">
       <div class="tg-top">
         <span class="tg-total" id="tg-total"></span>
+        ${/* 塗るあいだだけ表が指を取る。ふだんは画面を流せるようにしておく。 */ ''}
+        <button type="button" id="tg-paint" aria-pressed="false">塗る</button>
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
@@ -2141,8 +2143,19 @@ function wireTimeGrid(root, initial, fixed = 0) {
   // 固定費が無いときは引き算の行を出していないので、更新先も無い。
   const net = root.querySelector('#time-net');
   const surface = root.querySelector('.tg');
+  const paintBtn = root.querySelector('#tg-paint');
   let painting = false;
   let paintTo = '1';
+
+  /* 表は画面の半分以上を覆うので、いつでも指を取っていると流す場所が無くなる。
+     そのうえ掴んだつもりで週が塗り変わってしまう。
+     塗るあいだだけ取るようにして、ふだんは触っても何も起きないようにする。 */
+  let armed = false;
+  paintBtn.addEventListener('click', () => {
+    armed = !armed;
+    paintBtn.setAttribute('aria-pressed', String(armed));
+    surface.classList.toggle('is-paint', armed);
+  });
 
   const refresh = () => {
     const hours = grid.filter((cell) => cell === '1').length;
@@ -2164,14 +2177,20 @@ function wireTimeGrid(root, initial, fixed = 0) {
   };
 
   surface.addEventListener('pointerdown', (event) => {
+    if (!armed) return;
     const cell = event.target.closest('.tg-cell');
     if (!cell) return;
     event.preventDefault();
     painting = true;
     // 最初に触ったマスの逆の状態を、指を離すまで塗り続ける。
     paintTo = cell.classList.contains('is-on') ? '0' : '1';
-    surface.setPointerCapture(event.pointerId);
+    // 触れた1枡は先に塗る。捕捉に失敗しても、押した所だけは必ず変わるように。
     paint(cell);
+    try {
+      surface.setPointerCapture(event.pointerId);
+    } catch {
+      // 捕捉できない指もある。なぞりは効かなくなるが、1枡ずつなら押せる。
+    }
   });
 
   // 指の下にあるマスを座標から拾う。捕捉中は pointermove が surface に来るため。
@@ -2753,157 +2772,37 @@ async function renderDungeon() {
   });
 }
 
-/* ---------- ページ送り ----------
+/* ---------- 画面の丈 ----------
 
-   縦に流さず、1画面ぶんずつ横へ送る。中身は #view の段組みに流し込むので、
-   各画面の描画側には手を入れずに済む。段の送りは scrollLeft でやる。
-   overflow:hidden でも JS からの代入は効くので、指では動かないまま送れる。 */
+   画面は縦に流す。1画面ぶんずつ横へ送る作りを持っていたが、やめた。
+   組んである画面ほど枠が境で割れず、段の末尾に白が残って、
+   同じ中身が3ページにも4ページにもなる。どのページに何が居るのかも
+   覚えていられない。順に下へ辿れるほうが、探す手数が少なくて済む。
 
-const pagerEl = document.getElementById('pager');
-const pageCountEl = document.getElementById('page-count');
-const prevEl = document.getElementById('page-prev');
-const nextEl = document.getElementById('page-next');
+   #view は自分で流れるので、ここでやることは2つだけ。
+   盤の画面かどうかを見分けることと、画面を切り替えたら頭へ戻すこと。 */
 
-let page = 0;
-let pageTotal = 1;
+// 画面を切り替えたときだけ頭に戻す。その場の書き換えでは読んでいた所に留まる。
+let toTop = true;
 
-function pageMetrics() {
-  const style = getComputedStyle(viewEl);
-  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-  const gap = parseFloat(style.columnGap) || 0;
-  const width = Math.max(1, viewEl.clientWidth - padX);
-  return { width, gap, step: width + gap, padX };
-}
-
-function goToPage(next) {
-  const { step } = pageMetrics();
-  page = Math.min(Math.max(next, 0), pageTotal - 1);
-  viewEl.scrollLeft = page * step;
-  pageCountEl.textContent = `${page + 1} / ${pageTotal}`;
-  prevEl.disabled = page === 0;
-  nextEl.disabled = page === pageTotal - 1;
-}
-
-// 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
-let toFirstPage = true;
-
-/* この丈までは、めくらずに縦へ流す。単位は画面。
-   1画面に少し足りないだけで送る操作を強いるほうが、指の手数が増える。
-   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。
-
-   四捨五入で見るので「2画面ぶんぐらいまで」。2.4画面は流し、2.6画面はめくる。 */
-const SCROLL_LIMIT = 2;
-let scrolls = false;
-
-// 中身が変わるたびに、何ページに割れたかを測り直す。
-function refitPages() {
-  /* 盤の画面だけは別扱い。段にも割らず流しもせず、残りの高さを全部使う。
-     盤は1枚で1画面に収まるように縮むので、送る先も流す先も無い。 */
+function refitView() {
+  /* 盤の画面だけは別扱い。流さず、残りの高さを全部盤に渡す。
+     盤は枠の中で自分で繰るので、外側まで動くと二重になる。 */
   const board = viewEl.querySelector('.board');
   viewEl.classList.toggle('is-board', Boolean(board));
-  if (board) {
-    viewEl.classList.remove('is-scroll');
-    viewEl.style.columnWidth = '';
-    pageTotal = 1;
-    page = 0;
-    scrolls = true;
-    pagerEl.hidden = true;
-    pageCountEl.textContent = '';
-    document.body.classList.remove('is-paged');
-    toFirstPage = false;
-    return;
-  }
-
-  /* 送るか流すかは、段に割る前の丈で決める。
-     段の本数で決めていたが、枠を割らない指定のせいで段の末尾に白が残り、
-     2画面ぶんの中身が3段にも4段にもなる。それをそのまま頁数と読んでいたので、
-     流せるはずのものがめくりに回っていた。 */
-  viewEl.style.columnWidth = '';
-  viewEl.classList.add('is-scroll');
-  const screens = viewEl.scrollHeight / Math.max(1, viewEl.clientHeight);
-  const wasScrolling = scrolls;
-  /* 列の画面（ストリーム・プロセス）は丈にかかわらず流す。
-     めくりが効くのは、1ページが1つのまとまりになっている画面だけ。
-     ただ順に並んでいるだけのものをページで切ると、目当ての札がどのページに
-     居るのか分からず、探すのに何度もめくることになる。 */
-  scrolls = Boolean(viewEl.querySelector('.flow')) || Math.round(screens) <= SCROLL_LIMIT;
-
-  if (scrolls) {
-    const split = !wasScrolling || pageTotal !== 1;
-    pageTotal = 1;
-    page = 0;
-    pagerEl.hidden = true;
-    // 数字も消す。隠すだけだと、次に開いた画面の数と混ざって読めてしまう。
-    pageCountEl.textContent = '';
-    document.body.classList.remove('is-paged');
-    viewEl.scrollLeft = 0;
-    if (toFirstPage || split) viewEl.scrollTop = 0;
-    toFirstPage = false;
-    return;
-  }
-
-  // めくるほうに回ったら、段に割ってから何段になったかを数える。
-  viewEl.classList.remove('is-scroll');
-  const { width, gap, step, padX } = pageMetrics();
-  viewEl.style.columnWidth = `${width}px`;
-  const flowed = Math.max(0, viewEl.scrollWidth - padX);
-  const total = Math.max(1, Math.round((flowed + gap) / step));
-  const split = wasScrolling || total !== pageTotal;
-
-  pageTotal = total;
-  pagerEl.hidden = pageTotal < 2;
-  document.body.classList.toggle('is-paged', pageTotal > 1);
-  goToPage(toFirstPage || split ? 0 : page);
-  toFirstPage = false;
+  viewEl.classList.toggle('is-scroll', !board);
+  if (toTop) viewEl.scrollTop = 0;
+  toTop = false;
 }
 
 let refitTimer = null;
-let settleTimer = null;
 function scheduleRefit() {
   cancelAnimationFrame(refitTimer);
-  refitTimer = requestAnimationFrame(refitPages);
-  // 図版や書体が遅れて寸法を決めることがある。落ち着いた頃にもう一度だけ測る。
-  clearTimeout(settleTimer);
-  settleTimer = setTimeout(refitPages, 250);
+  refitTimer = requestAnimationFrame(refitView);
 }
 
-prevEl.addEventListener('click', () => goToPage(page - 1));
-nextEl.addEventListener('click', () => goToPage(page + 1));
-
-// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て測り直す。
+// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て付け直す。
 new MutationObserver(scheduleRefit).observe(viewEl, { childList: true, subtree: true });
-window.addEventListener('resize', scheduleRefit);
-
-/* 指で横に払ってもページを送る。
-   地図・時間の表・文字入力の中では、そちらの操作を邪魔しないよう手を出さない。 */
-const KEEPS_TOUCH = '.board, .tg, input, textarea, select, .filters';
-let swipe = null;
-
-viewEl.addEventListener('pointerdown', (event) => {
-  if (scrolls || event.target.closest(KEEPS_TOUCH)) return;
-  swipe = { x: event.clientX, y: event.clientY };
-});
-
-viewEl.addEventListener('pointerup', (event) => {
-  if (!swipe) return;
-  const dx = event.clientX - swipe.x;
-  const dy = event.clientY - swipe.y;
-  swipe = null;
-  // 横に払ったときだけ。縦の動きが勝っていれば、ただの押し損ねとみなす。
-  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-  goToPage(page + (dx < 0 ? 1 : -1));
-});
-
-viewEl.addEventListener('pointercancel', () => {
-  swipe = null;
-});
-
-// 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
-window.addEventListener('keydown', (event) => {
-  if (scrolls || event.target.closest('input, textarea, select')) return;
-  if (event.key === 'ArrowRight') goToPage(page + 1);
-  if (event.key === 'ArrowLeft') goToPage(page - 1);
-});
 
 /* 書き留めるボタンはシェルに置く。思いつくのはどの画面を見ている時でも同じなので、
    ストリームまで移動してから、では間に合わない。 */
@@ -2923,7 +2822,7 @@ window.addEventListener('keydown', (event) => {
 
 async function route() {
   const hash = location.hash.replace(/^#/, '') || '/home';
-  toFirstPage = true;
+  toTop = true;
   try {
     let match;
     if (hash === '/home') return await renderHome();
