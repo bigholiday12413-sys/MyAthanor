@@ -2578,19 +2578,85 @@ function boardMap(roads) {
     }
   }
 
-  /* 盤は1枚きり。幅にも高さにも合わせて縮め、全部を1画面に収める。
-     width/height を書かずに viewBox だけ渡すと、枠のほうが寸法を決める。 */
+  /* 盤は1枚きり。等倍では幅にも高さにも合わせて縮め、全部を1画面に収める。
+     拡げたぶんは枠の中を繰って見る。盤の寸法は JS が入れるので、ここでは
+     viewBox の縦横だけ添えておく。 */
   return `
     <div class="board">
-      <svg class="map" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}"
-           preserveAspectRatio="xMidYMid meet" role="img" aria-label="アストロラーベの盤">
-        <rect x="${n2(view.x)}" y="${n2(view.y)}" width="${n2(view.w)}"
-              height="${n2(view.h)}" fill="${SPHERE.space}" />
-        ${starfield(view, uid)}${guides.join('')}
-        ${beds.join('')}${lines.join('')}${glows.join('')}${bodies.join('')}${ink.join('')}
-      </svg>
+      <div class="board-view" id="board-view">
+        <svg class="map" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}"
+             data-w="${n2(view.w)}" data-h="${n2(view.h)}"
+             preserveAspectRatio="xMidYMid meet" role="img" aria-label="アストロラーベの盤">
+          <rect x="${n2(view.x)}" y="${n2(view.y)}" width="${n2(view.w)}"
+                height="${n2(view.h)}" fill="${SPHERE.space}" />
+          ${starfield(view, uid)}${guides.join('')}
+          ${beds.join('')}${lines.join('')}${glows.join('')}${bodies.join('')}${ink.join('')}
+        </svg>
+      </div>
+      <div class="board-zoom">
+        <button type="button" id="zoom-out" aria-label="盤を縮める">−</button>
+        <button type="button" id="zoom-in" aria-label="盤を拡げる">＋</button>
+      </div>
     </div>
   `;
+}
+
+/* 盤の倍率。等倍が「全部が1画面に収まる大きさ」で、そこから拡げていく。
+   縮める側は等倍で止める。等倍より小さくしても、読めない盤が真ん中に浮くだけ。 */
+const ZOOM_STEPS = [1, 1.5, 2.25, 3.4];
+// 期間を変えても同じ盤なので、描き直しをまたいで倍率は保つ。
+let boardZoom = 0;
+let boardWatch = null;
+
+function wireBoard() {
+  const box = document.getElementById('board-view');
+  if (!box) return;
+  const svg = box.querySelector('.map');
+  const w = Number(svg.dataset.w);
+  const h = Number(svg.dataset.h);
+  const outBtn = document.getElementById('zoom-out');
+  const inBtn = document.getElementById('zoom-in');
+
+  let lastFit = 0;
+
+  const apply = (keepCenter) => {
+    /* 等倍の寸法は枠から毎回出し直す。画面が回ったり幅が変わったりしても、
+       等倍が「1画面に収まる大きさ」であり続けるようにするため。 */
+    const fit = Math.min(box.clientWidth / w, box.clientHeight / h);
+    if (!fit) return;
+    // 枠も倍率も変わっていないなら触らない。繰り返し呼ばれても揺れないように。
+    if (!keepCenter && fit === lastFit) return;
+    lastFit = fit;
+    const zoom = ZOOM_STEPS[boardZoom];
+    // 拡げる前に見ていた真ん中を控えておき、拡げたあとに同じ点へ戻す。
+    // 左上を保つと、拡げるたびに盤の中心から離れていってしまう。
+    const at = keepCenter && {
+      x: (box.scrollLeft + box.clientWidth / 2) / Math.max(1, box.scrollWidth),
+      y: (box.scrollTop + box.clientHeight / 2) / Math.max(1, box.scrollHeight),
+    };
+    svg.style.width = `${w * fit * zoom}px`;
+    svg.style.height = `${h * fit * zoom}px`;
+    if (at) {
+      box.scrollLeft = at.x * box.scrollWidth - box.clientWidth / 2;
+      box.scrollTop = at.y * box.scrollHeight - box.clientHeight / 2;
+    }
+    outBtn.disabled = boardZoom === 0;
+    inBtn.disabled = boardZoom === ZOOM_STEPS.length - 1;
+  };
+
+  const step = (by) => () => {
+    boardZoom = Math.min(Math.max(boardZoom + by, 0), ZOOM_STEPS.length - 1);
+    apply(true);
+  };
+  outBtn.addEventListener('click', step(-1));
+  inBtn.addEventListener('click', step(1));
+
+  /* 枠の丈が決まるのは、ページ送りが盤の画面だと判じて縦の配分をやり直した後。
+     描いた直後に測ると等倍が大きく出るので、枠が動いたら測り直す。
+     画面を回したときにも同じ道で直る。 */
+  boardWatch?.disconnect();
+  boardWatch = new ResizeObserver(() => apply(false));
+  boardWatch.observe(box);
 }
 
 /* 盤に載せる期間。null は既定（直近1か月）。
@@ -2646,6 +2712,8 @@ async function renderDungeon() {
         : '<div class="empty">この期間の盤はありません</div>'
     }
   `;
+
+  wireBoard();
 
   document.getElementById('dig-form').addEventListener('submit', (event) => {
     event.preventDefault();
