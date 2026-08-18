@@ -2,6 +2,11 @@
 
 import { icon, iconBody, KIND_ICON } from './icons.js';
 
+/* いったん伏せてあるもの。表と API と保存済みの値はそのまま残してあるので、
+   true に戻せば元通り出る。伏せている間も、大釜に入っているミッションは
+   ふつうのミッションとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
+const SHOW = { temperature: false, cauldron: false };
+
 const viewEl = document.getElementById('view');
 const topbarEl = document.getElementById('topbar');
 const tabsEl = document.getElementById('tabs');
@@ -66,17 +71,23 @@ function fmtDate(iso) {
 }
 
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
-const KIND_LABEL = { idea: 'アイデア', log: 'ログ' };
+const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備' };
+
+/* 糧と装備はログの器に入っている。見た目の別だけここで引き直す。 */
+const GOODS = ['food', 'gear'];
+const isGoods = (kind) => GOODS.includes(kind);
+const faceOf = (item) => item.goods ?? item.kind;
+const toYen = (value) => Math.max(0, Math.round(Number(value) || 0));
 
 /* アイデアの温度。273K（＝0℃）を常温とし、そこへ向かって冷めていく。 */
 const AMBIENT_K = 273;
 const MAX_K = 373;
 
 const HEAT_LEVELS = [
-  { min: 350, key: 'boiling', label: '沸騰', flame: '#ff8a3c', core: '#ffe4b8' },
-  { min: 320, key: 'hot', label: '熱い', flame: '#e0aa3c', core: '#ffe8a8' },
-  { min: 295, key: 'warm', label: 'ぬるい', flame: '#b9925a', core: '#e6d0a0' },
-  { min: 276, key: 'cooling', label: '冷めかけ', flame: '#8a7550', core: '#b3a075' },
+  { min: 350, key: 'boiling', label: '沸騰', flame: '#d95d13', core: '#f0a860' },
+  { min: 320, key: 'hot', label: '熱い', flame: '#b07f14', core: '#e0bf6a' },
+  { min: 295, key: 'warm', label: 'ぬるい', flame: '#96703c', core: '#c4a678' },
+  { min: 276, key: 'cooling', label: '冷めかけ', flame: '#7d7458', core: '#a89d7c' },
 ];
 const FROZEN = { key: 'frozen', label: '凍結' };
 
@@ -159,7 +170,10 @@ function dueState(mission) {
 
 function dueRange(mission) {
   if (!mission.start_date && !mission.due_date) {
-    return mission.effective_due_date ? `大釜 → ${fmtShortDay(mission.effective_due_date)}` : '';
+    if (!mission.effective_due_date) return '';
+    return SHOW.cauldron
+      ? `大釜 → ${fmtShortDay(mission.effective_due_date)}`
+      : `→ ${fmtShortDay(mission.effective_due_date)}`;
   }
   const from = mission.start_date ? fmtShortDay(mission.start_date) : '';
   const to = mission.due_date ? fmtShortDay(mission.due_date) : '';
@@ -227,7 +241,7 @@ function missionCard(mission, { showSource = true } = {}) {
           : ''
       }
       ${
-        mission.cauldron
+        SHOW.cauldron && mission.cauldron
           ? `<div class="card-meta"><span>${icon('cauldron')}大釜「${esc(
               mission.cauldron.title,
             )}」の素材</span></div>`
@@ -337,6 +351,35 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
   `;
 }
 
+/* 今月のウォレットの内訳。金額の大小がそのまま帯の長さになる。
+   数字だけだと割合が読めず、家計簿として見るときに効かない。 */
+const GOODS_TONE = { food: 'var(--green)', gear: '#9aa5ab', event: 'var(--gold-dark)' };
+const GOODS_NAME = { food: '糧', gear: '装備', event: '出来事' };
+
+function walletBars(rows) {
+  const total = rows.reduce((sum, row) => sum + row.money, 0);
+  if (!total) return '';
+  return rows
+    .filter((row) => row.money)
+    .map(
+      (row) => `
+        <div class="spend">
+          <div class="spend-head">
+            <a class="spend-name" href="#/stream?">${
+              row.goods === 'event' ? '' : icon(KIND_ICON[row.goods])
+            }<span>${GOODS_NAME[row.goods]}</span></a>
+            <span class="spend-count">${row.count}件</span>
+            <span class="spend-money">${esc(fmtMoney(row.money))}</span>
+          </div>
+          <div class="spend-bar">
+            <i style="width:${Math.round((row.money / total) * 100)}%;
+              background:${GOODS_TONE[row.goods]}"></i>
+          </div>
+        </div>`,
+    )
+    .join('');
+}
+
 async function renderHome() {
   setActiveTab('home');
   setTopbar({
@@ -347,9 +390,10 @@ async function renderHome() {
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [summary, active] = await Promise.all([
+  const [summary, active, vault] = await Promise.all([
     api('/summary'),
     api('/missions?status=active&sort=due'),
+    api('/vault'),
   ]);
 
   const upcoming = active.slice(0, 5);
@@ -372,6 +416,12 @@ async function renderHome() {
         plannedLabel: '今月予定',
       })}
     </div>
+
+    <a class="card nav-card vault-line" href="#/vault">
+      ${icon('coins')}
+      <span class="vault-line-label">金庫</span>
+      <span class="vault-line-value">${esc(fmtMoney(vault.balance))}</span>
+    </a>
 
     <div class="section-title">現況</div>
     <div class="panel">
@@ -398,6 +448,14 @@ async function renderHome() {
     </div>
 
     ${
+      // 今月のウォレットが何に出ていったか。家計簿として見るのはここ。
+      summary.wallet_by_goods.some((row) => row.money)
+        ? `<div class="section-title">今月の出どころ</div>
+           <div class="panel">${walletBars(summary.wallet_by_goods)}</div>`
+        : ''
+    }
+
+    ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
       summary.undated.time || summary.undated.money
         ? `<div class="panel warn">
@@ -407,7 +465,6 @@ async function renderHome() {
                  fmtMoney(summary.undated.money),
                )}</span>
              </div>
-             <div class="hint">試験管には乗っていません。期限を入れると今週／今月に算入されます。</div>
            </div>`
         : ''
     }
@@ -452,12 +509,12 @@ async function renderStream() {
       : `<div class="list">${
           items.length
             ? items.map(streamCard).join('')
-            : '<div class="empty">まだ記録がありません。＋から追加してください。</div>'
+            : '<div class="empty">まだ記録がありません</div>'
         }</div>`;
 
   viewEl.innerHTML = `
     <div class="filters">
-      ${['all', 'idea', 'log']
+      ${['all', 'idea', 'log', 'food', 'gear']
         .map(
           (type) => `<button class="filter" data-filter="${type}"
              aria-pressed="${streamFilter === type}">${
@@ -485,7 +542,6 @@ async function renderStream() {
         : ''
     }
     ${body}
-    <button class="fab" id="fab" aria-label="新規追加">${icon('plus')}</button>
   `;
 
   for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
@@ -506,21 +562,21 @@ async function renderStream() {
       renderStream();
     });
   }
-  document.getElementById('fab').addEventListener('click', openNewEntryModal);
 }
 
 function streamCard(item) {
+  const face = faceOf(item);
   return `
-    <a class="card kind-${esc(item.kind)}" href="#/${esc(item.kind)}/${item.id}">
+    <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(item.kind)}">${esc(KIND_LABEL[item.kind])}</span>
-        ${item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
+        <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
+        ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>ミッション由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
       </div>
-      <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
+      <div class="card-title">${icon(KIND_ICON[face])}<span>${esc(item.title)}</span></div>
       <div class="card-meta">
         ${
           item.kind === 'log' && (item.time_spent || item.money_spent)
@@ -565,7 +621,7 @@ function groupedByTag(items) {
 
   const sections = [...groups.values()].sort((a, b) => b.items.length - a.items.length);
   if (untagged.length) sections.push({ name: '未分類', items: untagged });
-  if (sections.length === 0) return '<div class="empty">まだ記録がありません。</div>';
+  if (sections.length === 0) return '<div class="empty">まだ記録がありません</div>';
 
   return sections
     .map(
@@ -578,61 +634,158 @@ function groupedByTag(items) {
     .join('');
 }
 
-function openNewEntryModal() {
-  let kind = 'idea';
+/* 思いついた時点では、種別も詳細もまだ決まっていないことが多い。
+   ここでは題だけを受け取り、入れても閉じずに次を待つ。
+   詳細は後からストリームで開いて足せばよい。 */
+
+// 続けて書くときは種別が変わらないことがほとんどなので、前に選んだものを覚えておく。
+let captureKind = 'idea';
+
+function openCapture() {
+  if (document.querySelector('.modal-backdrop')) return;
+
+  const caught = [];
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
-    <form class="modal" id="new-entry">
-      <h2>新規追加</h2>
+    <form class="modal" id="capture">
+      <h2>書き留める</h2>
       <div class="field">
-        <label>種別</label>
-        <div class="seg-toggle" id="kind-toggle">
-          <button type="button" data-kind="idea" aria-pressed="true">${icon('stone')}アイデア</button>
-          <button type="button" data-kind="log" aria-pressed="false">${icon('footsteps')}ログ</button>
+        <div class="seg-toggle seg-4" id="kind-toggle">
+          ${['idea', 'log', 'food', 'gear']
+            .map(
+              (kind) => `<button type="button" data-kind="${kind}"
+                aria-pressed="${captureKind === kind}">${icon(KIND_ICON[kind])}${
+                KIND_LABEL[kind]
+              }</button>`,
+            )
+            .join('')}
         </div>
       </div>
-      <div class="field">
-        <label for="entry-title">テキスト</label>
-        <input id="entry-title" autocomplete="off" placeholder="したいこと／起きたこと" />
+      <div class="field capture-row">
+        <input id="capture-title" autocomplete="off" enterkeyhint="done" />
+        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0"
+          placeholder="円" hidden />
       </div>
+      <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
-        <button type="button" class="ghost" data-close>キャンセル</button>
-        <button type="submit" class="primary">追加</button>
+        <button type="button" class="ghost" data-close>閉じる</button>
+        <button type="submit" class="primary">入れる</button>
       </div>
     </form>
   `;
   document.body.appendChild(backdrop);
 
-  const input = backdrop.querySelector('#entry-title');
+  const input = backdrop.querySelector('#capture-title');
+  const money = backdrop.querySelector('#capture-money');
+  const caughtEl = backdrop.querySelector('#caught');
+
+  // 糧と装備は買ったものなので、金額を並べて受ける。
+  const HOLDER = {
+    idea: 'したいこと',
+    log: '起きたこと',
+    food: '食べたもの・消えるもの',
+    gear: '買ったもの・残るもの',
+  };
+  function dressFor(kind) {
+    input.placeholder = HOLDER[kind];
+    money.hidden = !isGoods(kind);
+    if (money.hidden) money.value = '';
+  }
+  dressFor(captureKind);
   input.focus();
 
-  const close = () => backdrop.remove();
+  // 入れたものがあれば、閉じたときに下の画面へ反映する。
+  const close = () => {
+    backdrop.remove();
+    if (caught.length) route();
+  };
+
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop || event.target.hasAttribute('data-close')) close();
+  });
+
+  backdrop.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
   });
 
   backdrop.querySelector('#kind-toggle').addEventListener('click', (event) => {
     const button = event.target.closest('button[data-kind]');
     if (!button) return;
-    kind = button.dataset.kind;
+    captureKind = button.dataset.kind;
     for (const b of backdrop.querySelectorAll('#kind-toggle button')) {
-      b.setAttribute('aria-pressed', String(b.dataset.kind === kind));
+      b.setAttribute('aria-pressed', String(b.dataset.kind === captureKind));
     }
+    dressFor(captureKind);
+    input.focus();
   });
 
-  backdrop.querySelector('#new-entry').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const title = input.value.trim();
-    if (!title) return input.focus();
-    try {
-      const created = await api('/entries', { method: 'POST', body: { kind, title } });
-      close();
-      toast(`${KIND_LABEL[kind]}を追加しました`);
-      location.hash = `#/${kind}/${created.id}`;
-    } catch (err) {
-      toast(err.message, true);
+  // 入れたものを新しい順に控える。題を押せばその場で詳細へ行ける。
+  function paintCaught() {
+    caughtEl.hidden = caught.length === 0;
+    caughtEl.innerHTML = `
+      <div class="caught-head">入れたもの <b>${caught.length}</b></div>
+      ${caught
+        .map(
+          (item) => `<a class="caught-row" href="#/${
+            isGoods(item.kind) ? 'log' : item.kind
+          }/${item.id}">
+            ${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span>
+            ${item.money ? `<b>${esc(fmtMoney(item.money))}</b>` : ''}
+          </a>`,
+        )
+        .join('')}
+    `;
+  }
+
+  // 1行につき1つとして入れる。
+  async function put(raw) {
+    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) return input.focus();
+
+    // 打ち終えた文字はすぐ引き取る。保存を待たせると次が打てない。
+    input.value = '';
+    input.focus();
+    const kind = captureKind;
+    // 金額は1行目にだけ載せる。まとめて貼ったぶんに同じ額を配ると嘘になる。
+    const spent = isGoods(kind) ? toYen(money.value) : 0;
+    money.value = '';
+
+    for (const [index, title] of lines.entries()) {
+      try {
+        const created = await api('/entries', {
+          method: 'POST',
+          body: { kind, title, money_spent: index === 0 ? spent : 0 },
+        });
+        caught.unshift({ kind, id: created.id, title, money: index === 0 ? spent : 0 });
+      } catch (err) {
+        toast(err.message, true);
+      }
     }
+    paintCaught();
+  }
+
+  // 変換の確定で送ってしまうと、打ちかけの文字が入る。変換中は受け取らない。
+  let composing = false;
+  input.addEventListener('compositionstart', () => {
+    composing = true;
+  });
+  input.addEventListener('compositionend', () => {
+    composing = false;
+  });
+
+  // 1行の入力欄は改行を持てないので、複数行の貼り付けはここで受けて割る。
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData?.getData('text') ?? '';
+    if (!/[\r\n]/.test(text)) return;
+    event.preventDefault();
+    put(text);
+  });
+
+  backdrop.querySelector('#capture').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (composing) return;
+    put(input.value);
   });
 }
 
@@ -892,7 +1045,10 @@ async function renderEntry(kind, entryId) {
   const [entry, allTags] = await Promise.all([api(path), api('/tags')]);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
   // 大釜に入っているミッションは大釜のほうに出すので、こちらからは外す。
-  const loose = entry.missions.filter((mission) => !mission.cauldron_id);
+  // 大釜を伏せている間は外さない。外すとどこからも出てこなくなる。
+  const loose = SHOW.cauldron
+    ? entry.missions.filter((mission) => !mission.cauldron_id)
+    : entry.missions;
 
   viewEl.innerHTML = `
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
@@ -903,7 +1059,20 @@ async function renderEntry(kind, entryId) {
       </div>
       ${
         kind === 'log'
-          ? `<div class="row">
+          ? `<div class="field">
+               <div class="seg-toggle seg-3" id="goods-toggle">
+                 ${['log', 'food', 'gear']
+                   .map(
+                     (face) => `<button type="button" data-goods="${
+                       face === 'log' ? '' : face
+                     }" aria-pressed="${(entry.goods ?? 'log') === face}">${icon(
+                       KIND_ICON[face],
+                     )}${KIND_LABEL[face]}</button>`,
+                   )
+                   .join('')}
+               </div>
+             </div>
+             <div class="row">
                <div class="field">
                  <label for="time-spent">消費タイム（時間）</label>
                  <input id="time-spent" type="number" step="0.25" min="0"
@@ -936,7 +1105,9 @@ async function renderEntry(kind, entryId) {
       </div>
     </form>
 
-    <div class="section-title">大釜</div>
+    ${
+      SHOW.cauldron
+        ? `<div class="section-title">大釜</div>
     <div id="entry-cauldrons">
       ${entry.cauldrons.map(cauldronPanel).join('')}
       <details class="panel optional-panel">
@@ -961,18 +1132,20 @@ async function renderEntry(kind, entryId) {
           <div class="btn-row"><button type="submit" class="primary">用意する</button></div>
         </form>
       </details>
-    </div>
+    </div>`
+        : ''
+    }
 
-    <div class="section-title">単独のミッション</div>
+    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
     <div class="list" id="entry-missions">
       ${
         loose.length
           ? loose.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">大釜に入っていないミッションはありません</div>'
+          : '<div class="empty">ミッションはありません</div>'
       }
     </div>
 
-    ${kind === 'idea' ? temperaturePanel(entry) : ''}
+    ${SHOW.temperature && kind === 'idea' ? temperaturePanel(entry) : ''}
 
     <div class="section-title">タグ</div>
     <form class="panel" id="tag-form">
@@ -1029,12 +1202,25 @@ async function renderEntry(kind, entryId) {
     </form>
   `;
 
+  const goodsToggle = document.getElementById('goods-toggle');
+  if (goodsToggle) {
+    goodsToggle.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-goods]');
+      if (!button) return;
+      for (const b of goodsToggle.querySelectorAll('button')) {
+        b.setAttribute('aria-pressed', String(b === button));
+      }
+    });
+  }
+
   document.getElementById('entry-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const body = { title: document.getElementById('title').value.trim() };
     if (kind === 'log') {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
+      body.goods = document.querySelector('#goods-toggle [aria-pressed="true"]').dataset.goods
+        || null;
     }
     try {
       await api(path, { method: 'PATCH', body });
@@ -1074,32 +1260,33 @@ async function renderEntry(kind, entryId) {
     );
   });
 
-  if (kind === 'idea') wireTemperature(entry, entryId);
+  if (SHOW.temperature && kind === 'idea') wireTemperature(entry, entryId);
 
-  const cauldronArea = document.getElementById('entry-cauldrons');
-  wireCauldrons(cauldronArea, entryId, kind);
-  document.getElementById('cauldron-new').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = document.getElementById('c-title');
-    const title = input.value.trim();
-    if (!title) return input.focus();
-    try {
-      await api('/cauldrons', {
-        method: 'POST',
-        body: {
-          title,
-          source_type: kind,
-          source_id: entryId,
-          start_date: document.getElementById('c-from').value || null,
-          due_date: document.getElementById('c-to').value || null,
-        },
-      });
-      toast('大釜を用意しました');
-      await renderEntry(kind, entryId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
+  if (SHOW.cauldron) {
+    wireCauldrons(document.getElementById('entry-cauldrons'), entryId, kind);
+    document.getElementById('cauldron-new').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = document.getElementById('c-title');
+      const title = input.value.trim();
+      if (!title) return input.focus();
+      try {
+        await api('/cauldrons', {
+          method: 'POST',
+          body: {
+            title,
+            source_type: kind,
+            source_id: entryId,
+            start_date: document.getElementById('c-from').value || null,
+            due_date: document.getElementById('c-to').value || null,
+          },
+        });
+        toast('大釜を用意しました');
+        await renderEntry(kind, entryId);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
 
   document.getElementById('mission-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1225,7 +1412,8 @@ const BUDGET_UI = {
 };
 
 // 一覧に何期間ぶんの過去を含めるか。「さらに過去」で伸びる。
-const budgetWindow = { time: 6, money: 6 };
+// 過去は「さらに過去」で伸ばせる。最初から6期ぶん開くと、設定だけで2ページ食う。
+const budgetWindow = { time: 3, money: 3 };
 
 function budgetSection(kind, rows) {
   const ui = BUDGET_UI[kind];
@@ -1273,37 +1461,61 @@ async function renderSettings() {
     api(`/budgets?kind=money&past=${budgetWindow.money}`),
   ]);
 
+  // 塗りが無ければ空の表から始める。
+  const grid = (settings.time_grid ?? '').length === 168 ? settings.time_grid : '0'.repeat(168);
+
   viewEl.innerHTML = `
-    <div class="section-title">既定の可処分リソース</div>
+    <div class="section-title">週の可処分タイム</div>
+    <div class="panel" id="time-grid-panel">
+      <div class="tg-top">
+        <span class="tg-total" id="tg-total"></span>
+        <button type="button" class="ghost" id="tg-clear">全部消す</button>
+      </div>
+      ${timeGridMarkup(grid)}
+      ${
+        settings.time_grid || !settings.weekly_time
+          ? ''
+          : `<div class="hint">いまは ${esc(
+              fmtTime(settings.weekly_time),
+            )}／週（数値で設定）。保存すると置き換わります。</div>`
+      }
+      <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
+    </div>
+
+    <div class="section-title">既定の可処分ウォレット</div>
     <form class="panel" id="settings-form">
       <div class="field">
-        <label for="weekly-time">週あたりの可処分タイム（時間）</label>
-        <input id="weekly-time" type="number" step="0.5" min="0"
-               value="${minutesToHours(settings.weekly_time)}" />
-      </div>
-      <div class="field">
-        <label for="monthly-money">月あたりの可処分ウォレット（円）</label>
+        <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
       </div>
-      <div class="hint">個別設定のない期間に使います。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
-    <div class="section-title">アイデアの冷却</div>
+    ${
+      SHOW.temperature
+        ? `<div class="section-title">アイデアの冷却</div>
     <form class="panel" id="cooling-form">
       <div class="field">
         <label for="half-life">冷却の半減期（日）</label>
         <input id="half-life" type="number" step="1" min="0"
                value="${settings.cooling_half_life_days}" />
       </div>
-      <div class="hint">この日数ごとに熱が半分になります。0 で冷めません。</div>
+      <div class="hint">0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>
+    </form>`
+        : ''
+    }
 
     <div class="section-title">定期イベント</div>
     <a class="card nav-card" href="#/recurrences">
       <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
       <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
+    </a>
+
+    <div class="section-title">金庫</div>
+    <a class="card nav-card" href="#/vault">
+      <div class="card-title">${icon('coins')}<span>金庫の初期残高と積立</span></div>
+      <div class="card-meta"><span>月の余りが積まれていきます</span></div>
     </a>
 
     <div class="section-title">タグ</div>
@@ -1322,7 +1534,6 @@ async function renderSettings() {
       await api('/settings', {
         method: 'PUT',
         body: {
-          weekly_time: hoursToMinutes(document.getElementById('weekly-time').value),
           monthly_money: Math.round(Number(document.getElementById('monthly-money').value || 0)),
         },
       });
@@ -1333,22 +1544,26 @@ async function renderSettings() {
     }
   });
 
-  document.getElementById('cooling-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api('/settings', {
-        method: 'PUT',
-        body: {
-          cooling_half_life_days: Math.round(
-            Number(document.getElementById('half-life').value || 0),
-          ),
-        },
-      });
-      toast('冷却の設定を保存しました');
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
+  wireTimeGrid(document.getElementById('time-grid-panel'), grid);
+
+  if (SHOW.temperature) {
+    document.getElementById('cooling-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await api('/settings', {
+          method: 'PUT',
+          body: {
+            cooling_half_life_days: Math.round(
+              Number(document.getElementById('half-life').value || 0),
+            ),
+          },
+        });
+        toast('冷却の設定を保存しました');
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
 
   for (const form of viewEl.querySelectorAll('.budget-form')) {
     const kind = form.dataset.kind;
@@ -1551,7 +1766,7 @@ async function renderRecurrences() {
     <div class="section-title">新しく登録</div>
     <form class="panel" id="recurrence-new">
       ${recurrenceFields()}
-      <div class="hint">開始日から今日までのぶんは登録時にログになります。</div>
+      <div class="hint">開始日から今日までのぶんはログになります。</div>
       <div class="btn-row"><button type="submit" class="primary">登録</button></div>
     </form>
   `;
@@ -1636,7 +1851,6 @@ async function renderRecurrence(recurrenceId) {
       <div class="btn-row">
         <button type="button" class="ghost danger" id="delete-recurrence">この定期イベントを削除</button>
       </div>
-      <div class="hint">生成済みのログは残ります。</div>
     </form>
 
     <div class="section-title">直近の回</div>
@@ -1789,7 +2003,7 @@ async function renderSpells() {
         </a>`,
               )
               .join('')
-          : '<div class="empty">まだ何も書かれていません。</div>'
+          : '<div class="empty">まだ何も書かれていません</div>'
       }
     </div>
   `;
@@ -1989,6 +2203,175 @@ async function renderSpell(spellId) {
   wireLegacy(viewEl, reload);
 }
 
+/* ---------- 金庫 ---------- */
+
+// 月が終わると、その月のウォレットの余りが金庫に積まれる。
+async function renderVault() {
+  setActiveTab('home');
+  setTopbar({ title: '金庫', back: '#/home' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const vault = await api('/vault');
+
+  viewEl.innerHTML = `
+    <div class="panel vault-head">
+      ${icon('coins', 'vault-mark')}
+      <div class="vault-balance">${esc(fmtMoney(vault.balance))}</div>
+      <div class="vault-note">
+        初期 ${esc(fmtMoney(vault.initial))}
+        ／ 積立 ${vault.deposited >= 0 ? '+' : ''}${esc(fmtMoney(vault.deposited))}
+      </div>
+    </div>
+
+    <div class="stat-line" style="margin-top:12px">
+      <span>${esc(vault.current_period.label)}（進行中）が終わったら</span>
+      <span class="v ${vault.pending < 0 ? 'neg' : ''}">${
+        vault.pending >= 0 ? '+' : ''
+      }${esc(fmtMoney(vault.pending))}</span>
+    </div>
+
+    <div class="section-title">初期残高</div>
+    <form class="panel" id="vault-form">
+      <div class="field">
+        <input id="vault-initial" type="number" step="1000" value="${vault.initial}" />
+      </div>
+      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
+    </form>
+
+    <div class="section-title">月ごとの積立<span class="section-count">${
+      vault.months.length
+    }</span></div>
+    ${
+      vault.months.length
+        ? `<div class="panel">${vault.months
+            .map(
+              (month) => `
+        <div class="vault-row">
+          <div>
+            <div class="vault-month">${esc(month.label)}</div>
+            <div class="vault-detail">可処分 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
+              fmtMoney(month.consumed),
+            )}</div>
+          </div>
+          <div class="vault-surplus ${month.surplus < 0 ? 'neg' : ''}">${
+            month.surplus >= 0 ? '+' : ''
+          }${esc(fmtMoney(month.surplus))}</div>
+        </div>`,
+            )
+            .join('')}</div>`
+        : '<div class="empty">まだ終わった月がありません</div>'
+    }
+  `;
+
+  document.getElementById('vault-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api('/settings', {
+        method: 'PUT',
+        body: {
+          vault_initial: Math.round(Number(document.getElementById('vault-initial').value || 0)),
+        },
+      });
+      toast('初期残高を保存しました');
+      await renderVault();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+
+const WEEK_HEAD = ['月', '火', '水', '木', '金', '土', '日'];
+
+// 曜日×24時間。index = 曜日(0=月) * 24 + 時。
+function timeGridMarkup(grid) {
+  const cells = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    cells.push(
+      `<div class="tg-hour ${hour % 6 === 0 ? 'is-mark' : ''}">${
+        hour % 3 === 0 ? hour : ''
+      }</div>`,
+    );
+    for (let day = 0; day < 7; day += 1) {
+      const index = day * 24 + hour;
+      cells.push(
+        `<div class="tg-cell ${grid[index] === '1' ? 'is-on' : ''}" data-cell="${index}"></div>`,
+      );
+    }
+  }
+  return `
+    <div class="tg">
+      <div class="tg-corner"></div>
+      ${WEEK_HEAD.map((day) => `<div class="tg-head">${day}</div>`).join('')}
+      ${cells.join('')}
+    </div>
+  `;
+}
+
+function wireTimeGrid(root, initial) {
+  const grid = [...initial];
+  const total = root.querySelector('#tg-total');
+  const surface = root.querySelector('.tg');
+  let painting = false;
+  let paintTo = '1';
+
+  const refresh = () => {
+    const hours = grid.filter((cell) => cell === '1').length;
+    total.textContent = `${hours}h / 週`;
+  };
+
+  const paint = (cell) => {
+    if (!cell) return;
+    const index = Number(cell.dataset.cell);
+    if (grid[index] === paintTo) return;
+    grid[index] = paintTo;
+    cell.classList.toggle('is-on', paintTo === '1');
+    refresh();
+  };
+
+  surface.addEventListener('pointerdown', (event) => {
+    const cell = event.target.closest('.tg-cell');
+    if (!cell) return;
+    event.preventDefault();
+    painting = true;
+    // 最初に触ったマスの逆の状態を、指を離すまで塗り続ける。
+    paintTo = cell.classList.contains('is-on') ? '0' : '1';
+    surface.setPointerCapture(event.pointerId);
+    paint(cell);
+  });
+
+  // 指の下にあるマスを座標から拾う。捕捉中は pointermove が surface に来るため。
+  surface.addEventListener('pointermove', (event) => {
+    if (!painting) return;
+    paint(document.elementFromPoint(event.clientX, event.clientY)?.closest('.tg-cell'));
+  });
+
+  const stop = () => {
+    painting = false;
+  };
+  surface.addEventListener('pointerup', stop);
+  surface.addEventListener('pointercancel', stop);
+
+  root.querySelector('#tg-clear').addEventListener('click', () => {
+    grid.fill('0');
+    for (const cell of surface.querySelectorAll('.tg-cell')) cell.classList.remove('is-on');
+    refresh();
+  });
+
+  root.querySelector('#tg-save').addEventListener('click', async () => {
+    try {
+      await api('/settings/time-grid', { method: 'PUT', body: { grid: grid.join('') } });
+      toast('週の可処分タイムを保存しました');
+      await renderSettings();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  refresh();
+}
+
 /* ---------- タグの整理 ---------- */
 
 async function renderTags() {
@@ -2019,9 +2402,8 @@ async function renderTags() {
               )
               .join('')}
             <div class="btn-row"><button type="submit" class="primary">名前を保存</button></div>
-            <div class="hint">削除してもタグが外れるだけで、項目は残ります。</div>
           </form>`
-        : '<div class="empty">タグはまだありません。<br />アイデアやログの詳細から付けられます。</div>'
+        : '<div class="empty">タグはまだありません</div>'
     }
   `;
 
@@ -2097,48 +2479,79 @@ function wireLegacy(container, onChanged) {
 
 /* ---------- ダンジョン ----------
 
-   たまっていく情報を「道」として地図にする。
-     部屋 = アイデア／ログ、通路 = ミッション、大釜 = 通路の束、宝箱 = レガシー。
-     縦 = 深さ（子は必ず親より後に生まれるので、下へ行くほど後の時間）。
-     横 = 枝分かれ。区画 = タグ。                                            */
+   たまっていく情報を、球体の盤として描く。
+     節 = アイデア／ログ、軌道 = ミッション、大釜の節 = 素材の束、宝箱 = レガシー。
+     中心が入口。外へ行くほど後の時間で、角度が枝分かれ。区画 = タグ。
+     入口からいちばん奥の掘削中まで、軌道に灯を入れて進む先を示す。
+
+   光はぼかしで作らない。同じ中心の輪を段で重ねて滲みにする。
+   ぼかすとこの画面だけ輪郭が溶けて、他と手ざわりが変わってしまう。 */
 
 let dungeonFilter = 'all';
 
-const MAP = { row: 56, col: 100, padX: 14, padY: 16, icon: 18 };
+const GRID = {
+  node: 11, // 節の半径
+  ring: 74, // 軌道の間隔
+  first: 84, // 中心から最初の軌道まで。ここが狭いと内側の札が触れ合う
+  margin: 78, // いちばん外の札が収まるぶん
+  icon: 14,
+};
+
+// 紙に引いた盤。地を白のままにして、節と軌道を墨と葉の色で置く。
+// 暗い地の光り方は使えないので、滲みは薄い輪を重ねた「にじみ」として残す。
+const SPHERE = {
+  space: '#fbfaf5',
+  guide: '#e2e2d6', // 軌道の案内線
+  fleck: '#e8e7db', // 紙の斑
+  bed: '#e7efe0', // 軌道の下敷き
+  bedDim: '#eeede4',
+  core: '#ffffff', // 節の中身
+};
+
+// 節の色。輪で描き、中は紙のまま抜く。
+const NODE_HUE = {
+  idea: { ring: '#b8452f', glow: '184, 69, 47' },
+  spell: { ring: '#a8802a', glow: '168, 128, 42' },
+  log: { ring: '#8a7a55', glow: '138, 122, 85' },
+  cauldron: { ring: '#4e8b3a', glow: '78, 139, 58' },
+  dead: { ring: '#b3b2a4', glow: '179, 178, 164' },
+  digging: { ring: '#a8802a', glow: '168, 128, 42' },
+};
 
 const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
 
-// 部屋と通路に (depth, lane) を振る。葉から順にレーンを配り、親は子の中央に置く。
-// 大釜は素材ごとにレーンを取らず、1つに畳んで進み具合だけ出す。
-// 素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。
+/* 節に (depth, slot) を振る。葉から順に区画を配り、親は子の平均に置く。
+   これで枝が扇に開き、中心から外へ向かう盤になる。
+   大釜は素材ごとに区画を取らず、1つに畳んで進み具合だけ出す。
+   素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。 */
 function layoutRoad(root) {
   const nodes = [];
-  let nextLane = 0;
+  let nextId = 0;
+  let leaves = 0;
 
   const placeCorridor = (corridor, depth) => {
     const child = corridor.room
       ? place(corridor.room, depth)
-      : { kind: 'dead', depth, lane: nextLane++, children: [] };
+      : { kind: 'dead', id: nextId++, depth, slot: leaves++, children: [] };
     if (!corridor.room) nodes.push(child);
     child.corridor = corridor;
     return child;
   };
 
+  const mid = (children) =>
+    children.reduce((sum, child) => sum + child.slot, 0) / children.length;
+
   const placeCauldron = (bundle, depth) => {
     const branching = bundle.corridors.filter((c) => c.room && hasBranch(c.room));
     const children = branching.map((corridor) => placeCorridor(corridor, depth + 1));
-    const lane = children.length
-      ? (children[0].lane + children[children.length - 1].lane) / 2
-      : nextLane++;
-    const done = bundle.corridors.filter((c) => c.mission.status === 'done').length;
-    const needed = bundle.corridors.filter((c) => c.mission.status !== 'abandoned').length;
     const node = {
       kind: 'cauldron',
+      id: nextId++,
       cauldron: bundle.cauldron,
-      done,
-      needed,
+      done: bundle.corridors.filter((c) => c.mission.status === 'done').length,
+      needed: bundle.corridors.filter((c) => c.mission.status !== 'abandoned').length,
       depth,
-      lane,
+      slot: children.length ? mid(children) : leaves++,
       children,
     };
     for (const child of children) child.parent = node;
@@ -2147,14 +2560,24 @@ function layoutRoad(root) {
   };
 
   function place(room, depth) {
+    // 大釜を伏せている間は、素材を束ねずに親の軌道として並べる。
+    // 節ごと落とすと、その先に続く道まで盤から消えてしまう。
+    const bundles = SHOW.cauldron ? room.cauldrons : [];
+    const spliced = SHOW.cauldron
+      ? room.corridors
+      : [...room.corridors, ...room.cauldrons.flatMap((bundle) => bundle.corridors)];
     const children = [
-      ...room.corridors.map((corridor) => placeCorridor(corridor, depth + 1)),
-      ...room.cauldrons.map((bundle) => placeCauldron(bundle, depth + 1)),
+      ...spliced.map((corridor) => placeCorridor(corridor, depth + 1)),
+      ...bundles.map((bundle) => placeCauldron(bundle, depth + 1)),
     ];
-    const lane = children.length
-      ? (children[0].lane + children[children.length - 1].lane) / 2
-      : nextLane++;
-    const node = { kind: 'room', room, depth, lane, children };
+    const node = {
+      kind: 'room',
+      id: nextId++,
+      room,
+      depth,
+      slot: children.length ? mid(children) : leaves++,
+      children,
+    };
     for (const child of children) child.parent = node;
     nodes.push(node);
     return node;
@@ -2162,117 +2585,272 @@ function layoutRoad(root) {
 
   place(root, 0);
 
-  const maxLane = Math.max(...nodes.map((n) => n.lane));
+  const total = Math.max(leaves, 1);
   const maxDepth = Math.max(...nodes.map((n) => n.depth));
+  const outer = maxDepth ? GRID.first + (maxDepth - 1) * GRID.ring : 0;
+  const center = outer + GRID.margin;
+
   for (const node of nodes) {
-    node.x = MAP.padX + node.lane * MAP.col + MAP.icon;
-    node.y = MAP.padY + node.depth * MAP.row;
+    // 中心が入口。深さ1から軌道に乗る。
+    node.r = node.depth ? GRID.first + (node.depth - 1) * GRID.ring : 0;
+    // 真上から時計回りに配る。
+    node.a = -Math.PI / 2 + ((node.slot + 0.5) / total) * Math.PI * 2;
+    node.x = center + node.r * Math.cos(node.a);
+    node.y = center + node.r * Math.sin(node.a);
   }
-  return {
-    nodes,
-    width: MAP.padX * 2 + maxLane * MAP.col + MAP.col,
-    height: MAP.padY * 2 + maxDepth * MAP.row,
-  };
+
+  return { nodes, center, maxDepth, size: center * 2 };
 }
 
-const CORRIDOR_STYLE = {
-  done: { stroke: '#8d8f7a', width: 3, dash: '' },
-  active: { stroke: '#e0aa3c', width: 3, dash: '6 5' },
-  abandoned: { stroke: '#5b4a2c', width: 2, dash: '2 5' },
-};
+const ROOM_ICON = { idea: 'stone', spell: 'sigil', log: 'footsteps' };
 
 function clip(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-// 親から子へ、直角に折れる通路を引く。
-function corridorPath(parent, child) {
-  const midY = parent.y + MAP.row / 2;
-  return `M ${parent.x} ${parent.y + 12} V ${midY} H ${child.x} V ${child.y - 12}`;
+const n2 = (value) => Math.round(value * 100) / 100;
+
+const onRing = (center, r, a) => [center + r * Math.cos(a), center + r * Math.sin(a)];
+
+/* 親の軌道を子の角度まで回ってから、外へ抜ける。
+   斜めに直線で結ぶと蜘蛛の巣になるので、必ず軌道に沿わせる。 */
+function trackPath(center, parent, child) {
+  const [px, py] = onRing(center, parent.r, parent.a);
+  const [bx, by] = onRing(center, child.r, child.a);
+  let turn = child.a - parent.a;
+  while (turn > Math.PI) turn -= Math.PI * 2;
+  while (turn < -Math.PI) turn += Math.PI * 2;
+
+  if (parent.r < 1 || Math.abs(turn) < 0.002) {
+    return `M ${n2(px)} ${n2(py)} L ${n2(bx)} ${n2(by)}`;
+  }
+  const [ax, ay] = onRing(center, parent.r, child.a);
+  const sweep = turn > 0 ? 1 : 0;
+  const large = Math.abs(turn) > Math.PI ? 1 : 0;
+  return `M ${n2(px)} ${n2(py)} A ${n2(parent.r)} ${n2(parent.r)} 0 ${large} ${sweep} `
+    + `${n2(ax)} ${n2(ay)} L ${n2(bx)} ${n2(by)}`;
 }
 
 function mapPixel(name, x, y, size, overrides = null) {
   const scale = size / 16;
-  return `<g transform="translate(${x - size / 2} ${y - size / 2}) scale(${scale})"
+  return `<g transform="translate(${n2(x - size / 2)} ${n2(y - size / 2)}) scale(${n2(scale)})"
     shape-rendering="crispEdges">${iconBody(name, overrides)}</g>`;
 }
 
-function roadMap(root) {
-  const { nodes, width, height } = layoutRoad(root);
-  const parts = [];
+/* 滲みは同じ中心の輪を段で重ねて作る。ぼかし半径は使わない。 */
+function halo(x, y, r, rgb, steps) {
+  return steps
+    .map(
+      ([grow, alpha]) =>
+        `<circle cx="${n2(x)}" cy="${n2(y)}" r="${n2(r + grow)}" fill="none"
+          stroke="rgba(${rgb}, ${alpha})" stroke-width="1" />`,
+    )
+    .join('');
+}
 
-  // 通路（先に描いて部屋の下に敷く）
+// 紙の斑。描き直すたびに動かないよう、道ごとの種から決める。
+function starfield(size, seed) {
+  let state = seed * 9301 + 49297;
+  const next = () => {
+    state = (state * 9301 + 49297) % 233280;
+    return state / 233280;
+  };
+  const dots = [];
+  for (let i = 0; i < Math.round(size / 9); i += 1) {
+    const x = Math.round(next() * size);
+    const y = Math.round(next() * size);
+    const bright = next() > 0.82;
+    dots.push(`<rect x="${x}" y="${y}" width="${bright ? 2 : 1}" height="${bright ? 2 : 1}"
+      fill="${SPHERE.fleck}" />`);
+  }
+  return dots.join('');
+}
+
+// 凡例の軌道も、盤と同じ「下敷きの上に細い線」で見せる。
+function trackSwatch(kind) {
+  const bed = kind === 'abandoned' ? SPHERE.bedDim : SPHERE.bed;
+  const line = { done: '#9c7325', lit: '#e6bb56', abandoned: '#3a2c17' }[kind];
+  return `<svg class="swatch" viewBox="0 0 24 12" width="24" height="12"
+    aria-hidden="true" focusable="false">
+    <path d="M0 6 H24" stroke="${bed}" stroke-width="7" stroke-linecap="round" />
+    <path d="M0 6 H24" stroke="${line}" stroke-width="2"
+      ${kind === 'abandoned' ? 'stroke-dasharray="2 4"' : ''}
+      ${kind === 'lit' ? 'stroke-dasharray="5 4"' : ''} />
+  </svg>`;
+}
+
+// 凡例の節。盤の上と同じ輪と滲みで出す。
+function nodeSwatch(kind) {
+  const hue = NODE_HUE[kind];
+  return `<svg class="swatch swatch-node" viewBox="0 0 22 22" width="22" height="22"
+    aria-hidden="true" focusable="false">
+    ${halo(11, 11, 6, hue.glow, [[2, 0.22], [4, 0.1]])}
+    <circle cx="11" cy="11" r="6" fill="${SPHERE.core}" stroke="${hue.ring}"
+      stroke-width="2" />
+  </svg>`;
+}
+
+/* 節が1つきりの道は、盤に起こしても輪が1つ描かれるだけで軌道が無い。
+   それが何十本も続くと、ダンジョンが「まだ何もしていないもの」の一覧に化ける。
+   掘った道だけを盤にして、入口しか無いものは押せる粒として畳む。 */
+function roadsOf(region) {
+  const dug = region.roads.filter((road) => road.totals.corridors > 0);
+  const seeds = region.roads.filter((road) => road.totals.corridors === 0);
+  return (
+    dug.map(roadMap).join('') +
+    (seeds.length
+      ? `<div class="seeds">${seeds
+          .map(
+            (road) => `<a class="seed" href="#/${road.type}/${road.id}">
+              ${nodeSwatch(road.type)}<span>${esc(road.title)}</span>
+            </a>`,
+          )
+          .join('')}</div>`
+      : '')
+  );
+}
+
+let mapSeq = 0;
+
+function roadMap(root) {
+  const { nodes, center, maxDepth, size } = layoutRoad(root);
+  const uid = (mapSeq += 1);
+
+  // 入口から、いちばん奥の掘削中の先端まで。灯すのはこの1本だけにする。
+  // 掘削中を全部灯すと盤が金色に埋まって、かえってどこへ向かうのか分からなくなる。
+  const frontier = nodes
+    .filter((node) => node.corridor?.mission.status === 'active')
+    .sort((a, b) => (b.depth !== a.depth ? b.depth - a.depth : a.slot - b.slot))[0];
+  const lit = new Set();
+  for (let n = frontier; n; n = n.parent) lit.add(n.id);
+
+  const beds = [];
+  const lines = [];
+  const glows = [];
+  const bodies = [];
+  const ink = [];
+
+  /* 軌道の案内線。節が乗る輪を薄く先に敷く。 */
+  const guides = [];
+  for (let depth = 1; depth <= maxDepth; depth += 1) {
+    guides.push(`<circle cx="${center}" cy="${center}"
+      r="${n2(GRID.first + (depth - 1) * GRID.ring)}" fill="none"
+      stroke="${SPHERE.guide}" stroke-width="1" />`);
+  }
+
+  /* 軌道 */
   for (const node of nodes) {
     if (!node.parent) continue;
-    const style = CORRIDOR_STYLE[node.kind === 'cauldron' ? 'done' : node.corridor.mission.status];
-    parts.push(
-      `<path d="${corridorPath(node.parent, node)}" fill="none" stroke="${style.stroke}"
-        stroke-width="${style.width}" ${style.dash ? `stroke-dasharray="${style.dash}"` : ''}
-        stroke-linecap="square" />`,
-    );
-    if (node.kind !== 'cauldron') {
-      // 通路の名前は縦の区間に添える
-      parts.push(
-        `<text class="map-corridor" x="${node.x + 8}" y="${node.y - 17}">${esc(
-          clip(node.corridor.mission.title, 6),
-        )}</text>`,
-      );
-      if (node.corridor.mission.is_legacy) {
-        parts.push(mapPixel('chest', node.x - 9, node.y - 24, 13));
-      }
+    const status = node.kind === 'cauldron' ? 'done' : node.corridor.mission.status;
+    const on = lit.has(node.id);
+    const d = trackPath(center, node.parent, node);
+
+    beds.push(`<path d="${d}" fill="none" stroke="${
+      status === 'abandoned' ? SPHERE.bedDim : SPHERE.bed
+    }" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />`);
+
+    const line = status === 'abandoned' ? '#c2c1b4' : on ? 'var(--gold)' : 'var(--green)';
+    lines.push(`<path d="${d}" fill="none" stroke="${line}" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"
+      ${status === 'abandoned' ? 'stroke-dasharray="2 5"' : ''}
+      ${on ? 'stroke-dasharray="6 5"' : ''} />`);
+
+    // 軌道には名前を置かない。節の名前だけで読める。
+    // 宝箱になったミッションだけ、外へ抜ける手前に印を置く。
+    if (node.kind !== 'cauldron' && node.corridor.mission.is_legacy) {
+      const [mx, my] = onRing(center, node.r - GRID.node - 11, node.a);
+      ink.push(mapPixel('chest', mx, my, 11));
     }
   }
 
-  // 部屋・大釜・行き止まり
+  /* 節 */
   for (const node of nodes) {
-    if (node.kind === 'cauldron') {
-      parts.push(
-        mapPixel('cauldron', node.x, node.y, MAP.icon),
-        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y}">${esc(
-          clip(node.cauldron.title, 5),
-        )}</text>`,
-        `<text class="map-cauldron" x="${node.x + 13}" y="${node.y + 11}">${node.done}/${
-          node.needed
-        } ${node.cauldron.complete ? '錬成完了' : '錬成中'}</text>`,
-      );
-      continue;
-    }
+    const { x, y } = node;
 
     if (node.kind === 'dead') {
       const digging = node.corridor.mission.status === 'active';
-      parts.push(
-        `<circle cx="${node.x}" cy="${node.y}" r="6" fill="#120e06"
-          stroke="${digging ? '#e0aa3c' : '#5b4a2c'}" stroke-width="2"
-          stroke-dasharray="3 3" />`,
-        `<text class="map-dead" x="${node.x + 12}" y="${node.y + 4}">${
-          digging ? '掘削中' : '崩落'
-        }</text>`,
+      const hue = NODE_HUE[digging ? 'digging' : 'dead'];
+      if (digging) glows.push(halo(x, y, 8, hue.glow, [[3, 0.26], [6, 0.12]]));
+      bodies.push(`<circle cx="${n2(x)}" cy="${n2(y)}" r="8" fill="${SPHERE.core}"
+        stroke="${hue.ring}" stroke-width="2" stroke-dasharray="3 3" />`);
+      ink.push(
+        `<text class="map-dead${digging ? ' is-active' : ''}" x="${n2(x)}"
+          y="${n2(y + 22)}" text-anchor="middle">${digging ? '掘削中' : '崩落'}</text>`,
       );
       continue;
     }
 
-    const room = node.room;
-    if (room.is_legacy) {
-      parts.push(
-        `<circle cx="${node.x}" cy="${node.y}" r="15" fill="rgba(224,170,60,.14)"
-          stroke="#a97c22" stroke-width="1" />`,
+    const isCauldron = node.kind === 'cauldron';
+    const type = isCauldron ? 'cauldron' : node.room.type;
+    const hue = NODE_HUE[type] ?? NODE_HUE.log;
+    const legacy = !isCauldron && node.room.is_legacy;
+    const r = node.depth === 0 ? GRID.node + 4 : GRID.node;
+
+    glows.push(
+      halo(x, y, r, hue.glow, lit.has(node.id) || legacy
+        ? [[3, 0.3], [6, 0.15], [9, 0.08]]
+        : [[3, 0.18], [6, 0.08]]),
+    );
+    // 宝箱の節には金の輪をもう1本回す。
+    if (legacy) {
+      glows.push(`<circle cx="${n2(x)}" cy="${n2(y)}" r="${r + 5}" fill="none"
+        stroke="var(--gold)" stroke-width="1" />`);
+    }
+    bodies.push(`<circle cx="${n2(x)}" cy="${n2(y)}" r="${r}" fill="${SPHERE.core}"
+      stroke="${hue.ring}" stroke-width="2" />`);
+
+    if (isCauldron) {
+      // 進み具合は輪の一部を明るくして出す。
+      const ratio = node.needed ? node.done / node.needed : 0;
+      if (ratio > 0) {
+        const end = -Math.PI / 2 + ratio * Math.PI * 2;
+        const [sx, sy] = [x, y - (r + 4)];
+        const ex = x + (r + 4) * Math.cos(end);
+        const ey = y + (r + 4) * Math.sin(end);
+        bodies.push(`<path d="M ${n2(sx)} ${n2(sy)} A ${r + 4} ${r + 4} 0 ${
+          ratio > 0.5 ? 1 : 0
+        } 1 ${n2(ex)} ${n2(ey)}" fill="none" stroke="var(--green)" stroke-width="2" />`);
+      }
+      ink.push(mapPixel('cauldron', x, y, GRID.icon));
+    } else {
+      // 押せるのは節ぜんぶ。絵の大きさのままだと的が小さすぎる。
+      ink.push(
+        `<a href="#/${node.room.type}/${node.room.id}" class="map-door">`,
+        `<circle cx="${n2(x)}" cy="${n2(y)}" r="${r + 7}" fill="transparent" />`,
+        mapPixel(ROOM_ICON[node.room.type] ?? 'footsteps', x, y, GRID.icon),
+        '</a>',
       );
     }
-    parts.push(
-      `<a href="#/${room.type}/${room.id}">`,
-      mapPixel(KIND_ICON[room.type], node.x, node.y, MAP.icon),
-      `<text class="map-room" x="${node.x + 13}" y="${node.y + 4}">${esc(
-        clip(room.title, 7),
-      )}</text>`,
-      '</a>',
+
+    /* 札。中心の節だけ真下に、あとは外へ向けて置く。 */
+    const title = isCauldron ? node.cauldron.title : node.room.title;
+    const [lx, ly] = node.depth === 0
+      ? [x, y - r - 14]
+      : onRing(center, node.r + r + 15, node.a);
+    const cos = Math.cos(node.a);
+    const anchor = node.depth === 0 || Math.abs(cos) < 0.25
+      ? 'middle'
+      : cos > 0 ? 'start' : 'end';
+    ink.push(
+      `<text class="map-node${legacy ? ' is-legacy' : ''}" x="${n2(lx)}" y="${n2(ly + 4)}"
+        text-anchor="${anchor}">${esc(clip(title, 6))}</text>`,
     );
-    if (room.is_legacy) parts.push(mapPixel('chest', node.x + 11, node.y - 11, 13));
+    if (isCauldron) {
+      ink.push(
+        `<text class="map-cauldron" x="${n2(lx)}" y="${n2(ly + 16)}"
+          text-anchor="${anchor}">${node.done}/${node.needed}</text>`,
+      );
+    }
   }
 
   return `
-    <div class="map-scroll">
-      <svg class="map" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"
-           role="img" aria-label="${esc(root.title)} の道">${parts.join('')}</svg>
+    <div class="map-scroll" data-center="${n2(size / 2)}">
+      <svg class="map" viewBox="0 0 ${n2(size)} ${n2(size)}" width="${n2(size)}"
+           height="${n2(size)}" role="img" aria-label="${esc(root.title)} の盤">
+        <rect width="${n2(size)}" height="${n2(size)}" fill="${SPHERE.space}" />
+        ${starfield(size, uid)}${guides.join('')}
+        ${beds.join('')}${lines.join('')}${glows.join('')}${bodies.join('')}${ink.join('')}
+      </svg>
     </div>
   `;
 }
@@ -2295,14 +2873,18 @@ async function renderDungeon() {
       }">宝箱のある道</button>
     </div>
 
-    <div class="map-legend">
-      <span>${icon('stone')}アイデア</span>
-      <span>${icon('footsteps')}ログ</span>
-      <span><i class="rule done"></i>通った道</span>
-      <span><i class="rule active"></i>掘削中</span>
-      <span><i class="rule abandoned"></i>崩落</span>
-      <span>${icon('chest')}宝箱</span>
-    </div>
+    <details class="optional">
+      <summary>凡例</summary>
+      <div class="map-legend">
+        <span>${nodeSwatch('idea')}アイデア</span>
+        <span>${nodeSwatch('log')}ログ</span>
+        ${SHOW.cauldron ? `<span>${nodeSwatch('cauldron')}大釜</span>` : ''}
+        <span>${trackSwatch('done')}通った軌道</span>
+        <span>${trackSwatch('lit')}灯りの軌道</span>
+        <span>${trackSwatch('abandoned')}崩落</span>
+        <span>${icon('chest')}宝箱</span>
+      </div>
+    </details>
 
     ${
       regions.length
@@ -2313,10 +2895,19 @@ async function renderDungeon() {
         class="section-count">${region.totals.roads}本</span></div>
       <div class="region">
         <div class="region-stat">
-          <span>部屋 ${region.totals.rooms}</span>
-          <span>通路 ${region.totals.corridors}</span>
-          ${region.totals.cauldrons ? `<span>大釜 ${region.totals.cauldrons}</span>` : ''}
-          <span>最深 ${region.totals.depth}</span>
+          <span>節 ${region.totals.rooms}</span>
+          ${
+            // 掘っていない区画では軌道も深さも常に 0 と 1 になる。出しても読む値が無い。
+            region.totals.corridors
+              ? `<span>軌道 ${region.totals.corridors}</span>
+                 <span>最深 ${region.totals.depth}</span>`
+              : ''
+          }
+          ${
+            SHOW.cauldron && region.totals.cauldrons
+              ? `<span>大釜 ${region.totals.cauldrons}</span>`
+              : ''
+          }
           ${
             region.totals.legacies
               ? `<span class="hot">宝箱 ${region.totals.legacies}</span>`
@@ -2335,11 +2926,11 @@ async function renderDungeon() {
               : ''
           }
         </div>
-        ${region.roads.map(roadMap).join('')}
+        ${roadsOf(region)}
       </div>`,
             )
             .join('')
-        : '<div class="empty">まだ道がありません</div>'
+        : '<div class="empty">まだ盤がありません</div>'
     }
 
     <div class="section-title">宝物庫</div>
@@ -2369,7 +2960,7 @@ async function renderDungeon() {
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだ宝箱はありません。<br />ログや完了したミッションから、得たものが大きかったと思うものを選んでください。</div>'
+        : '<div class="empty">まだ宝箱はありません</div>'
     }
   `;
 
@@ -2379,13 +2970,132 @@ async function renderDungeon() {
       renderDungeon();
     });
   }
+  // 盤は画面より大きいので、開いた時は入口（中心）が見えている状態にする。
+  for (const board of viewEl.querySelectorAll('.map-scroll[data-center]')) {
+    const center = Number(board.dataset.center);
+    board.scrollLeft = center - board.clientWidth / 2;
+    board.scrollTop = center - board.clientHeight / 2;
+  }
+
   wireLegacy(viewEl, renderDungeon);
 }
+
+/* ---------- ページ送り ----------
+
+   縦に流さず、1画面ぶんずつ横へ送る。中身は #view の段組みに流し込むので、
+   各画面の描画側には手を入れずに済む。段の送りは scrollLeft でやる。
+   overflow:hidden でも JS からの代入は効くので、指では動かないまま送れる。 */
+
+const pagerEl = document.getElementById('pager');
+const pageCountEl = document.getElementById('page-count');
+const prevEl = document.getElementById('page-prev');
+const nextEl = document.getElementById('page-next');
+
+let page = 0;
+let pageTotal = 1;
+
+function pageMetrics() {
+  const style = getComputedStyle(viewEl);
+  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const gap = parseFloat(style.columnGap) || 0;
+  const width = Math.max(1, viewEl.clientWidth - padX);
+  return { width, gap, step: width + gap, padX };
+}
+
+function goToPage(next) {
+  const { step } = pageMetrics();
+  page = Math.min(Math.max(next, 0), pageTotal - 1);
+  viewEl.scrollLeft = page * step;
+  pageCountEl.textContent = `${page + 1} / ${pageTotal}`;
+  prevEl.disabled = page === 0;
+  nextEl.disabled = page === pageTotal - 1;
+}
+
+// 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
+let toFirstPage = true;
+
+// 中身が変わるたびに、何ページに割れたかを測り直す。
+function refitPages() {
+  const { width, gap, step, padX } = pageMetrics();
+  viewEl.style.columnWidth = `${width}px`;
+  const flowed = Math.max(0, viewEl.scrollWidth - padX);
+  const total = Math.max(1, Math.round((flowed + gap) / step));
+  const split = total !== pageTotal;
+
+  pageTotal = total;
+  pagerEl.hidden = pageTotal < 2;
+  document.body.classList.toggle('is-paged', pageTotal > 1);
+  goToPage(toFirstPage || split ? 0 : page);
+  toFirstPage = false;
+}
+
+let refitTimer = null;
+let settleTimer = null;
+function scheduleRefit() {
+  cancelAnimationFrame(refitTimer);
+  refitTimer = requestAnimationFrame(refitPages);
+  // 図版や書体が遅れて寸法を決めることがある。落ち着いた頃にもう一度だけ測る。
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(refitPages, 250);
+}
+
+prevEl.addEventListener('click', () => goToPage(page - 1));
+nextEl.addEventListener('click', () => goToPage(page + 1));
+
+// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て測り直す。
+new MutationObserver(scheduleRefit).observe(viewEl, { childList: true, subtree: true });
+window.addEventListener('resize', scheduleRefit);
+
+/* 指で横に払ってもページを送る。
+   地図・時間の表・文字入力の中では、そちらの操作を邪魔しないよう手を出さない。 */
+const KEEPS_TOUCH = '.map-scroll, .tg, input, textarea, select, .tag-bar, .filters';
+let swipe = null;
+
+viewEl.addEventListener('pointerdown', (event) => {
+  if (event.target.closest(KEEPS_TOUCH)) return;
+  swipe = { x: event.clientX, y: event.clientY };
+});
+
+viewEl.addEventListener('pointerup', (event) => {
+  if (!swipe) return;
+  const dx = event.clientX - swipe.x;
+  const dy = event.clientY - swipe.y;
+  swipe = null;
+  // 横に払ったときだけ。縦の動きが勝っていれば、ただの押し損ねとみなす。
+  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  goToPage(page + (dx < 0 ? 1 : -1));
+});
+
+viewEl.addEventListener('pointercancel', () => {
+  swipe = null;
+});
+
+// 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
+window.addEventListener('keydown', (event) => {
+  if (event.target.closest('input, textarea, select')) return;
+  if (event.key === 'ArrowRight') goToPage(page + 1);
+  if (event.key === 'ArrowLeft') goToPage(page - 1);
+});
+
+/* 書き留めるボタンはシェルに置く。思いつくのはどの画面を見ている時でも同じなので、
+   ストリームまで移動してから、では間に合わない。 */
+const fabEl = document.getElementById('fab');
+fabEl.innerHTML = icon('plus');
+fabEl.addEventListener('click', openCapture);
+
+// 物理キーボードがあるときは n でも開く。文字を打っている最中は邪魔しない。
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'n' || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest('input, textarea, select')) return;
+  event.preventDefault();
+  openCapture();
+});
 
 /* ---------- ルーティング ---------- */
 
 async function route() {
   const hash = location.hash.replace(/^#/, '') || '/home';
+  toFirstPage = true;
   try {
     let match;
     if (hash === '/home') return await renderHome();
@@ -2395,6 +3105,7 @@ async function route() {
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
     if (hash === '/tags') return await renderTags();
+    if (hash === '/vault') return await renderVault();
     if (hash === '/spells') return await renderSpells();
     if ((match = hash.match(/^\/spell\/(\d+)$/))) {
       return await renderSpell(Number(match[1]));

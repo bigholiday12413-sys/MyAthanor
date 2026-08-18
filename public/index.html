@@ -11,6 +11,11 @@
     <div class="app">
       <header class="topbar" id="topbar"></header>
       <main class="view" id="view"></main>
+      <div class="pager" id="pager" hidden>
+        <button class="pager-arrow" id="page-prev" aria-label="前のページ">◀</button>
+        <span class="pager-count" id="page-count"></span>
+        <button class="pager-arrow" id="page-next" aria-label="次のページ">▶</button>
+      </div>
       <nav class="tabs" id="tabs">
         <a class="tab" data-tab="home" href="#/home">
           <span class="tab-mark" data-icon="shield"></span><span class="tab-label">ホーム</span>
@@ -26,7 +31,40 @@
         </a>
       </nav>
     </div>
+    <button class="fab" id="fab" aria-label="書き留める"></button>
     <div class="toast" id="toast" hidden></div>
+    <div class="update-badge" id="update-badge" hidden>
+      <span>アップデートが利用可能です</span>
+      <button id="update-btn">更新</button>
+    </div>
     <script type="module" src="/app.js"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+          });
+
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                document.getElementById('update-badge').hidden = false;
+                document.getElementById('update-btn').onclick = () => {
+                  newWorker.postMessage({ type: 'SKIP_WAITING' });
+                };
+              }
+            });
+          });
+
+          setInterval(() => {
+            reg.update();
+          }, 30000);
+        });
+      }
+    </script>
   </body>
 </html>

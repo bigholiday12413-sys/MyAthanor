@@ -2,17 +2,17 @@
    16x16 のグリッドを文字で持ち、横に連続する同色をまとめて <rect> にする。
    拡大しても滲まないよう shape-rendering="crispEdges" で描く。 */
 
-const INK = '#241a0c'; // 輪郭に使う焦茶
-const GOLD = '#e0aa3c';
-const GOLD_DARK = '#a97c22';
-const GREEN = '#7ab648';
-const GREEN_DARK = '#4e7c2c';
+const INK = '#23281f'; // 輪郭に使う墨
+const GOLD = '#a8802a';
+const GOLD_DARK = '#7d5f18';
+const GREEN = '#4e8b3a';
+const GREEN_DARK = '#2f5e26';
 const WOOD = '#8a5a2b';
 const WOOD_DARK = '#5d3a18';
-const CREAM = '#ecd9a8';
-const STONE = '#8d8f7a';
-const TRAIL = '#c9b68d'; // 踏んだ跡
-const GLASS = '#b9c9c2';
+const CREAM = '#c9b78a'; // 明るい面。紙の上なので、白に近づけすぎない
+const STONE = '#7d8175';
+const TRAIL = '#8a7a55'; // 踏んだ跡
+const GLASS = '#8fa79c';
 
 // アイデア＝賢者の石。上面を磨いた赤い宝石として切り、下半分にファセットを入れる。
 const PHILOSOPHERS_STONE = {
@@ -65,7 +65,7 @@ const FOOTSTEPS = {
     '...pppp.........',
     '...ppp..........',
   ],
-  palette: { p: TRAIL },
+  palette: { p: '#7d6f4c' },
 };
 
 // ミッション＝羊皮紙の巻物。
@@ -134,7 +134,7 @@ const KEY = {
     '................',
     '................',
   ],
-  palette: { g: GOLD },
+  palette: { g: GOLD_DARK },
 };
 
 // ホームタブ＝紋章の盾。
@@ -317,7 +317,30 @@ const SIGIL = {
     '.......gg.......',
     '................',
   ],
-  palette: { g: GOLD, c: CREAM },
+  palette: { g: GOLD_DARK, c: '#c9a24a' },
+};
+
+// 金庫＝積み上がった金貨。宝箱（レガシー）とは別物なので硬貨の段で表す。
+const COINS = {
+  rows: [
+    '................',
+    '................',
+    '................',
+    '...oooooooooo...',
+    '...ohhhhhhhho...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oggggggggo...',
+    '...oddddddddo...',
+    '...oooooooooo...',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: { o: INK, h: '#ffeab4', g: GOLD, d: GOLD_DARK },
 };
 
 // アイデアの温度＝炎。熱さに応じて色を差し替えて使う（icon の第3引数）。
@@ -340,7 +363,7 @@ const FLAME = {
     '......ffff......',
     '................',
   ],
-  palette: { f: '#e0aa3c', c: '#ffe8a8' },
+  palette: { f: '#b07f14', c: '#e0bf6a' },
 };
 
 // 冷めきったアイデア＝霜の結晶。
@@ -363,7 +386,7 @@ const FROST = {
     '.......cc.......',
     '................',
   ],
-  palette: { c: '#9fc4d8' },
+  palette: { c: '#5f93ad' },
 };
 
 const CHEVRON = {
@@ -385,7 +408,7 @@ const CHEVRON = {
     '................',
     '................',
   ],
-  palette: { g: CREAM },
+  palette: { g: '#6f7568' },
 };
 
 // 横方向の連続をまとめて矩形にする。
@@ -408,6 +431,64 @@ function toRects({ rows, palette }) {
   return parts.join('');
 }
 
+// 糧＝消え物。丸パン。上面に切り込みを入れて、焼き上がりの向きを出す。
+const PROVISION = {
+  rows: [
+    '................',
+    '................',
+    '................',
+    '.....oooooo.....',
+    '...oohhhhhhoo...',
+    '..ohhhhhhhhhho..',
+    '..ohhcchhcchho..',
+    '..ohhcchhcchho..',
+    '..obhhhhhhhhho..',
+    '..obbhhhhhhhbo..',
+    '..obbbbbbbbbbo..',
+    '...oobbbbbboo...',
+    '.....oooooo.....',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: {
+    o: '#5d3a18', // 焼き縁
+    h: '#e0b070', // 上面
+    c: '#8a5a2b', // 切り込み
+    b: '#b07a3c', // 底
+  },
+};
+
+// 装備＝残るもの。兜。細い天面から裾へ広げ、面頬の一文字と呼吸孔を入れる。
+// 箱のまま描くと書物のアイコンと見分けが付かないので、輪郭で silhouette を作る。
+const HELM = {
+  rows: [
+    '................',
+    '................',
+    '......oooo......',
+    '.....ollllo.....',
+    '....ollllllo....',
+    '....ommmmmmo....',
+    '....odddddddo...',
+    '....ommmmmmo....',
+    '...ommmmmmmmo...',
+    '...omddmmddmo...',
+    '...osssssssso...',
+    '..osssssssssso..',
+    '..oooooooooooo..',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: {
+    o: '#241a0c', // 縁
+    l: '#cfd6d8', // 天面の照り
+    m: '#9aa5ab', // 鋼
+    d: '#141410', // 面頬の隙間と呼吸孔
+    s: '#6e777c', // 裾の陰
+  },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -419,6 +500,9 @@ const SOURCES = {
   gate: GATE,
   chest: CHEST,
   cauldron: CAULDRON,
+  coins: COINS,
+  provision: PROVISION,
+  helm: HELM,
   grimoire: GRIMOIRE,
   sigil: SIGIL,
   flame: FLAME,
@@ -456,6 +540,8 @@ export function icon(name, className = '', overrides = null) {
 // 種別からアイコン名を引く。
 export const KIND_ICON = {
   idea: 'stone',
+  food: 'provision',
+  gear: 'helm',
   spell: 'sigil',
   log: 'footsteps',
   mission: 'parchment',

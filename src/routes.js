@@ -38,8 +38,8 @@ api.use((_req, _res, next) => {
 /* ストリーム */
 api.get('/stream', handle((req, res) => {
   const type = req.query.type ?? 'all';
-  if (!['all', 'idea', 'log'].includes(type)) {
-    const err = new Error('type must be all, idea or log');
+  if (!['all', 'idea', 'log', 'food', 'gear'].includes(type)) {
+    const err = new Error('type must be all, idea, log, food or gear');
     err.status = 400;
     throw err;
   }
@@ -48,10 +48,14 @@ api.get('/stream', handle((req, res) => {
 
 /* 新規追加（種別を選んでテキストのみ） */
 api.post('/entries', handle((req, res) => {
-  const { kind, title } = req.body ?? {};
+  const { kind, title, money_spent } = req.body ?? {};
   if (kind === 'idea') return res.status(201).json(store.createIdea({ title }));
   if (kind === 'log') return res.status(201).json(store.createLog({ title }));
-  const err = new Error('kind must be "idea" or "log"');
+  // 糧と装備はログの器に入れ、買ったものの別と金額だけ添える。
+  if (store.isGoods(kind)) {
+    return res.status(201).json(store.createLog({ title, money_spent, goods: kind }));
+  }
+  const err = new Error('kind must be "idea", "log", "food" or "gear"');
   err.status = 400;
   throw err;
 }));
@@ -110,6 +114,15 @@ api.post('/missions/:id/reopen', handle((req, res) =>
 /* 設定（既定値） */
 api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
 api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
+
+// 週の可処分タイムを表の塗りで決める。塗ったマスの数がそのまま時間になる。
+api.put('/settings/time-grid', handle((req, res) => {
+  const { grid } = req.body ?? {};
+  res.json(grid === null ? store.clearTimeGrid() : store.setTimeGrid(grid));
+}));
+
+/* 金庫 */
+api.get('/vault', handle((_req, res) => res.json(store.getVault())));
 
 /* 期間ごとの可処分量 */
 api.get('/budgets', handle((req, res) => {
