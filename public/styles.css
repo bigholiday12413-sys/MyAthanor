@@ -842,14 +842,6 @@ body::after {
   color: var(--dim);
 }
 
-.field .hint,
-.hint {
-  margin-top: 6px;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--dim);
-}
 
 input,
 select,
@@ -981,6 +973,11 @@ button:disabled {
   padding: 4px 0;
 }
 
+/* 出どころは右端へ。ミッションの中では軽い項目にする。 */
+.card-meta.is-right {
+  justify-content: flex-end;
+}
+
 .card-foot > .mission-dates {
   flex: 1 1 auto;
   min-width: 0;
@@ -988,13 +985,31 @@ button:disabled {
   border-top: none;
 }
 
+/* 期限は押せる操作なので、他の操作と同じ見た目の押しボタンにする。
+   点線の枠だと「畳んである見出し」に見えて、押すものだと分からない。 */
 .card-foot > .mission-dates > summary {
+  gap: 5px;
   min-height: 40px;
-  padding: 0;
+  padding: 0 10px;
   justify-content: center;
-  text-align: center;
-  border: 1px dashed var(--line);
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--edge);
   border-radius: 2px;
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.18);
+}
+
+.card-foot > .mission-dates > summary .px {
+  width: 14px;
+  height: 14px;
+}
+
+.card-foot > .mission-dates[open] > summary {
+  background: rgba(78, 139, 58, 0.09);
 }
 
 /* 開いたら1行を占め、入力欄は下に落とす。 */
@@ -1975,48 +1990,8 @@ a.room-title {
 
 .flask svg {
   width: 100%;
-  max-width: 46px;
+  max-width: 44px;
   height: auto;
-}
-
-.flask-glass {
-  stroke: var(--glass);
-  stroke-width: 1.5;
-}
-
-.flask-cork {
-  fill: var(--wood);
-}
-
-.flask-liquid {
-  fill: var(--green);
-}
-
-.flask.is-soon .flask-liquid {
-  fill: var(--gold);
-}
-
-.flask.is-over .flask-glass {
-  stroke: var(--danger);
-}
-
-.flask-spill {
-  fill: var(--danger);
-}
-
-.flask-day {
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1;
-  color: var(--dim);
-}
-
-.flask.is-soon .flask-day {
-  color: var(--gold-dark);
-}
-
-.flask.is-over .flask-day {
-  color: var(--danger);
 }
 
 /* 棚板。フラスコが乗っている板を1本の線で出す。 */

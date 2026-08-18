@@ -412,7 +412,7 @@ const CHEVRON = {
 };
 
 // 横方向の連続をまとめて矩形にする。
-function toRects({ rows, palette }) {
+export function toRects({ rows, palette }) {
   const parts = [];
   rows.forEach((row, y) => {
     let x = 0;
@@ -537,6 +537,53 @@ const SHEET_DONE = {
   palette: { o: TRAIL, p: '#f6f2e3', f: '#ded2b0', d: '#c2b287', v: GREEN },
 };
 
+// プロセス＝調合の1工程。丸底フラスコ。棚に並ぶものと同じ形にしてある。
+const FLASK = {
+  rows: [
+    '......cccc......',
+    '......cccc......',
+    '......oggo......',
+    '......oggo......',
+    '......oggo......',
+    '.....og..go.....',
+    '....og....go....',
+    '...og.lllll.o...',
+    '..og.lllllll.o..',
+    '..ogllllllllgo..',
+    '.ogllllllllllgo.',
+    '.ogllllllllllgo.',
+    '.ogllllllllllgo.',
+    '..ogllllllllgo..',
+    '..oogllllllgoo..',
+    '....oooooooo....',
+  ],
+  palette: { o: '#5f6d73', g: '#cfe0d8', c: WOOD, l: GREEN },
+};
+
+// インゴット＝炉から出てきた地金。意思や思いつきを、溶かして固めたもの。
+// 2本を積んで、上の1本の面を明るくする。1本だけだと札の中で潰れて読めない。
+const INGOT = {
+  rows: [
+    '................',
+    '................',
+    '......oooooo....',
+    '.....ohhhhhho...',
+    '....ohhhhhhhho..',
+    '....obbbbbbbbo..',
+    '....obbbbbbbbo..',
+    '....oddddddddo..',
+    '..oooooooooooo..',
+    '.ohhhhhhhhhhhho.',
+    'ohhhhhhhhhhhhhho',
+    'obbbbbbbbbbbbbbo',
+    'obbbbbbbbbbbbbbo',
+    'oddddddddddddddo',
+    '.oooooooooooooo.',
+    '................',
+  ],
+  palette: { o: GOLD_DARK, h: '#f0c96a', b: GOLD, d: '#6b4f14' },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -557,6 +604,8 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  ingot: INGOT,
+  flask: FLASK,
   sheet: SHEET,
   'sheet-done': SHEET_DONE,
 };
@@ -592,8 +641,8 @@ export const KIND_ICON = {
   idea: 'stone',
   food: 'provision',
   gear: 'helm',
-  spell: 'sigil',
+  spell: 'ingot',
   log: 'footsteps',
-  mission: 'parchment',
+  mission: 'flask',
   recurrence: 'hourglass',
 };

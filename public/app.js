@@ -1,10 +1,10 @@
 /* MyAthanor — フロントエンド（ビルドなしの ES モジュール） */
 
-import { icon, iconBody, KIND_ICON } from './icons.js';
+import { icon, iconBody, toRects, KIND_ICON } from './icons.js';
 
 /* いったん伏せてあるもの。表と API と保存済みの値はそのまま残してあるので、
-   true に戻せば元通り出る。伏せている間も、大釜に入っているミッションは
-   ふつうのミッションとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
+   true に戻せば元通り出る。伏せている間も、大釜に入っているプロセスは
+   ふつうのプロセスとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
 const SHOW = { temperature: false, cauldron: false };
 
 const viewEl = document.getElementById('view');
@@ -132,7 +132,7 @@ for (const el of tabsEl.querySelectorAll('.tab-mark')) {
   el.innerHTML = icon(el.dataset.icon);
 }
 
-/* ---------- ミッションの期日 ---------- */
+/* ---------- プロセスの期日 ---------- */
 
 const todayKey = () => {
   const now = new Date();
@@ -197,7 +197,7 @@ function missionDates(mission) {
   const range = dueRange(mission);
   return `
     <details class="mission-dates">
-      <summary>${range ? esc(range) : '日付を決める'}</summary>
+      <summary>${icon('hourglass')}<span>${range ? esc(range) : '期限'}</span></summary>
       <form class="mission-date-form" data-dates="${mission.id}">
         <div class="row">
           <div class="field">
@@ -244,7 +244,7 @@ function missionCard(mission, { showSource = true } = {}) {
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
-      <div class="card-title">${icon('parchment')}<span>${esc(mission.title)}</span></div>
+      <div class="card-title">${icon(KIND_ICON.mission)}<span>${esc(mission.title)}</span></div>
       ${
         mission.estimated_time || mission.estimated_money
           ? `<div class="card-meta">
@@ -261,9 +261,11 @@ function missionCard(mission, { showSource = true } = {}) {
           : ''
       }
       ${
+        // 出どころは右端へ寄せる。プロセスの中では重さの軽い項目で、
+        // 辿るのは盤のほうが主なので、左からは外す。
         showSource && mission.source_title
-          ? `<div class="card-meta">
-               <a class="link" href="${sourceHref}">↳ ${esc(KIND_LABEL[mission.source_type])}: ${esc(mission.source_title)}</a>
+          ? `<div class="card-meta is-right">
+               <a class="link" href="${sourceHref}">${esc(clip(mission.source_title, 10))} ↗</a>
              </div>`
           : ''
       }
@@ -281,7 +283,7 @@ function missionCard(mission, { showSource = true } = {}) {
   `;
 }
 
-// ミッションカードの完了／断念／再開と、期日の保存をまとめて処理する。
+// プロセスカードの完了／断念／再開と、期日の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
   container.addEventListener('submit', async (event) => {
     const form = event.target.closest('form[data-dates]');
@@ -306,7 +308,7 @@ function wireMissionActions(container, onChanged) {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     const { act, id } = button.dataset;
-    if (act === 'abandon' && !confirm('このミッションを断念しますか？')) return;
+    if (act === 'abandon' && !confirm('このプロセスを断念しますか？')) return;
     button.disabled = true;
     try {
       await api(`/missions/${id}/${act}`, { method: 'POST' });
@@ -431,48 +433,82 @@ function walletBars(rows) {
 
 /* ユーズド。ホームからは外して、ウォレットの試験管の先に置く。
    ホームは「いま週のどこに居るか」だけでよく、内訳は見に行くもの。 */
-/* 調合棚。今週のうちに期限が来るミッションを、丸底フラスコとして棚に並べる。
+/* 調合棚。今週のうちに期限が来るプロセスを、丸底フラスコとして棚に並べる。
    中身の高さが残り日数で、期限が近いほど減っている。過ぎたものは吹きこぼれる。
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
+
+/* 丸底フラスコ。他の絵と同じくドット絵で描く。
+   中身の高さだけが変わるので、型を1つ持って行ごとに塗り分ける。 */
+const FLASK_ROWS = [
+  '......cccc......',
+  '......cccc......',
+  '......o..o......',
+  '......o..o......',
+  '......o..o......',
+  '.....o....o.....',
+  '....o......o....',
+  '...o........o...',
+  '..o..........o..',
+  '..o..........o..',
+  '.o............o.',
+  '.o............o.',
+  '.o............o.',
+  '..o..........o..',
+  '..oo........oo..',
+  '....oooooooo....',
+];
+
+// 液が入りうる行（首から底の1つ上まで）。
+const FLASK_BODY = [2, 14];
+
+const FLASK_TONE = {
+  far: '#4a8236',
+  soon: '#a8802a',
+  over: '#b8442c',
+};
+
+function flaskRows(ratio, spill) {
+  const [top, bottom] = FLASK_BODY;
+  const rows = FLASK_ROWS.map((row) => row.split(''));
+  const height = bottom - top + 1;
+  const fill = Math.round(ratio * height);
+
+  for (let y = bottom; y > bottom - fill; y -= 1) {
+    const row = rows[y];
+    const left = row.indexOf('o');
+    const right = row.lastIndexOf('o');
+    for (let x = left + 1; x < right; x += 1) if (row[x] === '.') row[x] = 'l';
+  }
+  // 吹きこぼれ。口の脇に粒を散らす。
+  if (spill) {
+    for (const [x, y] of [[4, 1], [11, 2], [3, 3], [12, 4]]) rows[y][x] = 'l';
+  }
+  return rows.map((row) => row.join(''));
+}
 
 function flask(mission, weekEnd) {
   const left = daysUntil(mission.effective_due_date ?? mission.due_date);
   const over = left < 0;
   // 週の残りぶんを満たすところから、期限に向かって減っていく。
   const span = Math.max(1, daysUntil(weekEnd) + 1);
-  const ratio = over ? 0 : Math.max(0.08, Math.min(1, (left + 1) / span));
-  const tone = over ? 'is-over' : left <= 1 ? 'is-soon' : '';
+  const ratio = over ? 0 : Math.max(0.1, Math.min(1, (left + 1) / span));
+  const key = over ? 'over' : left <= 1 ? 'soon' : 'far';
   const href = `#/${mission.source_type}/${mission.source_id}`;
 
-  // 丸底。液は底から ratio ぶんだけ満たす。段で塗るのでぼかしは使わない。
-  const cx = 22;
-  const cy = 30;
-  const r = 13;
-  const top = cy + r - 2 * r * ratio;
+  const body = toRects({
+    rows: flaskRows(ratio, over),
+    palette: {
+      o: over ? FLASK_TONE.over : '#8fa79c',
+      c: '#8a5a2b',
+      l: FLASK_TONE[key],
+    },
+  });
 
   return `
-    <a class="flask ${tone}" href="${href}" aria-label="${esc(mission.title)}">
-      <svg viewBox="0 0 44 46" aria-hidden="true" focusable="false">
-        <clipPath id="fl${mission.id}">
-          <circle cx="${cx}" cy="${cy}" r="${r}" />
-        </clipPath>
-        <rect class="flask-liquid" x="${cx - r}" y="${n2(top)}"
-              width="${r * 2}" height="${n2(cy + r - top)}" clip-path="url(#fl${mission.id})" />
-        <circle class="flask-glass" cx="${cx}" cy="${cy}" r="${r}" fill="none" />
-        <path class="flask-glass" d="M ${cx - 4} ${cy - r + 1} L ${cx - 4} 8
-              M ${cx + 4} ${cy - r + 1} L ${cx + 4} 8" fill="none" />
-        <rect class="flask-cork" x="${cx - 6}" y="4" width="12" height="5" rx="1" />
-        ${
-          // 吹きこぼれ。口から溢れた粒を左右に散らす。
-          over
-            ? `<circle class="flask-spill" cx="${cx - 7}" cy="10" r="2" />
-               <circle class="flask-spill" cx="${cx + 8}" cy="13" r="1.5" />
-               <circle class="flask-spill" cx="${cx - 10}" cy="16" r="1.5" />`
-            : ''
-        }
-      </svg>
-      <span class="flask-day">${over ? `${-left}日超` : left === 0 ? '今日' : `${left}日`}</span>
+    <a class="flask is-${key}" href="${href}" aria-label="${esc(mission.title)}">
+      <svg viewBox="0 0 16 16" shape-rendering="crispEdges"
+           aria-hidden="true" focusable="false">${body}</svg>
     </a>
   `;
 }
@@ -521,12 +557,12 @@ async function renderHome() {
   setTopbar({
     title: 'MyAthanor',
     action:
-      `<a class="icon-btn" href="#/spells" aria-label="スペルブック">${icon('grimoire')}</a>` +
+      `<a class="icon-btn" href="#/spells" aria-label="インゴット">${icon('ingot')}</a>` +
       `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  // 今週の終わり。ここまでに期限が来るミッションだけを棚に並べる。
+  // 今週の終わり。ここまでに期限が来るプロセスだけを棚に並べる。
   const weekEnd = dateKeyOf(new Date(new Date(summaryWeekEnd()).getTime() - 1));
   const [summary, vault, due] = await Promise.all([
     api('/summary'),
@@ -567,7 +603,7 @@ async function renderHome() {
     <div class="section-title">現況</div>
     <div class="panel">
       <div class="stat-line">
-        <span>進行中ミッション</span>
+        <span>進行中プロセス</span>
         <span class="v">${summary.active_mission_count}</span>
       </div>
       <div class="stat-line">
@@ -650,7 +686,7 @@ function streamCard(item) {
       <div class="card-top">
         <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
-        ${item.from_mission ? '<span>ミッション由来</span>' : ''}
+        ${item.from_mission ? '<span>プロセス由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
@@ -665,7 +701,7 @@ function streamCard(item) {
         }
         ${
           item.mission_count
-            ? `<span class="${item.active_mission_count ? 'hot' : ''}">ミッション ${item.mission_count}件${
+            ? `<span class="${item.active_mission_count ? 'hot' : ''}">プロセス ${item.mission_count}件${
                 item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
               }</span>`
             : ''
@@ -705,8 +741,7 @@ function openCapture() {
       </div>
       <div class="field capture-row">
         <input id="capture-title" autocomplete="off" enterkeyhint="done" />
-        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0"
-          placeholder="円" hidden />
+        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0" hidden />
       </div>
       <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
@@ -722,14 +757,7 @@ function openCapture() {
   const caughtEl = backdrop.querySelector('#caught');
 
   // 糧と装備は買ったものなので、金額を並べて受ける。
-  const HOLDER = {
-    idea: 'したいこと',
-    log: '起きたこと',
-    food: '食べたもの・消えるもの',
-    gear: '買ったもの・残るもの',
-  };
   function dressFor(kind) {
-    input.placeholder = HOLDER[kind];
     money.hidden = !isGoods(kind);
     if (money.hidden) money.value = '';
   }
@@ -832,9 +860,9 @@ function openCapture() {
 
 /* ---------- 詳細（アイデア／ログ） ---------- */
 
-/* ---------- 大釜（ミッションのTODOリスト） ---------- */
+/* ---------- 大釜（プロセスのTODOリスト） ---------- */
 
-// ひとつの大きなイベントに必要なミッションを素材として並べる。
+// ひとつの大きなイベントに必要なプロセスを素材として並べる。
 // 素材が全部そろうと錬成が終わる。断念した素材は必要数から外れる。
 function cauldronPanel(cauldron) {
   const { progress } = cauldron;
@@ -896,8 +924,7 @@ function cauldronPanel(cauldron) {
 
       <form class="material-add" data-add="${cauldron.id}">
         <div class="field">
-          <textarea id="mat-${cauldron.id}" rows="2"
-                    placeholder="素材を投入（1行に1つ）"></textarea>
+          <textarea id="mat-${cauldron.id}" rows="2"></textarea>
         </div>
         <div class="btn-row">
           <button type="submit">投入</button>
@@ -1003,7 +1030,7 @@ function wireCauldrons(container, entryId, kind) {
       } else if (act) {
         await api(`/missions/${act.dataset.id}/${act.dataset.materialAct}`, { method: 'POST' });
       } else {
-        if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のミッションとして残ります）`)) return;
+        if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のプロセスとして残ります）`)) return;
         await api(`/cauldrons/${drop.dataset.drop}`, { method: 'DELETE' });
         toast('大釜を捨てました');
       }
@@ -1085,18 +1112,18 @@ async function renderEntry(kind, entryId) {
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
   const entry = await api(path);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
-  // 大釜に入っているミッションは大釜のほうに出すので、こちらからは外す。
+  // 大釜に入っているプロセスは大釜のほうに出すので、こちらからは外す。
   // 大釜を伏せている間は外さない。外すとどこからも出てこなくなる。
   const loose = SHOW.cauldron
     ? entry.missions.filter((mission) => !mission.cauldron_id)
     : entry.missions;
 
   viewEl.innerHTML = `
-    ${/* いちばん使うのはミッションを足すこと。1ページ目に置く。 */ ''}
-    <div class="section-title">ミッションを追加</div>
+    ${/* いちばん使うのはプロセスを足すこと。1ページ目に置く。 */ ''}
+    <div class="section-title">プロセスを追加</div>
     <form class="panel" id="mission-form">
       <div class="field">
-        <input id="m-title" autocomplete="off" placeholder="切り出すミッション" />
+        <input id="m-title" autocomplete="off" />
       </div>
       <details class="optional">
         <summary>見積と日付</summary>
@@ -1124,12 +1151,12 @@ async function renderEntry(kind, entryId) {
       <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
 
-    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
+    <div class="section-title">${SHOW.cauldron ? '単独のプロセス' : 'プロセス'}</div>
     <div class="list" id="entry-missions">
       ${
         loose.length
           ? loose.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">ミッションはありません</div>'
+          : '<div class="empty">プロセスはありません</div>'
       }
     </div>
 
@@ -1171,7 +1198,7 @@ async function renderEntry(kind, entryId) {
       <div class="stat-line"><span>${kind === 'idea' ? '作成' : '発生'}</span><span class="v">${esc(fmtDate(at))}</span></div>
       ${
         entry.source_mission
-          ? `<div class="stat-line"><span>由来</span><span class="v">ミッション完了「${esc(entry.source_mission.title)}」</span></div>`
+          ? `<div class="stat-line"><span>由来</span><span class="v">プロセス完了「${esc(entry.source_mission.title)}」</span></div>`
           : ''
       }
       ${
@@ -1196,7 +1223,7 @@ async function renderEntry(kind, entryId) {
         <summary>大釜を用意する</summary>
         <form id="cauldron-new">
           <div class="field">
-            <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
+            <input id="c-title" autocomplete="off" />
           </div>
           <details class="optional">
             <summary>日付</summary>
@@ -1295,7 +1322,7 @@ async function renderEntry(kind, entryId) {
           due_date: document.getElementById('m-to').value || null,
         },
       });
-      toast('ミッションを追加しました');
+      toast('プロセスを追加しました');
       await renderEntry(kind, entryId);
     } catch (err) {
       toast(err.message, true);
@@ -1306,14 +1333,14 @@ async function renderEntry(kind, entryId) {
   wireLegacy(viewEl, () => renderEntry(kind, entryId));
 }
 
-/* ---------- ミッション ---------- */
+/* ---------- プロセス ---------- */
 
 let missionFilter = 'active';
 let missionSort = 'due';
 
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: 'ミッション' });
+  setTopbar({ title: 'プロセス' });
 
   const missions = await api(`/missions?status=${missionFilter}&sort=${missionSort}`);
   const totals = missions.reduce(
@@ -1359,7 +1386,7 @@ async function renderMissions() {
       ${
         missions.length
           ? missions.map((m) => missionCard(m)).join('')
-          : '<div class="empty">該当するミッションはありません</div>'
+          : '<div class="empty">該当するプロセスはありません</div>'
       }
     </div>
   `;
@@ -1463,13 +1490,6 @@ async function renderSettings() {
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
-      ${
-        settings.time_grid || !settings.weekly_time
-          ? ''
-          : `<div class="hint">いまは ${esc(
-              fmtTime(settings.weekly_time),
-            )}／週（数値で設定）。保存すると置き換わります。</div>`
-      }
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
@@ -1495,7 +1515,6 @@ async function renderSettings() {
         <input id="half-life" type="number" step="1" min="0"
                value="${settings.cooling_half_life_days}" />
       </div>
-      <div class="hint">0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>`
         : ''
@@ -1504,13 +1523,11 @@ async function renderSettings() {
     <div class="section-title">定期イベント</div>
     <a class="card nav-card" href="#/recurrences">
       <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
-      <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
     </a>
 
     <div class="section-title">金庫</div>
     <a class="card nav-card" href="#/vault">
       <div class="card-title">${icon('coins')}<span>金庫の初期残高と積立</span></div>
-      <div class="card-meta"><span>月の余りが積まれていきます</span></div>
     </a>
 
     ${budgetSection('time', timeBudgets)}
@@ -1630,7 +1647,7 @@ function recurrenceFields(recurrence = null) {
 
   return `
     <div class="field">
-      <input id="r-title" autocomplete="off" placeholder="定期的に起きること"
+      <input id="r-title" autocomplete="off"
              value="${esc(recurrence?.title ?? '')}" />
     </div>
     <div class="row">
@@ -1761,7 +1778,6 @@ async function renderRecurrences() {
     <div class="section-title">新しく登録</div>
     <form class="panel" id="recurrence-new">
       ${recurrenceFields()}
-      <div class="hint">開始日から今日までのぶんはログになります。</div>
       <div class="btn-row"><button type="submit" class="primary">登録</button></div>
     </form>
   `;
@@ -1946,13 +1962,13 @@ async function renderRecurrence(recurrenceId) {
   });
 }
 
-/* ---------- スペルブック ---------- */
+/* ---------- インゴット ---------- */
 
-// スペルは「したいこと」ではなく、良いと思った物事を持っておくもの。
+// インゴットは「したいこと」ではなく、良いと思った物事を持っておくもの。
 // 時系列の出来事ではないのでストリームには出さず、ここに溜める。
 async function renderSpells() {
   setActiveTab('home');
-  setTopbar({ title: 'スペルブック', back: '#/home' });
+  setTopbar({ title: 'インゴット', back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const spells = await api('/spells');
@@ -1960,12 +1976,12 @@ async function renderSpells() {
   viewEl.innerHTML = `
     <form class="panel" id="spell-new">
       <div class="field">
-        <input id="s-title" autocomplete="off" placeholder="良いと思った物事・考え方" />
+        <input id="s-title" autocomplete="off" />
       </div>
       <div class="btn-row"><button type="submit" class="primary">書き留める</button></div>
     </form>
 
-    <div class="section-title">スペル<span class="section-count">${spells.length}</span></div>
+    <div class="section-title">インゴット<span class="section-count">${spells.length}</span></div>
     <div class="list">
       ${
         spells.length
@@ -1983,7 +1999,7 @@ async function renderSpells() {
             spell.mission_count
               ? `<div class="card-meta"><span class="${
                   spell.active_mission_count ? 'hot' : ''
-                }">ミッション ${spell.mission_count}件${
+                }">プロセス ${spell.mission_count}件${
                   spell.active_mission_count ? `（進行中 ${spell.active_mission_count}）` : ''
                 }</span></div>`
               : ''
@@ -2003,7 +2019,7 @@ async function renderSpells() {
     if (!title) return input.focus();
     try {
       const created = await api('/spells', { method: 'POST', body: { title } });
-      toast('スペルを書き留めました');
+      toast('インゴットを書き留めました');
       location.hash = `#/spell/${created.id}`;
     } catch (err) {
       toast(err.message, true);
@@ -2013,7 +2029,7 @@ async function renderSpells() {
 
 async function renderSpell(spellId) {
   setActiveTab('home');
-  setTopbar({ title: 'スペル', back: '#/spells' });
+  setTopbar({ title: 'インゴット', back: '#/spells' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const spell = await api(`/spells/${spellId}`);
@@ -2021,11 +2037,11 @@ async function renderSpell(spellId) {
   viewEl.innerHTML = `
     <form class="panel" id="spell-form">
       <div class="field">
-        <label for="title">スペル</label>
+        <label for="title">インゴット</label>
         <input id="title" value="${esc(spell.title)}" autocomplete="off" />
       </div>
       <div class="field">
-        <textarea id="body" rows="5" placeholder="思ったことを書き留める">${esc(
+        <textarea id="body" rows="5">${esc(
           spell.body ?? '',
         )}</textarea>
       </div>
@@ -2035,7 +2051,7 @@ async function renderSpell(spellId) {
       </div>
     </form>
 
-    <div class="section-title">ここから出たミッション</div>
+    <div class="section-title">ここから出たプロセス</div>
     <div class="list" id="entry-missions">
       ${
         spell.missions.length
@@ -2044,10 +2060,10 @@ async function renderSpell(spellId) {
       }
     </div>
 
-    <div class="section-title">ミッションを切り出す</div>
+    <div class="section-title">プロセスを切り出す</div>
     <form class="panel" id="mission-form">
       <div class="field">
-        <input id="m-title" autocomplete="off" placeholder="このスペルからやること" />
+        <input id="m-title" autocomplete="off" />
       </div>
       <details class="optional">
         <summary>見積と日付</summary>
@@ -2095,15 +2111,15 @@ async function renderSpell(spellId) {
   });
 
   document.getElementById('spell-delete').addEventListener('click', async () => {
-    if (!confirm('このスペルを捨てますか？')) return;
+    if (!confirm('このインゴットを捨てますか？')) return;
     try {
       await api(`/spells/${spellId}`, { method: 'DELETE' });
-      toast('スペルを捨てました');
+      toast('インゴットを捨てました');
       location.hash = '#/spells';
     } catch (err) {
       toast(
         err.message === 'spell still has missions'
-          ? 'ミッションが残っているので捨てられません'
+          ? 'プロセスが残っているので捨てられません'
           : err.message,
         true,
       );
@@ -2127,7 +2143,7 @@ async function renderSpell(spellId) {
           due_date: document.getElementById('m-to').value || null,
         },
       });
-      toast('ミッションを切り出しました');
+      toast('プロセスを切り出しました');
       await reload();
     } catch (err) {
       toast(err.message, true);
@@ -2345,11 +2361,11 @@ function wireLegacy(container, onChanged) {
 /* ---------- ダンジョン ----------
 
    たまっていく情報を、1枚の盤として描く。
-     節 = アイデア／ログ、軌道 = ミッション、大釜の節 = 素材の束、宝箱 = レガシー。
+     節 = アイデア／ログ、軌道 = プロセス、大釜の節 = 素材の束、宝箱 = レガシー。
      入口はいちばん内側の輪に並び、外へ行くほど後の時間で、角度が枝分かれ。
      入口からいちばん奥の掘削中まで、軌道に灯を入れて進む先を示す。
 
-   区画には割らない。何と何が関わっているかは、派生したミッションだけが決める。
+   区画には割らない。何と何が関わっているかは、派生したプロセスだけが決める。
 
    光はぼかしで作らない。同じ中心の輪を段で重ねて滲みにする。
    ぼかすとこの画面だけ輪郭が溶けて、他と手ざわりが変わってしまう。 */
@@ -2501,7 +2517,7 @@ function layoutBoard(roads) {
   };
 }
 
-const ROOM_ICON = { idea: 'stone', spell: 'sigil', log: 'footsteps' };
+const ROOM_ICON = { idea: 'stone', spell: 'ingot', log: 'footsteps' };
 
 function clip(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -2618,7 +2634,7 @@ function boardMap(roads) {
       ${on ? 'stroke-dasharray="6 5"' : ''} />`);
 
     // 軌道には名前を置かない。節の名前だけで読める。
-    // 宝箱になったミッションだけ、外へ抜ける手前に印を置く。
+    // 宝箱になったプロセスだけ、外へ抜ける手前に印を置く。
     if (node.kind !== 'cauldron' && node.corridor.mission.is_legacy) {
       const [mx, my] = onRing(cx, cy, node.r - GRID.node - 11, node.a);
       ink.push(mapPixel('chest', mx, my, 11));
