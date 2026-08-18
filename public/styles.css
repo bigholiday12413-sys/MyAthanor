@@ -304,6 +304,18 @@ body::after {
   column-fill: auto;
 }
 
+/* 2ページぶんまでは段に割らず、そのまま縦へ流す。
+   1画面に少し足りないだけで送らせるより、指で流したほうが早い。 */
+.view.is-scroll {
+  column-width: auto !important;
+  columns: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* 末尾が「書き留める」の下に隠れないよう、そのぶん空けておく。 */
+  padding-bottom: calc(var(--pad) + 62px);
+}
+
 /* 枠のあるものはページの境で割らない。断ち切られると別物に見えてしまう。
    ただし大釜のように1画面近い高さになりうる容器まで割らないと、
    入りきらないぶんが丸ごと次ページへ送られて、前のページが白く空く。
@@ -455,12 +467,6 @@ body::after {
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--text);
-}
-
-.tube-period {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--dim);
 }
 
 .tube-wrap {

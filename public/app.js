@@ -330,7 +330,8 @@ function weekSheets(now = new Date()) {
   }).join('')}</div>`;
 }
 
-function tubeCard({ name, period, data, format, plannedLabel = '消費予定' }) {
+// 期間は出さない。上の週の紙がいつの話かを示していて、両方あると二度言うことになる。
+function tubeCard({ name, data, format, plannedLabel = '消費予定' }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
@@ -339,7 +340,6 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
     <div class="tube-card">
       <div class="tube-head">
         <span class="tube-name">${esc(name)}</span>
-        <span class="tube-period">${esc(period)}</span>
       </div>
       <div class="tube-wrap">
         <div class="tube ${data.over ? 'is-over' : ''}">
@@ -425,14 +425,12 @@ async function renderHome() {
     <div class="tubes">
       ${tubeCard({
         name: 'タイム',
-        period: `週 ${summary.time.period.label}`,
         data: summary.time,
         format: fmtTime,
         plannedLabel: '今週予定',
       })}
       ${tubeCard({
         name: 'ウォレット',
-        period: `週 ${summary.money.period.label}`,
         data: summary.money,
         format: fmtMoney,
         plannedLabel: '今週予定',
@@ -3038,8 +3036,17 @@ function goToPage(next) {
 // 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
 let toFirstPage = true;
 
+/* この枚数までは、めくらずに縦へ流す。
+   1画面に少し足りないだけで送る操作を強いるほうが、指の手数が増える。
+   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。 */
+const SCROLL_LIMIT = 2;
+let scrolls = false;
+
 // 中身が変わるたびに、何ページに割れたかを測り直す。
 function refitPages() {
+  // 判定はいつも段組みの状態で測る。流したまま測ると必ず1ページになり、
+  // 一度縦へ倒れたらめくりへ戻れなくなる。
+  viewEl.classList.remove('is-scroll');
   const { width, gap, step, padX } = pageMetrics();
   viewEl.style.columnWidth = `${width}px`;
   const flowed = Math.max(0, viewEl.scrollWidth - padX);
@@ -3047,9 +3054,18 @@ function refitPages() {
   const split = total !== pageTotal;
 
   pageTotal = total;
-  pagerEl.hidden = pageTotal < 2;
-  document.body.classList.toggle('is-paged', pageTotal > 1);
-  goToPage(toFirstPage || split ? 0 : page);
+  scrolls = total <= SCROLL_LIMIT;
+  viewEl.classList.toggle('is-scroll', scrolls);
+  pagerEl.hidden = scrolls || pageTotal < 2;
+  document.body.classList.toggle('is-paged', !scrolls && pageTotal > 1);
+
+  if (scrolls) {
+    viewEl.scrollLeft = 0;
+    if (toFirstPage || split) viewEl.scrollTop = 0;
+    page = 0;
+  } else {
+    goToPage(toFirstPage || split ? 0 : page);
+  }
   toFirstPage = false;
 }
 
@@ -3076,7 +3092,7 @@ const KEEPS_TOUCH = '.map-scroll, .tg, input, textarea, select, .tag-bar, .filte
 let swipe = null;
 
 viewEl.addEventListener('pointerdown', (event) => {
-  if (event.target.closest(KEEPS_TOUCH)) return;
+  if (scrolls || event.target.closest(KEEPS_TOUCH)) return;
   swipe = { x: event.clientX, y: event.clientY };
 });
 
@@ -3096,7 +3112,7 @@ viewEl.addEventListener('pointercancel', () => {
 
 // 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
 window.addEventListener('keydown', (event) => {
-  if (event.target.closest('input, textarea, select')) return;
+  if (scrolls || event.target.closest('input, textarea, select')) return;
   if (event.key === 'ArrowRight') goToPage(page + 1);
   if (event.key === 'ArrowLeft') goToPage(page - 1);
 });
