@@ -449,6 +449,9 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
+// 1歩にかける秒数。急ぐものではないので、ゆっくり歩かせる。
+const KEEPER_STEP = 3;
+
 /* 棚番の絵だけ縦に長い（帽子のぶん）。共通の icon() は 16x16 を前提に
    viewBox を書くので、ここだけ自前で組む。 */
 function keeperMark() {
@@ -566,24 +569,22 @@ function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
   const n = shown.length;
   if (!n && !back && !recurring) return '';
 
-  /* 棚番。1秒ごとに隣のフラスコへ移り、端まで行ったら向きを変えて戻る。
+  /* 棚番。フラスコと同じ段をうろつく。1歩に STEP 秒かけ、端まで行ったら
+     向きを変えて戻る。
      動かすのは transform だけなので合成で済み、本数が増えても値段は変わらない。
      steps(n) で n 区間に割ると、位置は 0 から n-1 番目まで飛び飛びに出る。
      持ち幅がちょうど1つぶんなので、100% + 隙間 = 隣までの距離になる。
      往復は alternate。折り返しは体ごと裏返して、進む向きに顔を向ける。 */
   const keeper =
     n > 1
-      ? `<div class="shelf-walk">
-           <span class="keeper" style="--n:${n};
-                 animation-duration:${n}s; animation-timing-function:steps(${n}, end)">
-             <span class="keeper-face" style="animation-duration:${n * 2}s">
-               ${keeperMark()}
-             </span>
+      ? `<span class="keeper" style="--n:${n};
+             animation-duration:${n * KEEPER_STEP}s;
+             animation-timing-function:steps(${n}, end)">
+           <span class="keeper-face" style="animation-duration:${n * KEEPER_STEP * 2}s">
+             ${keeperMark()}
            </span>
-         </div>`
-      : `<div class="shelf-walk">
-           <span class="keeper is-still"><span class="keeper-face">${keeperMark()}</span></span>
-         </div>`;
+         </span>`
+      : `<span class="keeper is-still"><span class="keeper-face">${keeperMark()}</span></span>`;
 
   /* 定期イベントは棚に並べない。勝手に起きるもので、こちらが仕込むものではない。
      右上から吊るしておいて、来る回のぶんだけ札に出す。 */
@@ -598,10 +599,12 @@ function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
       ${hung}
       <div class="shelf-stage">
         ${backFlasks(back + Math.max(0, rest))}
-        <div class="shelf-row">${shown.map((m) => flask(m, weekEnd)).join('')}</div>
+        <div class="shelf-row">
+          ${shown.map((m) => flask(m, weekEnd)).join('')}
+          ${n ? keeper : ''}
+        </div>
       </div>
       <div class="shelf-board"></div>
-      ${n ? keeper : ''}
       <div class="shelf-names">
         ${shown.map((m) => `<span>${esc(clip(m.title, 5))}</span>`).join('')}
       </div>

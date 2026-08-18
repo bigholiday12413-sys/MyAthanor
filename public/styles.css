@@ -2009,6 +2009,11 @@ a.room-title {
   gap: 4px;
 }
 
+/* 棚番はこの中を歩くので、位置の基準にする。 */
+.shelf-row {
+  position: relative;
+}
+
 /* 棚の上。手前に今週のフラスコ、その1段奥に控えのぶんが並ぶ。 */
 .shelf-stage {
   display: flex;
@@ -2074,14 +2079,8 @@ a.room-title {
   height: auto;
 }
 
-/* 棚番。棚の前を1秒ごとに隣のフラスコへ移る。
+/* 棚番。フラスコと同じ段を、同じ棚板の上で歩く。
    幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。 */
-.shelf-walk {
-  position: relative;
-  height: 22px;
-  margin-bottom: 2px;
-}
-
 .keeper {
   position: absolute;
   left: 0;
