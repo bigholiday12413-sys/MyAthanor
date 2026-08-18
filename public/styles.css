@@ -820,6 +820,11 @@ body::after {
   color: var(--gold-dark);
 }
 
+/* 引かれるぶんの札。可処分から先に持っていかれることを色で言う。 */
+.card-meta .neg {
+  color: var(--danger);
+}
+
 /* ---------- フィルタ ---------- */
 
 .filters {

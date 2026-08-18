@@ -220,6 +220,23 @@ function missionDates(mission) {
   `;
 }
 
+/* 種が毎週いくら持っていくか。見積もりは1回ぶんなので 7 ÷ 周期を掛ける。
+   この額が可処分から先に引かれるので、種の札にだけ出す。
+   周期と見積もりから暗算はできるが、頭の中でやらせる理由がない。 */
+function weekShare(mission) {
+  if (!mission.repeat_days) return '';
+  const share = (value) => Math.round((value * 7) / mission.repeat_days);
+  // 0 のほうは書かない。タイムだけの種に「−¥0」が付くと、引かれた気がしてしまう。
+  const parts = [
+    [share(mission.estimated_time), fmtTime],
+    [share(mission.estimated_money), fmtMoney],
+  ]
+    .filter(([value]) => value)
+    .map(([value, format]) => `−${esc(format(value))}`);
+  if (!parts.length) return '';
+  return `<div class="card-meta"><span class="neg">週 ${parts.join(' · ')}</span></div>`;
+}
+
 function missionCard(mission, { showSource = true } = {}) {
   const sourceHref = `#/${mission.source_type}/${mission.source_id}`;
   const done = mission.status === 'done';
@@ -260,7 +277,8 @@ function missionCard(mission, { showSource = true } = {}) {
                <span>${done ? '実消費' : '見積'} ${esc(fmtTime(mission.estimated_time))}</span>
                <span>${esc(fmtMoney(mission.estimated_money))}</span>
                ${mission.repeat_days ? `<span>${mission.repeat_days}日ごと</span>` : ''}
-             </div>`
+             </div>
+             ${weekShare(mission)}`
           : mission.repeat_days
             ? `<div class="card-meta"><span>${mission.repeat_days}日ごと</span></div>`
             : ''
@@ -399,9 +417,20 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
             <span class="k"><i class="swatch free"></i>残量</span>
             <span class="v ${data.over ? 'neg' : ''}">${esc(format(free))}</span>
           </div>
+          ${
+            /* 固定費。繰り返すぶんは先にここで引いてあるので、消費済みにも
+               消費予定にも出てこない。引かれた覚えのない数字にならないよう、
+               全体のすぐ上に置いて、引き算の途中だと読めるようにする。 */
+            data.fixed
+              ? `<div class="readout-row">
+                   <span class="k">固定費</span>
+                   <span class="v neg">−${esc(format(data.fixed))}</span>
+                 </div>`
+              : ''
+          }
           <div class="readout-row">
             <span class="k">全体</span>
-            <span class="v">${esc(format(data.budget))}</span>
+            <span class="v ${data.budget < 0 ? 'neg' : ''}">${esc(format(data.budget))}</span>
           </div>
         </div>
       </div>
@@ -1572,12 +1601,16 @@ function budgetSection(kind, rows) {
             <div class="budget-key">${esc(row.label)}${
               row.is_current ? '<span class="badge now">現在</span>' : ''
             }</div>
-            <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}</div>
+            <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}${
+              // 固定費を引く前と後で数が違うので、後のほうも出す。
+              // 名前は管の読み取りに合わせる。同じ数を別の名前で呼ばない。
+              row.fixed ? ` · 全体 ${esc(ui.format(row.amount))}` : ''
+            }</div>
           </div>
           <input type="number" min="0" step="${ui.step}"
                  data-key="${esc(row.key)}"
-                 data-original="${ui.toInput(row.amount)}"
-                 value="${ui.toInput(row.amount)}"
+                 data-original="${ui.toInput(row.gross)}"
+                 value="${ui.toInput(row.gross)}"
                  aria-label="${esc(row.label)} の${esc(ui.unit)}" />
           ${
             row.source === 'override'
@@ -1608,6 +1641,12 @@ async function renderSettings() {
   // 塗りが無ければ空の表から始める。
   const grid = (settings.time_grid ?? '').length === 168 ? settings.time_grid : '0'.repeat(168);
 
+  /* 繰り返すプロセスから来る固定費。今の週のぶんを使う。
+     入ってくる量から引かれるので、引き算の途中を両方の枠に見せる。 */
+  const fixedOf = (rows) => rows.find((row) => row.is_current)?.fixed ?? 0;
+  const fixedTime = fixedOf(timeBudgets);
+  const fixedMoney = fixedOf(moneyBudgets);
+
   viewEl.innerHTML = `
     <div class="section-title">週のタイム</div>
     <div class="panel" id="time-grid-panel">
@@ -1616,6 +1655,20 @@ async function renderSettings() {
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
+      ${
+        /* 塗りが無いときは出さない。この行は塗った枚数から引いた数なので、
+           数字で持っている週のタイムとは食い違う。 */
+        fixedTime && settings.time_grid
+          ? `<div class="stat-line">
+               <span>固定費</span>
+               <span class="v neg">−${esc(fmtTime(fixedTime))}</span>
+             </div>
+             <div class="stat-line">
+               <span>週のタイム</span>
+               <span class="v" id="time-net"></span>
+             </div>`
+          : ''
+      }
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
@@ -1625,9 +1678,17 @@ async function renderSettings() {
         <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
       </div>
+      ${
+        fixedMoney
+          ? `<div class="stat-line">
+               <span>固定費</span>
+               <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
+             </div>`
+          : ''
+      }
       <div class="stat-line">
         <span>週のウォレット</span>
-        <span class="v" id="weekly-share">${esc(fmtMoney(Math.round(settings.monthly_money / 4)))}</span>
+        <span class="v" id="weekly-share"></span>
       </div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
@@ -1655,12 +1716,17 @@ async function renderSettings() {
     ${budgetSection('money', moneyBudgets)}
   `;
 
-  // 打っている最中に、4で割った週ぶんが見えるようにする。
+  // 打っている最中に、4で割って固定費を引いたぶんが見えるようにする。
   const rewardInput = document.getElementById('monthly-money');
-  rewardInput.addEventListener('input', () => {
-    document.getElementById('weekly-share').textContent =
-      fmtMoney(Math.round(Number(rewardInput.value || 0) / 4));
-  });
+  const share = document.getElementById('weekly-share');
+  const showShare = () => {
+    const value = Math.round(Number(rewardInput.value || 0) / 4) - fixedMoney;
+    share.textContent = fmtMoney(value);
+    // 固定費が報酬を超えたら赤にする。数字だけだと符号を見落とす。
+    share.classList.toggle('neg', value < 0);
+  };
+  showShare();
+  rewardInput.addEventListener('input', showShare);
 
   document.getElementById('settings-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1678,7 +1744,7 @@ async function renderSettings() {
     }
   });
 
-  wireTimeGrid(document.getElementById('time-grid-panel'), grid);
+  wireTimeGrid(document.getElementById('time-grid-panel'), grid, fixedTime);
 
   if (SHOW.temperature) {
     document.getElementById('cooling-form').addEventListener('submit', async (event) => {
@@ -2046,9 +2112,11 @@ function timeGridMarkup(grid) {
   `;
 }
 
-function wireTimeGrid(root, initial) {
+function wireTimeGrid(root, initial, fixed = 0) {
   const grid = [...initial];
   const total = root.querySelector('#tg-total');
+  // 固定費が無いときは引き算の行を出していないので、更新先も無い。
+  const net = root.querySelector('#time-net');
   const surface = root.querySelector('.tg');
   let painting = false;
   let paintTo = '1';
@@ -2056,6 +2124,11 @@ function wireTimeGrid(root, initial) {
   const refresh = () => {
     const hours = grid.filter((cell) => cell === '1').length;
     total.textContent = `${hours}h / 週`;
+    if (net) {
+      const left = hours * 60 - fixed;
+      net.textContent = fmtTime(left);
+      net.classList.toggle('neg', left < 0);
+    }
   };
 
   const paint = (cell) => {

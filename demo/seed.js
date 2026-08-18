@@ -22,11 +22,25 @@ export function seed(db, transaction) {
     const run = (sql, ...params) => db.prepare(sql).run(...params);
     const idOf = (sql, ...params) => Number(run(sql, ...params).lastInsertRowid);
 
+    /* 週のタイムは塗りで持ち、時間数はその塗りから数える。
+       数字だけで持つと、設定画面の表が空のまま「14h ある」ことになって食い違う。
+       平日の夜（20-22時）と土日の午前（9-12時）で16時間。 */
+    const grid = Array.from({ length: 7 * 24 }, (_, cell) => {
+      const day = Math.floor(cell / 24);
+      const hour = cell % 24;
+      const weekday = day < 5 && hour >= 20 && hour < 22;
+      const weekend = day >= 5 && hour >= 9 && hour < 12;
+      return weekday || weekend ? '1' : '0';
+    }).join('');
+
     run(
-      `UPDATE settings SET weekly_time = ?, monthly_money = ?, vault_initial = ? WHERE id = 1`,
-      14 * 60,
+      `UPDATE settings
+          SET weekly_time = ?, monthly_money = ?, vault_initial = ?, time_grid = ?
+        WHERE id = 1`,
+      [...grid].filter((cell) => cell === '1').length * 60,
       60000,  // 月の報酬。4で割った 15,000 が1週ぶんになる
       48000,
+      grid,
     );
 
     const idea = (title, days, temperature) =>
@@ -174,16 +188,24 @@ export function seed(db, transaction) {
     bought('鉄瓶', 13, 5600, 'gear');
     bought('作業用の前掛け', 24, 3600, 'gear');
 
-    /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。 */
-    run(
-      `INSERT INTO mission
-         (title, source_type, source_id, status, estimated_time, estimated_money,
-          created_at, repeat_days)
-       VALUES (?, 'idea', ?, 'active', ?, 0, ?, 3)`,
-      '庭の水やり',
-      garden,
-      45,
-      iso(28),
-    );
+    /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。
+       固定費として可処分から先に引かれるので、タイムだけのものと
+       ウォレットだけのものを両方置いて、両方の管が減るのを見せる。 */
+    const seedOf = (title, days, minutes, money) =>
+      run(
+        `INSERT INTO mission
+           (title, source_type, source_id, status, estimated_time, estimated_money,
+            created_at, repeat_days)
+         VALUES (?, 'idea', ?, 'active', ?, ?, ?, ?)`,
+        title,
+        garden,
+        minutes,
+        money,
+        iso(28),
+        days,
+      );
+
+    seedOf('庭の水やり', 3, 45, 0);
+    seedOf('炭と灯油', 30, 0, 12000);
   });
 }

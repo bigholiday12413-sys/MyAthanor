@@ -642,6 +642,35 @@ export function isMissionStatus(status) {
   return MISSION_STATUSES.has(status);
 }
 
+/* ---------- 固定費 ---------- */
+
+/* 繰り返すプロセスは、毎回考えて決めるものではなく、決まって出ていくもの。
+   なので週ごとの消費予定として立てず、報酬と同じ「月ぶんの固定費」として扱い、
+   1週ぶんに均して可処分から先に引く。
+
+   週ごとに立てると、家賃の来た週だけ真っ赤になって、他の週が実態より豊かに見える。
+   均せば、どの週も「固定費を払ったあとに手元に残るぶん」を出す。
+
+   種の見積もりは1回ぶんなので、1週あたりは 見積 × 7 ÷ 周期。
+   周期30日のものは月ぶんがちょうど戻る。報酬側の4分割よりわずかに厳しく出るが、
+   足りないより余るほうが安全なので寄せない。 */
+function fixedPerWeek() {
+  return db
+    .prepare(`
+      SELECT estimated_time, estimated_money, repeat_days
+      FROM mission WHERE status = 'active' AND repeat_days IS NOT NULL
+    `)
+    .all()
+    .reduce(
+      (sum, seed) => ({
+        time: sum.time + Math.round((seed.estimated_time * 7) / seed.repeat_days),
+        money: sum.money + Math.round((seed.estimated_money * 7) / seed.repeat_days),
+        count: sum.count + 1,
+      }),
+      { time: 0, money: 0, count: 0 },
+    );
+}
+
 /* ---------- settings ---------- */
 
 export function getSettings() {
@@ -705,13 +734,15 @@ export function getVault(now = new Date()) {
   const settings = getSettings();
   const current = periods.money.of(now);
   const firstLog = db.prepare(`SELECT MIN(occurred_at) AS at FROM log`).get().at;
+  // 何週ぶんも回すので、固定費は先に1回だけ数える。
+  const fixed = fixedPerWeek().money;
 
   const weeks = [];
   if (firstLog) {
     let period = periods.money.of(new Date(firstLog));
     let guard = 0;
     while (period && period.key < current.key && guard < 600) {
-      const budget = resolveBudget('money', period.key);
+      const budget = resolveBudget('money', period.key, fixed);
       const consumed = consumedIn('money', period);
       weeks.push({
         ...period,
@@ -726,7 +757,7 @@ export function getVault(now = new Date()) {
   }
 
   const deposited = weeks.reduce((sum, week) => sum + week.surplus, 0);
-  const currentBudget = resolveBudget('money', current.key).amount;
+  const currentBudget = resolveBudget('money', current.key, fixed).amount;
 
   return {
     initial: settings.vault_initial,
@@ -769,23 +800,35 @@ function requirePeriod(kind, periodKey) {
   return period;
 }
 
-// その期間に使える量。個別設定があればそれを、無ければ既定値を返す。
-// ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから返す。
-export function resolveBudget(kind, periodKey) {
+/* その期間に入ってくる量から固定費を引いて、実際に使える量を出す。
+   個別設定があればそれを、無ければ既定値を入ってくる量として使う。
+   ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから引く。
+
+   固定費は個別設定の週からも引く。可処分の定義を1つに保つため。
+   一覧のように何期間ぶんも回す側では、先に数えて渡せば1回で済む。 */
+export function resolveBudget(kind, periodKey, fixed = fixedPerWeek()[kind]) {
   requireKind(kind);
   const row = db
     .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
     .get(kind, periodKey);
-  if (row) return { amount: row.amount, source: 'override' };
   const stored = getSettings()[DEFAULT_COLUMN[kind]];
-  return { amount: kind === 'money' ? weeklyShare(stored) : stored, source: 'default' };
+  const gross = row ? row.amount : kind === 'money' ? weeklyShare(stored) : stored;
+  return { amount: gross - fixed, gross, fixed, source: row ? 'override' : 'default' };
 }
+
+/* 循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。
+   数えると同じ出費を2回引くことになる。
+   出どころのプロセスが無い普通のログは、LEFT JOIN の結果が NULL なので残る。 */
+const NOT_FROM_REPEAT = `
+  LEFT JOIN mission src ON src.id = l.source_mission_id
+  WHERE src.repeat_of IS NULL
+`;
 
 function consumedIn(kind, period) {
   return db
     .prepare(`
-      SELECT COALESCE(SUM(${SPENT_COLUMN[kind]}), 0) AS total
-      FROM log WHERE occurred_at >= ? AND occurred_at < ?
+      SELECT COALESCE(SUM(l.${SPENT_COLUMN[kind]}), 0) AS total
+      FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
     `)
     .get(period.start, period.end).total;
 }
@@ -797,6 +840,8 @@ export function listBudgets(kind, { past = 5, future = 1 } = {}) {
   const current = scale.of();
   const back = Math.min(Math.max(int(past), 0), 60);
   const ahead = Math.min(Math.max(int(future), 0), 12);
+
+  const fixed = fixedPerWeek()[kind];
 
   const found = new Map();
   for (let offset = -back; offset <= ahead; offset += 1) {
@@ -811,10 +856,12 @@ export function listBudgets(kind, { past = 5, future = 1 } = {}) {
   return [...found.values()]
     .sort((a, b) => b.start.localeCompare(a.start))
     .map((period) => {
-      const budget = resolveBudget(kind, period.key);
+      const budget = resolveBudget(kind, period.key, fixed);
       return {
         ...period,
         amount: budget.amount,
+        gross: budget.gross,
+        fixed: budget.fixed,
         source: budget.source,
         consumed: consumedIn(kind, period),
         is_current: period.key === current.key,
@@ -1225,19 +1272,21 @@ export function getSummary(now = new Date()) {
   // どちらも同じ週。刻みが揃ったので、期間はひとつだけ取ればよい。
   const week = periods.time.of(now);
   const moneyWeek = periods.money.of(now);
-  const timeBudget = resolveBudget('time', week.key);
-  const moneyBudget = resolveBudget('money', moneyWeek.key);
+  const fixed = fixedPerWeek();
+  const timeBudget = resolveBudget('time', week.key, fixed.time);
+  const moneyBudget = resolveBudget('money', moneyWeek.key, fixed.money);
 
   const spent = (period) =>
     db
       .prepare(`
-        SELECT COALESCE(SUM(time_spent), 0) AS time, COALESCE(SUM(money_spent), 0) AS money
-        FROM log WHERE occurred_at >= ? AND occurred_at < ?
+        SELECT COALESCE(SUM(l.time_spent), 0) AS time, COALESCE(SUM(l.money_spent), 0) AS money
+        FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
       `)
       .get(period.start, period.end);
 
-  // 消費予定は期限で絞る。期限が期間の終わりまでに来る進行中ミッションが対象。
-  // 期限切れのものも含める。過ぎていても払う／やるぶんなので、視界から消すと危ない。
+  /* 消費予定は期限で絞る。期限が期間の終わりまでに来る進行中プロセスが対象。
+     期限切れのものも含める。過ぎていても払う／やるぶんなので、視界から消すと危ない。
+     循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。 */
   const plannedMissions = (period) =>
     db
       .prepare(`
@@ -1246,19 +1295,23 @@ export function getSummary(now = new Date()) {
                COUNT(*) AS count
         FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
         WHERE m.status = 'active'
+          AND m.repeat_of IS NULL
           AND COALESCE(m.due_date, c.due_date) IS NOT NULL
           AND COALESCE(m.due_date, c.due_date) <= ?
       `)
       .get(dateKey(new Date(new Date(period.end).getTime() - 1)));
 
-  // 期限を持たないミッション。試験管には乗らないので、別枠で見せて見落としを防ぐ。
+  /* 期限を持たないプロセス。試験管には乗らないので、別枠で見せて見落としを防ぐ。
+     種も期限を持たないが、こちらは固定費として乗っているので外す。 */
   const undated = db
     .prepare(`
       SELECT COALESCE(SUM(m.estimated_time), 0) AS time,
              COALESCE(SUM(m.estimated_money), 0) AS money,
              COUNT(*) AS count
       FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
-      WHERE m.status = 'active' AND COALESCE(m.due_date, c.due_date) IS NULL
+      WHERE m.status = 'active'
+        AND m.repeat_days IS NULL
+        AND COALESCE(m.due_date, c.due_date) IS NULL
     `)
     .get();
 
@@ -1268,15 +1321,16 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active' AND repeat_of IS NULL`)
     .get().count;
 
-  // 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+  /* 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+     管の消費済みの内訳なので、外す条件も管と揃える。 */
   const spendByGoods = db
     .prepare(`
-      SELECT COALESCE(goods, 'event') AS goods,
-             COALESCE(SUM(money_spent), 0) AS money,
+      SELECT COALESCE(l.goods, 'event') AS goods,
+             COALESCE(SUM(l.money_spent), 0) AS money,
              COUNT(*) AS count
-      FROM log
-      WHERE occurred_at >= ? AND occurred_at < ? AND money_spent <> 0
-      GROUP BY COALESCE(goods, 'event')
+      FROM log l ${NOT_FROM_REPEAT}
+        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
+      GROUP BY COALESCE(l.goods, 'event')
     `)
     .all(moneyWeek.start, moneyWeek.end);
 
@@ -1303,12 +1357,16 @@ export function getSummary(now = new Date()) {
       unit: 'minutes',
       ...build(timeBudget.amount, spent(week).time, plannedWeek.time, week),
       budget_source: timeBudget.source,
+      gross: timeBudget.gross,
+      fixed: timeBudget.fixed,
       due_mission_count: plannedWeek.count,
     },
     money: {
       unit: 'jpy',
       ...build(moneyBudget.amount, spent(moneyWeek).money, plannedMoney.money, moneyWeek),
       budget_source: moneyBudget.source,
+      gross: moneyBudget.gross,
+      fixed: moneyBudget.fixed,
       due_mission_count: plannedMoney.count,
     },
     // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
@@ -1319,5 +1377,7 @@ export function getSummary(now = new Date()) {
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,
+    // 固定費の本数。種が何本あって引かれているかを設定で見せるため。
+    fixed_count: fixed.count,
   };
 }
