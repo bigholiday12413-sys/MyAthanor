@@ -494,9 +494,6 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
-// 棚を描き直すたびに増やす。@keyframes の名前を毎回変えて、前のものと混ぜない。
-let shelfSeq = 0;
-
 // 1歩にかける秒数。急ぐものではないので、ゆっくり歩かせる。
 const KEEPER_STEP = 3;
 // 端まで行ったら、いなくなっている時間。奥へ引っ込んでいるつもり。
@@ -513,51 +510,86 @@ function keeperMark(name) {
 
 /* 棚番の動き。右へ歩き、端で消え、しばらくして戻ってくる、を繰り返す。
 
-   歩幅も止まる場所もフラスコの数で変わるので、@keyframes をその場で組む。
-   各keyframe に step-end を付けて、次の点まで値を保たせる。
-   こうすると中割りが起きず、ドット絵が半端な位置に来ない。
+   歩幅も止まる場所もフラスコの数で変わるので、道筋はその場で組む。
+   組んだものは @keyframes ではなく element.animate() に渡す。
+   刷ったCSSを差し込む形だと、規則が入るのと要素に名前が付くのとの前後で
+   動き出さないブラウザがあり、確かめようがない不確かさが残る。
+   JS から直に渡せばその前後関係が消えるうえ、動きを控える設定も
+   その場で見て決められる（CSS 側だと、要素に直接書いた指定に負ける）。
 
+   各点に step-end を付けて、次の点まで値を保たせる。
+   中割りが起きるとドット絵が半端な位置に来る。
    動かすのは transform と opacity だけなので、合成だけで済む。 */
-function keeperWalk(n, uid) {
+function keeperWalk(n) {
   /* 出来事を時間順に並べる。
      右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。 */
-  const events = [];
+  const stops = [];
   let t = 0;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) events.push({ t, pos: i, on: 1, face: 1 });
-  events.push({ t, pos: n - 1, on: 0, face: 1 });
+  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) stops.push({ t, pos: i, on: 1, face: 1 });
+  stops.push({ t, pos: n - 1, on: 0, face: 1 });
   t += KEEPER_AWAY;
   for (let i = 0; i < n; i += 1, t += KEEPER_STEP) {
-    events.push({ t, pos: n - 1 - i, on: 1, face: -1 });
+    stops.push({ t, pos: n - 1 - i, on: 1, face: -1 });
   }
-  events.push({ t, pos: 0, on: 0, face: -1 });
-  const total = t + KEEPER_AWAY;
+  stops.push({ t, pos: 0, on: 0, face: -1 });
+  const seconds = t + KEEPER_AWAY;
 
-  /* 最後の点から 100% までは、そのままの姿勢で消えている。
-     終端の keyframe が無いと元の値へ戻そうとするので、明示して置く。 */
-  const last = events[events.length - 1];
-  const stops = [...events, { ...last, t: total }];
-  const at = (time) => `${((time / total) * 100).toFixed(3)}%`;
-  const rule = (time, body) => `${at(time)} { ${body} animation-timing-function: step-end; }`;
+  /* 最後の点から終いまでは、そのままの姿勢で消えている。
+     終端が無いと元の値へ戻そうとするので、明示して置く。 */
+  stops.push({ ...stops[stops.length - 1], t: seconds });
+  return { seconds, stops };
+}
 
-  const walk = stops
-    .map((e) => rule(e.t, `transform: translateX(calc((100% + 4px) * ${e.pos})); opacity: ${e.on};`))
-    .join('\n');
-  const face = stops.map((e) => rule(e.t, `transform: scaleX(${e.face});`)).join('\n');
-  /* 柄は1歩ごとに送る。歩いている間だけ入れ替わればよいので、
-     何番目の出来事かをそのまま柄の番号にする。 */
-  const frames = KEEPER_FRAMES.map((_, k) =>
-    stops
-      .map((e, index) => rule(e.t, `opacity: ${index % KEEPER_FRAMES.length === k ? 1 : 0};`))
-      .join('\n'));
+function wireKeeper() {
+  const keeper = viewEl.querySelector('.keeper');
+  if (!keeper) return;
+  const dresses = [...keeper.querySelectorAll('.keeper-frame')];
+  // 動きを控える設定なら、いちばん左に立たせたままにする。
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-  return {
-    seconds: total,
-    css: `
-      @keyframes kw${uid} { ${walk} }
-      @keyframes kf${uid} { ${face} }
-      ${frames.map((body, k) => `@keyframes kp${uid}_${k} { ${body} }`).join('\n')}
-    `,
-  };
+  const n = Number(keeper.dataset.n);
+  const cycle = (offsets, opts) =>
+    dresses.forEach((dress, k) =>
+      dress.animate(
+        offsets.map(({ offset, index }) => ({
+          offset,
+          opacity: index % dresses.length === k ? 1 : 0,
+          easing: 'step-end',
+        })),
+        opts,
+      ));
+
+  /* フラスコが1本だけなら歩く先が無い。それでも布だけは動かす。
+     じっと固まっていると、居るのではなく描き損ねたように見える。 */
+  if (n < 2) {
+    const each = 1 / dresses.length;
+    return cycle(
+      [...dresses.map((_, index) => ({ offset: index * each, index })), { offset: 1, index: 0 }],
+      { duration: KEEPER_STEP * dresses.length * 1000, iterations: Infinity },
+    );
+  }
+
+  const { seconds, stops } = keeperWalk(n);
+  const opts = { duration: seconds * 1000, iterations: Infinity };
+  const at = (stop) => stop.t / seconds;
+
+  keeper.animate(
+    stops.map((stop) => ({
+      offset: at(stop),
+      // 持ち幅がフラスコ1つぶんなので、100%＋隙間 が隣までの距離になる。
+      transform: `translateX(calc((100% + 4px) * ${stop.pos}))`,
+      opacity: stop.on,
+      easing: 'step-end',
+    })),
+    opts,
+  );
+  // 折り返しでは体ごと裏返して、進む向きに顔を向ける。
+  keeper.querySelector('.keeper-face').animate(
+    stops.map((stop) => ({ offset: at(stop), transform: `scaleX(${stop.face})`, easing: 'step-end' })),
+    opts,
+  );
+  // 柄は1歩ごとに送る。何番目の出来事かをそのまま柄の番号にする。
+  cycle(stops.map((stop, index) => ({ offset: at(stop), index })), opts);
 }
 
 /* 丸底フラスコ。他の絵と同じくドット絵で描く。
@@ -655,28 +687,13 @@ function shelf(missions, weekEnd) {
   const n = shown.length;
   if (!n) return '';
 
-  /* 棚番。フラスコと同じ段をうろつく。持ち幅をフラスコ1つぶんに合わせてあるので、
-     100%＋隙間 がそのまま隣までの距離になる。
-     歩く柄は3枚を重ねて置き、表に出す1枚を差し替えて切り替える。
-     動かすのは transform と opacity だけなので、本数が増えても値段は変わらない。 */
-  const uid = (shelfSeq += 1);
-  const walk = n > 1 ? keeperWalk(n, uid) : null;
-  const dress = (k) =>
-    `<span class="keeper-frame"${
-      walk
-        ? ` style="animation-name:kp${uid}_${k};animation-duration:${walk.seconds}s"`
-        : ''
-    }>${keeperMark(KEEPER_FRAMES[k])}</span>`;
+  /* 棚番。フラスコと同じ段をうろつく。歩く柄は3枚を重ねて置き、
+     表に出す1枚を差し替えて切り替える。動きは wireKeeper() が付ける。 */
   const keeper = `
-    ${walk ? `<style>${walk.css}</style>` : ''}
-    <span class="keeper${walk ? '' : ' is-still'}" style="--n:${n}${
-      walk ? `;animation-name:kw${uid};animation-duration:${walk.seconds}s` : ''
-    }">
-      <span class="keeper-face"${
-        walk ? ` style="animation-name:kf${uid};animation-duration:${walk.seconds}s"` : ''
-      }>
+    <span class="keeper" style="--n:${n}" data-n="${n}">
+      <span class="keeper-face">
         <span class="keeper-frames">
-          ${walk ? KEEPER_FRAMES.map((_, k) => dress(k)).join('') : dress(0)}
+          ${KEEPER_FRAMES.map((name) => `<span class="keeper-frame">${keeperMark(name)}</span>`).join('')}
         </span>
       </span>
     </span>
@@ -784,6 +801,8 @@ async function renderHome() {
     }
 
   `;
+
+  wireKeeper();
 }
 
 /* ---------- ストリーム ---------- */

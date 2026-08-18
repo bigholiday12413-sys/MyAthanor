@@ -2140,21 +2140,18 @@ a.room-title {
 
 /* 棚番。フラスコと同じ段を、同じ棚板の上で歩く。
    幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。
-   位置と向きと柄で animation が3枚要るので、入れ子にして1枚ずつ持たせる。
-   道筋は本数で変わるため、@keyframes の名前と長さは app.js が入れる。 */
+   位置と向きと柄で動きが3枚要るので、入れ子にして1枚ずつ持たせる。
+   道筋は本数で変わるため、動きそのものは app.js が element.animate() で付ける。 */
 .keeper {
   position: absolute;
   left: 0;
   bottom: 0;
   display: block;
   width: calc((100% - (var(--n, 1) - 1) * 4px) / var(--n, 1));
-  animation-iteration-count: infinite;
 }
 
-/* 折り返したら体ごと裏返して、進む向きに顔を向ける。 */
 .keeper-face {
   display: block;
-  animation-iteration-count: infinite;
 }
 
 /* 柄を重ねる箱。中身が全部浮いているので、縦横比で背を確保する。 */
@@ -2167,33 +2164,22 @@ a.room-title {
   aspect-ratio: 16 / 20;
 }
 
-/* 3枚を同じ場所に重ね、表に出す1枚だけを不透明にする。 */
+/* 3枚を同じ場所に重ね、表に出す1枚だけを不透明にする。
+   動きは JS が付ける。動かないとき（動きを控える設定）は1枚目が出たままになる。 */
 .keeper-frame {
   position: absolute;
   inset: 0;
   display: block;
   opacity: 0;
-  animation-iteration-count: infinite;
 }
 
-/* 動かないときは1枚しか置かないので、それを出しておく。 */
-.keeper.is-still .keeper-frame { opacity: 1; }
+.keeper-frame:first-child { opacity: 1; }
 
 /* フラスコと同じ大きさで立たせる。並んだときに背丈が揃う。 */
 .keeper-px {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-/* 動きを減らす設定なら、いちばん左に立たせたままにする。 */
-@media (prefers-reduced-motion: reduce) {
-  .keeper,
-  .keeper-face,
-  .keeper-frame { animation: none; }
-
-  .keeper .keeper-frame { opacity: 0; }
-  .keeper .keeper-frame:first-child { opacity: 1; }
 }
 
 /* 棚板。フラスコが乗っている板を1本の線で出す。 */
