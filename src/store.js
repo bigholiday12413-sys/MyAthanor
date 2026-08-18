@@ -34,139 +34,6 @@ function notFound(what) {
   return err;
 }
 
-/* ---------- tag ---------- */
-
-const ENTRY_KINDS = new Set(['idea', 'log']);
-
-function requireEntryKind(kind) {
-  if (!ENTRY_KINDS.has(kind)) {
-    const err = new Error('kind must be "idea" or "log"');
-    err.status = 400;
-    throw err;
-  }
-  return kind;
-}
-
-// 表記ゆれで別タグにならないよう、前後の空白と連続空白を潰す。
-function normalizeTagName(name) {
-  const trimmed = String(name ?? '').trim().replace(/\s+/g, ' ');
-  if (!trimmed) {
-    const err = new Error('tag name is required');
-    err.status = 400;
-    throw err;
-  }
-  if (trimmed.length > 24) {
-    const err = new Error('tag name must be 24 characters or fewer');
-    err.status = 400;
-    throw err;
-  }
-  return trimmed;
-}
-
-function findOrCreateTag(name) {
-  const normalized = normalizeTagName(name);
-  const existing = db.prepare(`SELECT * FROM tag WHERE name = ?`).get(normalized);
-  if (existing) return existing;
-  const { lastInsertRowid } = db
-    .prepare(`INSERT INTO tag (name, created_at) VALUES (?, ?)`)
-    .run(normalized, nowIso());
-  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(Number(lastInsertRowid));
-}
-
-/* type を渡すと、ストリームのその絞り込みで実際に出るものだけを数える。
-   渡さなければ全部を数える（タグの整理はこちらを使う）。
-   数がタブによらず一定だと、絞り込んだ意味が読めない。 */
-function taggedWhere(type) {
-  const idea = `e.kind = 'idea'
-    AND EXISTS (SELECT 1 FROM idea i WHERE i.id = e.entry_id AND i.is_spell = 0)`;
-  const logWith = (cond) =>
-    `e.kind = 'log' AND EXISTS (SELECT 1 FROM log l WHERE l.id = e.entry_id AND ${cond})`;
-
-  if (type === 'idea') return idea;
-  // 糧と装備はログの器に入っている。素のログは goods を持たない。
-  if (isGoods(type)) return logWith(`l.goods = '${type}'`);
-  if (type === 'log') return logWith('l.goods IS NULL');
-  // すべて。スペルはストリームに出ないので、ここでも数えない。
-  return `(${idea}) OR (${logWith('1 = 1')})`;
-}
-
-export function listTags({ type = null } = {}) {
-  const visible = type === null ? '1 = 1' : taggedWhere(type);
-  return db
-    .prepare(`
-      SELECT t.id, t.name,
-             COALESCE(SUM(CASE WHEN e.kind = 'idea' THEN 1 ELSE 0 END), 0) AS idea_count,
-             COALESCE(SUM(CASE WHEN e.kind = 'log' THEN 1 ELSE 0 END), 0) AS log_count,
-             COUNT(e.tag_id) AS total
-      FROM tag t
-      LEFT JOIN entry_tag e ON e.tag_id = t.id AND (${visible})
-      GROUP BY t.id
-      ORDER BY total DESC, t.name ASC
-    `)
-    .all();
-}
-
-export function createTag({ name }) {
-  return findOrCreateTag(name);
-}
-
-export function renameTag(id, { name }) {
-  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-  if (!row) throw notFound('tag');
-  const normalized = normalizeTagName(name);
-  const clash = db.prepare(`SELECT id FROM tag WHERE name = ? AND id <> ?`).get(normalized, id);
-  if (clash) {
-    const err = new Error('a tag with that name already exists');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE tag SET name = ? WHERE id = ?`).run(normalized, id);
-  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-}
-
-export function deleteTag(id) {
-  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-  if (!row) throw notFound('tag');
-  return transaction(() => {
-    db.prepare(`DELETE FROM entry_tag WHERE tag_id = ?`).run(id);
-    db.prepare(`DELETE FROM tag WHERE id = ?`).run(id);
-    return { id, deleted: true };
-  });
-}
-
-export function tagsFor(kind, entryId) {
-  return db
-    .prepare(`
-      SELECT t.id, t.name FROM entry_tag e
-      JOIN tag t ON t.id = e.tag_id
-      WHERE e.kind = ? AND e.entry_id = ?
-      ORDER BY t.name ASC
-    `)
-    .all(kind, entryId);
-}
-
-// 名前の配列でまるごと置き換える。無い名前は作る。
-export function setEntryTags(kind, entryId, names) {
-  requireEntryKind(kind);
-  if (kind === 'idea') getIdea(entryId);
-  else getLog(entryId);
-  if (!Array.isArray(names)) {
-    const err = new Error('tags must be an array of names');
-    err.status = 400;
-    throw err;
-  }
-
-  return transaction(() => {
-    const ids = new Set(names.map((name) => findOrCreateTag(name).id));
-    db.prepare(`DELETE FROM entry_tag WHERE kind = ? AND entry_id = ?`).run(kind, entryId);
-    const insert = db.prepare(
-      `INSERT OR IGNORE INTO entry_tag (kind, entry_id, tag_id) VALUES (?, ?, ?)`,
-    );
-    for (const tagId of ids) insert.run(kind, entryId, tagId);
-    return tagsFor(kind, entryId);
-  });
-}
-
 /* ---------- アイデアの温度 ---------- */
 
 // 273K（水の凝固点）を常温＝基準とする。設定した熱は基準へ向かって指数的に冷める。
@@ -209,7 +76,6 @@ export function getIdea(id) {
   return {
     ...withTemperature(row),
     kind: 'idea',
-    tags: tagsFor('idea', id),
     cauldrons: listCauldronsBySource('idea', id),
     missions: listMissionsBySource('idea', id),
   };
@@ -251,7 +117,7 @@ export function listSpells() {
       ORDER BY i.created_at DESC, i.id DESC
     `)
     .all()
-    .map((row) => ({ ...row, tags: tagsFor('idea', row.id) }));
+    .map((row) => ({ ...row }));
 }
 
 export function getSpell(id) {
@@ -259,7 +125,6 @@ export function getSpell(id) {
   return {
     ...row,
     kind: 'spell',
-    tags: tagsFor('idea', id),
     missions: listMissionsBySource('idea', id),
   };
 }
@@ -293,7 +158,6 @@ export function deleteSpell(id) {
     throw err;
   }
   return transaction(() => {
-    db.prepare(`DELETE FROM entry_tag WHERE kind = 'idea' AND entry_id = ?`).run(id);
     db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
     return { id, deleted: true };
   });
@@ -347,7 +211,6 @@ export function getLog(id) {
     kind: 'log',
     source_mission: source,
     source_recurrence: recurrence,
-    tags: tagsFor('log', id),
     cauldrons: listCauldronsBySource('log', id),
     missions: listMissionsBySource('log', id),
   };
@@ -374,7 +237,7 @@ export function updateLog(id, { title, occurred_at, time_spent, money_spent, goo
 /* ---------- stream ---------- */
 
 // アイデアとログを時系列で混ぜて返す。
-export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
+export function listStream({ type = 'all', limit = 200 } = {}) {
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
@@ -404,20 +267,6 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
     .prepare(`${parts.join(' UNION ALL ')} ORDER BY at DESC, kind ASC, id DESC LIMIT ?`)
     .all(int(limit, { min: 1 }));
 
-  const links = db
-    .prepare(`
-      SELECT e.kind, e.entry_id, t.id, t.name FROM entry_tag e
-      JOIN tag t ON t.id = e.tag_id
-      ORDER BY t.name ASC
-    `)
-    .all();
-  const tagsByEntry = new Map();
-  for (const link of links) {
-    const key = `${link.kind}:${link.entry_id}`;
-    if (!tagsByEntry.has(key)) tagsByEntry.set(key, []);
-    tagsByEntry.get(key).push({ id: link.id, name: link.name });
-  }
-
   const counts = db
     .prepare(`
       SELECT source_type, source_id, COUNT(*) AS total,
@@ -429,17 +278,14 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
 
   const now = new Date();
   const halfLife = getSettings().cooling_half_life_days;
-  const tagId = tag === null || tag === undefined || tag === '' ? null : int(tag);
 
   return rows
     .map((row) => {
       const c = byKey.get(`${row.kind}:${row.id}`);
-      const tags = tagsByEntry.get(`${row.kind}:${row.id}`) ?? [];
       return {
         ...row,
         from_mission: Boolean(row.from_mission),
         from_recurrence: Boolean(row.from_recurrence),
-        tags,
         current_temperature:
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
@@ -447,8 +293,7 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
         mission_count: c ? c.total : 0,
         active_mission_count: c ? c.active : 0,
       };
-    })
-    .filter((row) => tagId === null || row.tags.some((t) => t.id === tagId));
+    });
 }
 
 /* ---------- mission ---------- */
@@ -1452,23 +1297,6 @@ export function setLegacy(kind, id, value) {
   return kind === 'log' ? getLog(id) : getMission(id);
 }
 
-export function listLegacies() {
-  const logs = db
-    .prepare(`SELECT * FROM log WHERE is_legacy = 1 ORDER BY occurred_at DESC`)
-    .all()
-    .map((row) => ({ ...row, type: 'log', at: row.occurred_at }));
-  const missions = db
-    .prepare(`SELECT * FROM mission WHERE is_legacy = 1 ORDER BY completed_at DESC`)
-    .all()
-    .map((row) => ({
-      ...row,
-      type: 'mission',
-      at: row.completed_at ?? row.created_at,
-      source_title: sourceTitle(row.source_type, row.source_id),
-    }));
-  return [...logs, ...missions].sort((a, b) => String(b.at).localeCompare(String(a.at)));
-}
-
 /* ---------- ダンジョン（たまった情報を道として見る） ----------
 
    部屋   = アイデア／ログ。実際に起きたこと・思いついたこと。
@@ -1477,8 +1305,9 @@ export function listLegacies() {
             進行中の通路は掘りかけ、断念した通路は崩れて行き止まり。
    大釜   = ひとつの部屋から出る通路のうち、同じ器に入っているものの束。
    深さ   = 道を進んだ順。子は必ず親より後に生まれるので、深さは時間の順序でもある。
-   区画   = タグ。道のどこかに付いたタグで、その道全体が区画に属する。
-   宝箱   = レガシー。                                                        */
+   宝箱   = レガシー。盤の上で輝かせるかどうかだけの印。
+
+   区画には割らない。何と何が関わっているかは、派生したミッションだけが決める。  */
 
 const DUNGEON_MAX_DEPTH = 12;
 
@@ -1538,7 +1367,6 @@ function dungeonRoom(type, row, depth) {
     is_legacy: Boolean(row.is_legacy),
     from_recurrence: type === 'log' ? Boolean(row.source_recurrence_id) : false,
     temperature: type === 'idea' ? withTemperature(row).current_temperature : null,
-    tags: tagsFor(type, row.id),
     corridors: loose,
     cauldrons: [...bundles.values()],
   };
@@ -1587,82 +1415,52 @@ function accumulate(room) {
   return totals;
 }
 
-// 道のどこかに付いたタグを集める。入口だけでなく途中で付けたタグでも辿れるように。
-function collectTags(room, into = new Map()) {
-  for (const tag of room.tags) into.set(tag.id, tag);
-  for (const corridor of eachCorridor(room)) {
-    if (corridor.room) collectTags(corridor.room, into);
-  }
-  return into;
-}
-
 // 探索の入口＝アイデア全部と、ミッション由来ではないログ。
-export function getDungeon({ onlyLegacy = false } = {}) {
-  const roots = [
+// 区画には割らない。ひとつの盤に全部載せて、関わりは派生したミッションだけが決める。
+export function getDungeon() {
+  const roads = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
-    // 糧は食べれば消える。盤に残すと買った回数だけ節が増えて読めなくなる。
     ...db
-      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL AND goods IS NOT 'food'`)
+      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
     .map((room) => ({ ...room, totals: accumulate(room) }))
-    .filter((room) => !onlyLegacy || room.totals.legacies > 0);
+    // 深い道から。同じ深さなら新しい順。盤の並びをここで決めておく。
+    .sort((a, b) =>
+      b.totals.depth !== a.totals.depth
+        ? b.totals.depth - a.totals.depth
+        : String(b.at).localeCompare(String(a.at)),
+    );
 
-  // タグごとの区画に振り分ける。タグが1つも無い道は「未踏」に集める。
-  const regions = new Map();
-  const push = (key, tag, room) => {
-    if (!regions.has(key)) regions.set(key, { tag, roads: [] });
-    regions.get(key).roads.push(room);
-  };
-  for (const room of roots) {
-    const tags = [...collectTags(room).values()].sort((a, b) => a.name.localeCompare(b.name));
-    if (tags.length === 0) push('__none__', null, room);
-    else for (const tag of tags) push(tag.id, tag, room);
-  }
+  const totals = roads.reduce(
+    (sum, road) => ({
+      roads: sum.roads + 1,
+      rooms: sum.rooms + road.totals.rooms,
+      corridors: sum.corridors + road.totals.corridors,
+      cauldrons: sum.cauldrons + road.totals.cauldrons,
+      legacies: sum.legacies + road.totals.legacies,
+      consumed_time: sum.consumed_time + road.totals.consumed_time,
+      consumed_money: sum.consumed_money + road.totals.consumed_money,
+      planned_time: sum.planned_time + road.totals.planned_time,
+      planned_money: sum.planned_money + road.totals.planned_money,
+      depth: Math.max(sum.depth, road.totals.depth),
+    }),
+    {
+      roads: 0,
+      rooms: 0,
+      corridors: 0,
+      cauldrons: 0,
+      legacies: 0,
+      consumed_time: 0,
+      consumed_money: 0,
+      planned_time: 0,
+      planned_money: 0,
+      depth: 0,
+    },
+  );
 
-  return [...regions.values()]
-    .map((region) => {
-      const totals = region.roads.reduce(
-        (sum, road) => ({
-          roads: sum.roads + 1,
-          rooms: sum.rooms + road.totals.rooms,
-          corridors: sum.corridors + road.totals.corridors,
-          cauldrons: sum.cauldrons + road.totals.cauldrons,
-          legacies: sum.legacies + road.totals.legacies,
-          consumed_time: sum.consumed_time + road.totals.consumed_time,
-          consumed_money: sum.consumed_money + road.totals.consumed_money,
-          planned_time: sum.planned_time + road.totals.planned_time,
-          planned_money: sum.planned_money + road.totals.planned_money,
-          depth: Math.max(sum.depth, road.totals.depth),
-        }),
-        {
-          roads: 0,
-          rooms: 0,
-          corridors: 0,
-          cauldrons: 0,
-          legacies: 0,
-          consumed_time: 0,
-          consumed_money: 0,
-          planned_time: 0,
-          planned_money: 0,
-          depth: 0,
-        },
-      );
-      // 深い道から見せる。同じ深さなら新しい順。
-      const roads = [...region.roads].sort((a, b) =>
-        b.totals.depth !== a.totals.depth
-          ? b.totals.depth - a.totals.depth
-          : String(b.at).localeCompare(String(a.at)),
-      );
-      return { tag: region.tag, totals, roads };
-    })
-    .sort((a, b) => {
-      if (!a.tag) return 1; // 未踏は最後
-      if (!b.tag) return -1;
-      if (b.totals.rooms !== a.totals.rooms) return b.totals.rooms - a.totals.rooms;
-      return a.tag.name.localeCompare(b.tag.name);
-    });
+  return { totals, roads };
 }
 
 /* ---------- summary（ホームのタンク） ---------- */

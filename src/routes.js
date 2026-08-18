@@ -50,7 +50,7 @@ function streamType(value, fallback = 'all') {
 
 api.get('/stream', handle((req, res) => {
   const type = streamType(req.query.type);
-  res.json(store.listStream({ type, limit: req.query.limit ?? 200, tag: req.query.tag ?? null }));
+  res.json(store.listStream({ type, limit: req.query.limit ?? 200 }));
 }));
 
 /* 新規追加（種別を選んでテキストのみ） */
@@ -194,21 +194,7 @@ api.delete('/cauldrons/:id', handle((req, res) => res.json(store.deleteCauldron(
 api.post('/cauldrons/:id/materials', handle((req, res) =>
   res.status(201).json(store.addMaterials(id(req), req.body?.items))));
 
-/* タグ */
-// type を付けるとストリームのその絞り込みでの件数になる。無ければ全部。
-api.get('/tags', handle((req, res) =>
-  res.json(store.listTags({ type: streamType(req.query.type, null) }))));
-api.post('/tags', handle((req, res) => res.status(201).json(store.createTag(req.body ?? {}))));
-api.patch('/tags/:id', handle((req, res) => res.json(store.renameTag(id(req), req.body ?? {}))));
-api.delete('/tags/:id', handle((req, res) => res.json(store.deleteTag(id(req)))));
-
-// アイデア／ログに付くタグを名前の配列で置き換える。
-api.put('/entries/:kind/:id/tags', handle((req, res) =>
-  res.json(store.setEntryTags(req.params.kind, id(req), req.body?.tags))));
-
-/* レガシー */
-api.get('/legacies', handle((_req, res) => res.json(store.listLegacies())));
-
+/* レガシー：盤の上で輝かせるかどうかだけの印。 */
 api.put('/legacies/:kind/:id', handle((req, res) => {
   const value = req.body?.is_legacy;
   if (typeof value !== 'boolean') {
@@ -219,9 +205,8 @@ api.put('/legacies/:kind/:id', handle((req, res) => {
   res.json(store.setLegacy(req.params.kind, id(req), value));
 }));
 
-/* ダンジョン */
-api.get('/dungeon', handle((req, res) =>
-  res.json(store.getDungeon({ onlyLegacy: req.query.legacy === '1' }))));
+/* ダンジョン：区画に割らない1枚の盤。 */
+api.get('/dungeon', handle((_req, res) => res.json(store.getDungeon())));
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));

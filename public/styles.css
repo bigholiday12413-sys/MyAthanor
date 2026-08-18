@@ -304,6 +304,15 @@ body::after {
   column-fill: auto;
 }
 
+/* 盤の画面。段にも割らず流しもせず、残りの高さを全部盤に渡す。 */
+.view.is-board {
+  display: flex;
+  flex-direction: column;
+  column-width: auto !important;
+  columns: auto;
+  overflow: hidden;
+}
+
 /* 2ページぶんまでは段に割らず、そのまま縦へ流す。
    1画面に少し足りないだけで送らせるより、指で流したほうが早い。 */
 .view.is-scroll {
@@ -322,7 +331,6 @@ body::after {
    そういう容器は割れるようにしておき、枠は割れた先にも引き直す。 */
 .card,
 .panel,
-.region,
 .map-legend,
 .tubes,
 .tg,
@@ -331,8 +339,7 @@ body::after {
 .budget-row,
 .occurrence-row,
 .stat-line,
-.filters,
-.tag-bar {
+.filters {
   break-inside: avoid;
 }
 
@@ -1109,132 +1116,12 @@ button:disabled {
   text-align: right;
 }
 
-/* ---------- タグ ---------- */
-
-.tag-bar {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding-bottom: 4px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.card .chips {
-  margin-top: 7px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  padding: 4px 9px;
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--text);
-  white-space: nowrap;
-  background: var(--surface);
-  border: 1px solid var(--edge);
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
-}
-
-.chip b {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--dim);
-}
-
-.chip.is-on {
-  color: #ffffff;
-  background: var(--green);
-  border-color: var(--green-deep);
-}
-
-.chip.is-on b {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-/* カード上のタグは押せないので平たく置く。 */
-.chip.is-flat {
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--dim);
-  background: transparent;
-  border-style: dashed;
-}
-
-/* 外す印。17×14 では隣の文字に触れてしまう。粒ごと厚くして的にする。 */
-.chip button {
-  position: relative;
-  display: inline-flex;
-  min-height: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: 0 -6px 0 0;
-  padding: 0;
-  font-family: var(--mono);
-  font-size: 15px;
-  line-height: 1;
-  color: var(--dim);
-  background: none;
-  border: none;
-  box-shadow: none;
-}
-
-/* 粒の縁までしか塗っていないので、判定だけ指の幅まで出す。
-   隣の粒の × とは粒1つぶん離れているので、取り合いにならない。 */
-.chip button::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 44px;
-  height: 44px;
-  transform: translate(-50%, -50%);
-}
-
-.chip:has(button) {
-  padding-right: 4px;
-}
-
-.chips-empty {
-  font-size: 12px;
-  color: var(--dim);
-}
-
-.tag-add {
-  margin-top: 12px;
-}
-
-.tag-add button {
-  flex: 0 0 84px;
-}
-
 .section-count {
   margin-left: 2px;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 400;
   color: var(--dim);
-}
-
-.tag-name {
-  padding: 7px 8px;
-  font-size: 15px;
 }
 
 /* ---------- アイデアの温度 ---------- */
@@ -1356,87 +1243,41 @@ input[type='range']::-moz-range-thumb {
 
 /* ---------- ダンジョン ---------- */
 
-.region {
-  margin-bottom: 20px;
-  padding: 12px 0 6px;
-  background: var(--surface);
-  border: 1px solid var(--edge);
-  border-radius: 3px;
-  box-shadow: var(--frame);
-}
-
-.region-stat {
+/* 盤は1枚きり。区画には割らない。
+   何と何が関わっているかは、派生したミッションだけが決める。 */
+.board-stat {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 4px 12px;
-  padding: 0 12px 7px;
+  margin-bottom: 8px;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
 }
 
-.region-stat .hot {
+.board-stat .hot {
   color: var(--gold-dark);
 }
 
-/* 盤は画面より大きくなるので、区画の中だけで動かす。
-   地はいちばん暗くしておく。節と軌道の光がここに乗る。 */
-.map-scroll {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  max-height: min(360px, 42dvh);
-  margin: 2px 0 0;
-  padding: 0;
-  background: #fbfaf5;
-  border-top: 1px solid var(--edge);
-  border-bottom: 1px solid var(--edge);
+.board-stat .spacer {
+  flex: 1;
 }
 
-.map-scroll + .map-scroll {
-  margin-top: 12px;
-}
-
-/* 入口しか無い道。盤にすると場所を食うだけなので、押せる粒として並べる。 */
-.seeds {
+/* 盤は残りぜんぶを使う。縦にも横にも合わせて縮めるので、1画面に収まる。 */
+.board {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 12px 2px;
-}
-
-.map-scroll + .seeds {
-  padding-top: 10px;
-}
-
-.seed {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 44px;
-  max-width: 100%;
-  padding: 0 10px 0 4px;
-  font-size: 12px;
-  color: var(--text);
-  text-decoration: none;
-  background: var(--surface);
+  background: #fbfaf5;
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
-}
-
-.seed span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.seed:active {
-  background: #eef0ea;
 }
 
 .map {
   display: block;
-  max-width: none;
+  width: 100%;
+  height: 100%;
 }
 
 .map a {
@@ -2307,10 +2148,6 @@ body.is-paged .toast {
 .mission-date-form button {
   padding: 7px 10px;
   font-size: 12px;
-}
-
-.region-stat .over {
-  color: var(--danger);
 }
 
 .panel.warn {
