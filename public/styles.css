@@ -257,6 +257,7 @@ body::after {
 }
 
 .icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -271,6 +272,17 @@ body::after {
   border: 1px solid var(--edge);
   border-radius: 2px;
   box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.2);
+}
+
+/* 見た目は36pxのまま、当たり判定だけ44pxに広げる。上部の帯を厚くしたくない。 */
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 .icon-btn:active {
@@ -772,6 +784,7 @@ body::after {
 
 .filter {
   flex: 1;
+  min-height: 44px;
   padding: 8px 4px;
   font-family: var(--serif);
   font-size: 12px;
@@ -823,6 +836,7 @@ input,
 select,
 textarea {
   width: 100%;
+  min-height: 44px;
   padding: 11px 12px;
   font-family: inherit;
   font-size: 16px; /* iOS のズーム防止 */
@@ -860,6 +874,7 @@ textarea:focus {
 }
 
 button {
+  min-height: 40px;
   padding: 11px 15px;
   font-family: var(--serif);
   font-size: 14px;
@@ -1115,14 +1130,40 @@ button:disabled {
   border-style: dashed;
 }
 
+/* 外す印。17×14 では隣の文字に触れてしまう。粒ごと厚くして的にする。 */
 .chip button {
-  padding: 0 0 0 2px;
+  position: relative;
+  display: inline-flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 -6px 0 0;
+  padding: 0;
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   color: var(--dim);
   background: none;
   border: none;
+  box-shadow: none;
+}
+
+/* 粒の縁までしか塗っていないので、判定だけ指の幅まで出す。
+   隣の粒の × とは粒1つぶん離れているので、取り合いにならない。 */
+.chip button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.chip:has(button) {
+  padding-right: 4px;
 }
 
 .chips-empty {
@@ -1310,6 +1351,44 @@ input[type='range']::-moz-range-thumb {
   margin-top: 12px;
 }
 
+/* 入口しか無い道。盤にすると場所を食うだけなので、押せる粒として並べる。 */
+.seeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px 2px;
+}
+
+.map-scroll + .seeds {
+  padding-top: 10px;
+}
+
+.seed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 10px 0 4px;
+  font-size: 12px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
+}
+
+.seed span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seed:active {
+  background: #eef0ea;
+}
+
 .map {
   display: block;
   max-width: none;
@@ -1472,9 +1551,11 @@ input[type='range']::-moz-range-thumb {
 }
 
 .material-check {
+  position: relative;
   flex: none;
-  width: 24px;
-  height: 24px;
+  min-height: 0;
+  width: 28px;
+  height: 28px;
   padding: 0;
   font-family: var(--mono);
   font-size: 14px;
@@ -1483,6 +1564,17 @@ input[type='range']::-moz-range-thumb {
   background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 3px;
+}
+
+/* 隣は文字だけで押せないので、判定を広げても取り合いにならない。 */
+.material-check::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 .material.is-done .material-check {
@@ -1524,7 +1616,8 @@ input[type='range']::-moz-range-thumb {
 
 .material-drop {
   flex: none;
-  padding: 4px 8px;
+  min-height: 36px;
+  padding: 4px 10px;
   font-size: 11px;
   letter-spacing: 0;
 }
@@ -1958,7 +2051,7 @@ a.room-title {
   align-items: center;
   justify-content: center;
   gap: 18px;
-  padding: 5px var(--pad);
+  padding: 0 var(--pad);
   background: var(--chrome);
   border-top: 1px solid var(--edge);
   box-shadow: inset 0 1px 0 var(--edge);
@@ -1968,9 +2061,12 @@ a.room-title {
   display: none;
 }
 
+/* 横払いでも送れるが、送れると分かる前に狙うのはこの矢印なので、
+   ここだけは指の幅（44px）を切らせない。 */
 .pager-arrow {
-  width: 46px;
-  padding: 4px 0;
+  width: 52px;
+  height: 44px;
+  padding: 0;
   font-size: 12px;
   line-height: 1;
   color: var(--green-dark);
@@ -1993,6 +2089,8 @@ a.room-title {
 /* ---------- その他 ---------- */
 
 .link {
+  display: inline-block;
+  padding: 7px 0;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--green-dark);
@@ -2085,6 +2183,9 @@ body.is-paged .toast {
 }
 
 .mission-dates > summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
   padding: 7px 0 0;
   font-family: var(--mono);
   font-size: 11px;
@@ -2143,7 +2244,10 @@ body.is-paged .toast {
 }
 
 .optional > summary {
-  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 0;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--dim);
@@ -2173,6 +2277,9 @@ body.is-paged .toast {
 
 /* 開くと中身が出るパネル。ふだんは1行だけ。 */
 .optional-panel > summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
   font-family: var(--serif);
   font-size: 14px;
   font-weight: 700;
@@ -2264,6 +2371,7 @@ textarea {
 .spend-name {
   display: flex;
   align-items: center;
+  min-height: 34px;
   gap: 7px;
   flex: 1;
   min-width: 0;

@@ -1396,7 +1396,8 @@ const BUDGET_UI = {
 };
 
 // 一覧に何期間ぶんの過去を含めるか。「さらに過去」で伸びる。
-const budgetWindow = { time: 6, money: 6 };
+// 過去は「さらに過去」で伸ばせる。最初から6期ぶん開くと、設定だけで2ページ食う。
+const budgetWindow = { time: 3, money: 3 };
 
 function budgetSection(kind, rows) {
   const ui = BUDGET_UI[kind];
@@ -2661,6 +2662,26 @@ function nodeSwatch(kind) {
   </svg>`;
 }
 
+/* 節が1つきりの道は、盤に起こしても輪が1つ描かれるだけで軌道が無い。
+   それが何十本も続くと、ダンジョンが「まだ何もしていないもの」の一覧に化ける。
+   掘った道だけを盤にして、入口しか無いものは押せる粒として畳む。 */
+function roadsOf(region) {
+  const dug = region.roads.filter((road) => road.totals.corridors > 0);
+  const seeds = region.roads.filter((road) => road.totals.corridors === 0);
+  return (
+    dug.map(roadMap).join('') +
+    (seeds.length
+      ? `<div class="seeds">${seeds
+          .map(
+            (road) => `<a class="seed" href="#/${road.type}/${road.id}">
+              ${nodeSwatch(road.type)}<span>${esc(road.title)}</span>
+            </a>`,
+          )
+          .join('')}</div>`
+      : '')
+  );
+}
+
 let mapSeq = 0;
 
 function roadMap(root) {
@@ -2847,9 +2868,14 @@ async function renderDungeon() {
       <div class="region">
         <div class="region-stat">
           <span>節 ${region.totals.rooms}</span>
-          <span>軌道 ${region.totals.corridors}</span>
+          ${
+            // 掘っていない区画では軌道も深さも常に 0 と 1 になる。出しても読む値が無い。
+            region.totals.corridors
+              ? `<span>軌道 ${region.totals.corridors}</span>
+                 <span>最深 ${region.totals.depth}</span>`
+              : ''
+          }
           ${region.totals.cauldrons ? `<span>大釜 ${region.totals.cauldrons}</span>` : ''}
-          <span>最深 ${region.totals.depth}</span>
           ${
             region.totals.legacies
               ? `<span class="hot">宝箱 ${region.totals.legacies}</span>`
@@ -2868,7 +2894,7 @@ async function renderDungeon() {
               : ''
           }
         </div>
-        ${region.roads.map(roadMap).join('')}
+        ${roadsOf(region)}
       </div>`,
             )
             .join('')
