@@ -98,7 +98,7 @@ api.get('/missions', handle((req, res) => {
     err.status = 400;
     throw err;
   }
-  res.json(store.listMissions({ status, sort }));
+  res.json(store.listMissions({ status, sort, due_by: req.query.due_by ?? null }));
 }));
 
 api.post('/missions', handle((req, res) =>

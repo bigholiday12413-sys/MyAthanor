@@ -140,6 +140,19 @@ const todayKey = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
+// 月曜始まりの週の終わり（日曜）。棚に並べる範囲を決めるのに使う。
+const dateKeyOf = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+function summaryWeekEnd(now = new Date()) {
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  return new Date(monday.getTime() + 7 * 86_400_000);
+}
+
 const daysUntil = (key) =>
   Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
 
@@ -331,7 +344,7 @@ function weekSheets(now = new Date()) {
 }
 
 // 期間は出さない。上の週の紙がいつの話かを示していて、両方あると二度言うことになる。
-function tubeCard({ name, data, format, plannedLabel = '消費予定' }) {
+function tubeCard({ name, data, format, plannedLabel = '消費予定', href = null }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
@@ -339,7 +352,12 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定' }) {
   return `
     <div class="tube-card">
       <div class="tube-head">
-        <span class="tube-name">${esc(name)}</span>
+        ${
+          // 飛び先があるものは見出しごとリンクにする。別の行を足すより場所を食わない。
+          href
+            ? `<a class="tube-name is-link" href="${href}">${esc(name)} →</a>`
+            : `<span class="tube-name">${esc(name)}</span>`
+        }
       </div>
       <div class="tube-wrap">
         <div class="tube ${data.over ? 'is-over' : ''}">
@@ -371,15 +389,16 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定' }) {
         </div>
       </div>
       <div class="projection">
-        <span>やり切ったら</span>
+        <span>フォーキャスト</span>
         <span class="v ${data.remaining < 0 ? 'neg' : ''}">${esc(format(data.remaining))}</span>
       </div>
     </div>
   `;
 }
 
-/* 今月のウォレットの内訳。金額の大小がそのまま帯の長さになる。
-   数字だけだと割合が読めず、家計簿として見るときに効かない。 */
+/* ユーズド＝今週のウォレットが何に出ていったか。
+   金額の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
+   家計簿として見るときに効かない。行を押すとストリームのその絞り込みへ飛ぶ。 */
 const GOODS_TONE = { food: 'var(--green)', gear: '#9aa5ab', event: 'var(--gold-dark)' };
 const GOODS_NAME = { food: '糧', gear: '装備', event: '出来事' };
 
@@ -392,9 +411,12 @@ function walletBars(rows) {
       (row) => `
         <div class="spend">
           <div class="spend-head">
-            <a class="spend-name" href="#/stream?">${
+            <a class="spend-name" href="#/stream?type=${
+              // 出来事＝素のログ。ストリームの絞り込みでは 'log' に当たる。
+              row.goods === 'event' ? 'log' : row.goods
+            }">${
               row.goods === 'event' ? '' : icon(KIND_ICON[row.goods])
-            }<span>${GOODS_NAME[row.goods]}</span></a>
+            }<span>${GOODS_NAME[row.goods]}</span> →</a>
             <span class="spend-count">${row.count}件</span>
             <span class="spend-money">${esc(fmtMoney(row.money))}</span>
           </div>
@@ -407,6 +429,93 @@ function walletBars(rows) {
     .join('');
 }
 
+/* ユーズド。ホームからは外して、ウォレットの試験管の先に置く。
+   ホームは「いま週のどこに居るか」だけでよく、内訳は見に行くもの。 */
+/* 調合棚。今週のうちに期限が来るミッションを、丸底フラスコとして棚に並べる。
+   中身の高さが残り日数で、期限が近いほど減っている。過ぎたものは吹きこぼれる。
+   上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
+const SHELF_MAX = 6;
+
+function flask(mission, weekEnd) {
+  const left = daysUntil(mission.effective_due_date ?? mission.due_date);
+  const over = left < 0;
+  // 週の残りぶんを満たすところから、期限に向かって減っていく。
+  const span = Math.max(1, daysUntil(weekEnd) + 1);
+  const ratio = over ? 0 : Math.max(0.08, Math.min(1, (left + 1) / span));
+  const tone = over ? 'is-over' : left <= 1 ? 'is-soon' : '';
+  const href = `#/${mission.source_type}/${mission.source_id}`;
+
+  // 丸底。液は底から ratio ぶんだけ満たす。段で塗るのでぼかしは使わない。
+  const cx = 22;
+  const cy = 30;
+  const r = 13;
+  const top = cy + r - 2 * r * ratio;
+
+  return `
+    <a class="flask ${tone}" href="${href}" aria-label="${esc(mission.title)}">
+      <svg viewBox="0 0 44 46" aria-hidden="true" focusable="false">
+        <clipPath id="fl${mission.id}">
+          <circle cx="${cx}" cy="${cy}" r="${r}" />
+        </clipPath>
+        <rect class="flask-liquid" x="${cx - r}" y="${n2(top)}"
+              width="${r * 2}" height="${n2(cy + r - top)}" clip-path="url(#fl${mission.id})" />
+        <circle class="flask-glass" cx="${cx}" cy="${cy}" r="${r}" fill="none" />
+        <path class="flask-glass" d="M ${cx - 4} ${cy - r + 1} L ${cx - 4} 8
+              M ${cx + 4} ${cy - r + 1} L ${cx + 4} 8" fill="none" />
+        <rect class="flask-cork" x="${cx - 6}" y="4" width="12" height="5" rx="1" />
+        ${
+          // 吹きこぼれ。口から溢れた粒を左右に散らす。
+          over
+            ? `<circle class="flask-spill" cx="${cx - 7}" cy="10" r="2" />
+               <circle class="flask-spill" cx="${cx + 8}" cy="13" r="1.5" />
+               <circle class="flask-spill" cx="${cx - 10}" cy="16" r="1.5" />`
+            : ''
+        }
+      </svg>
+      <span class="flask-day">${over ? `${-left}日超` : left === 0 ? '今日' : `${left}日`}</span>
+    </a>
+  `;
+}
+
+function shelf(missions, weekEnd) {
+  const shown = missions.slice(0, SHELF_MAX);
+  const rest = missions.length - shown.length;
+  return `
+    <div class="shelf">
+      <div class="shelf-row">${shown.map((m) => flask(m, weekEnd)).join('')}</div>
+      <div class="shelf-board"></div>
+      <div class="shelf-names">
+        ${shown.map((m) => `<span>${esc(clip(m.title, 5))}</span>`).join('')}
+      </div>
+      ${rest > 0 ? `<a class="link shelf-more" href="#/missions">他 ${rest} 本 →</a>` : ''}
+    </div>
+  `;
+}
+
+async function renderUsed() {
+  setActiveTab('home');
+  setTopbar({ title: 'ユーズド', back: '#/home' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const summary = await api('/summary');
+  const rows = summary.wallet_by_goods;
+  const total = rows.reduce((sum, row) => sum + row.money, 0);
+
+  viewEl.innerHTML = `
+    <div class="panel tight">
+      <div class="stat-line">
+        <span>週 ${esc(summary.money.period.label)}</span>
+        <span class="v">${esc(fmtMoney(total))}</span>
+      </div>
+    </div>
+    ${
+      total
+        ? `<div class="panel">${walletBars(rows)}</div>`
+        : '<div class="empty">今週はまだ出ていません</div>'
+    }
+  `;
+}
+
 async function renderHome() {
   setActiveTab('home');
   setTopbar({
@@ -417,7 +526,13 @@ async function renderHome() {
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [summary, vault] = await Promise.all([api('/summary'), api('/vault')]);
+  // 今週の終わり。ここまでに期限が来るミッションだけを棚に並べる。
+  const weekEnd = dateKeyOf(new Date(new Date(summaryWeekEnd()).getTime() - 1));
+  const [summary, vault, due] = await Promise.all([
+    api('/summary'),
+    api('/vault'),
+    api(`/missions?status=active&sort=due&due_by=${weekEnd}`),
+  ]);
 
   viewEl.innerHTML = `
     ${weekSheets()}
@@ -434,6 +549,7 @@ async function renderHome() {
         data: summary.money,
         format: fmtMoney,
         plannedLabel: '今週予定',
+        href: '#/used',
       })}
     </div>
 
@@ -442,6 +558,11 @@ async function renderHome() {
       <span class="vault-line-label">金庫</span>
       <span class="vault-line-value">${esc(fmtMoney(vault.balance))}</span>
     </a>
+
+    ${
+      // 調合棚。今週のうちに期限が来るぶんだけ。
+      due.length ? `<div class="section-title">調合棚</div>${shelf(due, weekEnd)}` : ''
+    }
 
     <div class="section-title">現況</div>
     <div class="panel">
@@ -463,17 +584,7 @@ async function renderHome() {
              </div>`
           : ''
       }
-      <div class="stat-line"><span>やり切った時のタイム残</span><span class="v">${esc(fmtTime(summary.time.remaining))}</span></div>
-      <div class="stat-line"><span>やり切った時のウォレット残</span><span class="v">${esc(fmtMoney(summary.money.remaining))}</span></div>
     </div>
-
-    ${
-      // 今週のウォレットが何に出ていったか。家計簿として見るのはここ。
-      summary.wallet_by_goods.some((row) => row.money)
-        ? `<div class="section-title">今週の出どころ</div>
-           <div class="panel">${walletBars(summary.wallet_by_goods)}</div>`
-        : ''
-    }
 
     ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
@@ -494,6 +605,7 @@ async function renderHome() {
 
 /* ---------- ストリーム ---------- */
 
+const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
 let streamFilter = 'all';
 
 async function renderStream() {
@@ -511,7 +623,7 @@ async function renderStream() {
 
   viewEl.innerHTML = `
     <div class="filters">
-      ${['all', 'idea', 'log', 'food', 'gear']
+      ${STREAM_TYPES
         .map(
           (type) => `<button class="filter" data-filter="${type}"
              aria-pressed="${streamFilter === type}">${
@@ -2826,12 +2938,18 @@ async function route() {
   try {
     let match;
     if (hash === '/home') return await renderHome();
-    if (hash === '/stream') return await renderStream();
+    if (hash === '/stream' || hash.startsWith('/stream?')) {
+      // ユーズドから種別を指定して来られるようにする。
+      const type = new URLSearchParams(hash.split('?')[1] ?? '').get('type');
+      if (type && STREAM_TYPES.includes(type)) streamFilter = type;
+      return await renderStream();
+    }
     if (hash === '/missions') return await renderMissions();
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
     if (hash === '/vault') return await renderVault();
+    if (hash === '/used') return await renderUsed();
     if (hash === '/spells') return await renderSpells();
     if ((match = hash.match(/^\/spell\/(\d+)$/))) {
       return await renderSpell(Number(match[1]));

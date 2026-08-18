@@ -407,12 +407,24 @@ const MISSION_ORDER = {
   recent: `ORDER BY COALESCE(m.completed_at, m.created_at) DESC, m.id DESC`,
 };
 
-export function listMissions({ status, sort = 'recent' } = {}) {
+// due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
+// 期限を持たないものは落とす。棚に並べる先が無いため。
+export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
   const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
-  const rows = status
-    ? db.prepare(`${MISSION_SELECT} WHERE m.status = ? ${order}`).all(status)
-    : db.prepare(`${MISSION_SELECT} ${order}`).all();
-  return rows.map(decorate);
+  const where = [];
+  const params = [];
+  if (status) {
+    where.push('m.status = ?');
+    params.push(status);
+  }
+  if (due_by !== null) {
+    const key = parseDateKey(due_by) ? due_by : null;
+    if (!key) throw badRequest('invalid due_by');
+    where.push('effective_due_date IS NOT NULL AND effective_due_date <= ?');
+    params.push(key);
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return db.prepare(`${MISSION_SELECT} ${clause} ${order}`).all(...params).map(decorate);
 }
 
 export function isMissionSort(sort) {

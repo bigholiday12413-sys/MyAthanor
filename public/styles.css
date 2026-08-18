@@ -1944,6 +1944,106 @@ a.room-title {
   opacity: 1;
 }
 
+/* ---------- 調合棚 ---------- */
+
+/* 上の試験管と同じガラスの一家。丸底のフラスコを期限の早い順に並べる。
+   中身の高さが残り日数で、過ぎたものは口から吹きこぼれる。 */
+.shelf {
+  margin-bottom: 14px;
+  padding: 8px 10px 10px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: var(--frame);
+}
+
+.shelf-row,
+.shelf-names {
+  display: flex;
+  gap: 4px;
+}
+
+.flask {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-decoration: none;
+}
+
+.flask svg {
+  width: 100%;
+  max-width: 46px;
+  height: auto;
+}
+
+.flask-glass {
+  stroke: var(--glass);
+  stroke-width: 1.5;
+}
+
+.flask-cork {
+  fill: var(--wood);
+}
+
+.flask-liquid {
+  fill: var(--green);
+}
+
+.flask.is-soon .flask-liquid {
+  fill: var(--gold);
+}
+
+.flask.is-over .flask-glass {
+  stroke: var(--danger);
+}
+
+.flask-spill {
+  fill: var(--danger);
+}
+
+.flask-day {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+}
+
+.flask.is-soon .flask-day {
+  color: var(--gold-dark);
+}
+
+.flask.is-over .flask-day {
+  color: var(--danger);
+}
+
+/* 棚板。フラスコが乗っている板を1本の線で出す。 */
+.shelf-board {
+  height: 3px;
+  margin: 2px 0 4px;
+  background: var(--trail);
+  border-radius: 1px;
+}
+
+.shelf-names span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--dim);
+  text-align: center;
+  word-break: break-all;
+}
+
+.shelf-more {
+  display: block;
+  margin-top: 6px;
+  text-align: center;
+}
+
 /* ---------- 週の紙 ---------- */
 
 /* 7枚を等幅で並べる。狭い画面でも折り返さない。 */
