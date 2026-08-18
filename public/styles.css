@@ -203,9 +203,14 @@ body::after {
 }
 
 
+/* 柱の丈。dvh の効かないブラウザ（iOS 16.3 以前の Safari）では宣言ごと落ちて
+   height:auto になり、中の #view が丈を持てず、めくりも流しも死ぬ。
+   html/body が overflow:hidden なので、そうなると中身に手が届かない。
+   先に vh を置いて、読めるほうが後から上書きする。 */
 .app {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   height: 100dvh;
   max-width: 720px;
   margin: 0 auto;
@@ -321,6 +326,10 @@ body::after {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  /* 縦に流すことを明示する。書かないと、この指づかいを誰が取るのかの判断が
+     ブラウザ任せになり、外側（めくり）に持っていかれることがある。
+     つまむ拡大は残す。取り上げると字を大きくして読む手が塞がる。 */
+  touch-action: pan-y pinch-zoom;
   /* 末尾が「書き留める」の下に隠れないよう、そのぶん空けておく。 */
   padding-bottom: calc(var(--pad) + 62px);
 }
@@ -1346,6 +1355,8 @@ input[type='range']::-moz-range-thumb {
   overflow: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  /* 盤は縦にも横にも繰る。こちらも指づかいを明示しておく。 */
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 /* 盤の寸法は JS が入れる。等倍のときだけ枠にぴったり合う。 */
