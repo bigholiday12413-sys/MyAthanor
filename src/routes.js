@@ -36,13 +36,20 @@ api.use((_req, _res, next) => {
 });
 
 /* ストリーム */
-api.get('/stream', handle((req, res) => {
-  const type = req.query.type ?? 'all';
-  if (!['all', 'idea', 'log', 'food', 'gear'].includes(type)) {
-    const err = new Error('type must be all, idea, log, food or gear');
+const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
+
+function streamType(value, fallback = 'all') {
+  const type = value ?? fallback;
+  if (type !== null && !STREAM_TYPES.includes(type)) {
+    const err = new Error(`type must be ${STREAM_TYPES.join(', ')}`);
     err.status = 400;
     throw err;
   }
+  return type;
+}
+
+api.get('/stream', handle((req, res) => {
+  const type = streamType(req.query.type);
   res.json(store.listStream({ type, limit: req.query.limit ?? 200, tag: req.query.tag ?? null }));
 }));
 
@@ -188,7 +195,9 @@ api.post('/cauldrons/:id/materials', handle((req, res) =>
   res.status(201).json(store.addMaterials(id(req), req.body?.items))));
 
 /* タグ */
-api.get('/tags', handle((_req, res) => res.json(store.listTags())));
+// type を付けるとストリームのその絞り込みでの件数になる。無ければ全部。
+api.get('/tags', handle((req, res) =>
+  res.json(store.listTags({ type: streamType(req.query.type, null) }))));
 api.post('/tags', handle((req, res) => res.status(201).json(store.createTag(req.body ?? {}))));
 api.patch('/tags/:id', handle((req, res) => res.json(store.renameTag(id(req), req.body ?? {}))));
 api.delete('/tags/:id', handle((req, res) => res.json(store.deleteTag(id(req)))));

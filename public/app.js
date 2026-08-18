@@ -500,8 +500,13 @@ async function renderStream() {
 
   const [items, tags] = await Promise.all([
     api(`/stream?type=${streamFilter}${streamTag ? `&tag=${streamTag}` : ''}`),
-    api('/tags'),
+    // 件数はいま選んでいる絞り込みでのもの。タブによらず一定だと、絞った意味が読めない。
+    api(`/tags?type=${streamFilter}`),
   ]);
+
+  // その絞り込みで1件も無いタグは出さない。押しても空になるだけなので。
+  // ただし、いま選んでいるタグだけは残す。消すと選択を外す手立てが無くなる。
+  const shown = tags.filter((tag) => tag.total > 0 || String(streamTag) === String(tag.id));
 
   const body =
     streamView === 'tag'
@@ -528,10 +533,10 @@ async function renderStream() {
       <button class="filter" data-view="tag" aria-pressed="${streamView === 'tag'}">タグ別</button>
     </div>
     ${
-      streamView === 'time' && tags.length
+      streamView === 'time' && shown.length
         ? `<div class="tag-bar">
              <button class="chip ${streamTag ? '' : 'is-on'}" data-tag="">すべて</button>
-             ${tags
+             ${shown
                .map(
                  (tag) => `<button class="chip ${
                    String(streamTag) === String(tag.id) ? 'is-on' : ''

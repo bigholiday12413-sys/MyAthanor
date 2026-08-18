@@ -72,7 +72,25 @@ function findOrCreateTag(name) {
   return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(Number(lastInsertRowid));
 }
 
-export function listTags() {
+/* type を渡すと、ストリームのその絞り込みで実際に出るものだけを数える。
+   渡さなければ全部を数える（タグの整理はこちらを使う）。
+   数がタブによらず一定だと、絞り込んだ意味が読めない。 */
+function taggedWhere(type) {
+  const idea = `e.kind = 'idea'
+    AND EXISTS (SELECT 1 FROM idea i WHERE i.id = e.entry_id AND i.is_spell = 0)`;
+  const logWith = (cond) =>
+    `e.kind = 'log' AND EXISTS (SELECT 1 FROM log l WHERE l.id = e.entry_id AND ${cond})`;
+
+  if (type === 'idea') return idea;
+  // 糧と装備はログの器に入っている。素のログは goods を持たない。
+  if (isGoods(type)) return logWith(`l.goods = '${type}'`);
+  if (type === 'log') return logWith('l.goods IS NULL');
+  // すべて。スペルはストリームに出ないので、ここでも数えない。
+  return `(${idea}) OR (${logWith('1 = 1')})`;
+}
+
+export function listTags({ type = null } = {}) {
+  const visible = type === null ? '1 = 1' : taggedWhere(type);
   return db
     .prepare(`
       SELECT t.id, t.name,
@@ -80,7 +98,7 @@ export function listTags() {
              COALESCE(SUM(CASE WHEN e.kind = 'log' THEN 1 ELSE 0 END), 0) AS log_count,
              COUNT(e.tag_id) AS total
       FROM tag t
-      LEFT JOIN entry_tag e ON e.tag_id = t.id
+      LEFT JOIN entry_tag e ON e.tag_id = t.id AND (${visible})
       GROUP BY t.id
       ORDER BY total DESC, t.name ASC
     `)
