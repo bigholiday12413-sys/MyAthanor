@@ -703,7 +703,7 @@ export function updateSettings({
   return getSettings();
 }
 
-/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+/* ---------- 週のタイムを表で選ぶ ---------- */
 
 // 曜日×24時間の 168 マス。index = 曜日(0=月) * 24 + 時。
 export const GRID_CELLS = 7 * 24;
@@ -727,7 +727,7 @@ export function clearTimeGrid() {
 
 /* ---------- 金庫 ---------- */
 
-// 月が終わると、その月のウォレットの余り（可処分 − 消費済み）が金庫に積まれる。
+// 月が終わると、その月のウォレットの余り（全体 − 消費済み）が金庫に積まれる。
 // 進行中の今月はまだ積まない。使いすぎた月は目減りする。
 export function getVault(now = new Date()) {
   const settings = getSettings();
@@ -767,7 +767,7 @@ export function getVault(now = new Date()) {
   };
 }
 
-/* ---------- budget（期間ごとの可処分量） ---------- */
+/* ---------- budget（期間ごとに使える量） ---------- */
 
 // 既定値（settings）のどの列が、どちらのリソースに対応するか。
 const DEFAULT_COLUMN = { time: 'weekly_time', money: 'monthly_money' };
@@ -797,7 +797,7 @@ function requirePeriod(kind, periodKey) {
   return period;
 }
 
-// その期間の可処分量。個別設定があればそれを、無ければ既定値を返す。
+// その期間に使える量。個別設定があればそれを、無ければ既定値を返す。
 export function resolveBudget(kind, periodKey) {
   requireKind(kind);
   const row = db

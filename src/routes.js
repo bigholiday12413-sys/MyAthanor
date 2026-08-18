@@ -122,7 +122,7 @@ api.post('/missions/:id/reopen', handle((req, res) =>
 api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
 api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
 
-// 週の可処分タイムを表の塗りで決める。塗ったマスの数がそのまま時間になる。
+// 週のタイムを表の塗りで決める。塗ったマスの数がそのまま時間になる。
 api.put('/settings/time-grid', handle((req, res) => {
   const { grid } = req.body ?? {};
   res.json(grid === null ? store.clearTimeGrid() : store.setTimeGrid(grid));
@@ -131,7 +131,7 @@ api.put('/settings/time-grid', handle((req, res) => {
 /* 金庫 */
 api.get('/vault', handle((_req, res) => res.json(store.getVault())));
 
-/* 期間ごとの可処分量 */
+/* 期間ごとに使える量 */
 api.get('/budgets', handle((req, res) => {
   const { kind, past, future } = req.query;
   res.json(store.listBudgets(kind, { past, future }));

@@ -254,8 +254,16 @@ function missionCard(mission, { showSource = true } = {}) {
              </div>`
           : ''
       }
-      ${mission.status === 'active' ? missionDates(mission) : ''}
-      ${actions ? `<div class="btn-row">${actions}</div>` : ''}
+      ${
+        // 日付と操作を1行に混ぜる。別々の行に置くと札が241pxになり、
+        // 1画面に1枚しか乗らなくなる。開いたときだけ下へ折り返す。
+        mission.status === 'active' || actions
+          ? `<div class="btn-row card-foot">
+               ${mission.status === 'active' ? missionDates(mission) : ''}
+               ${actions}
+             </div>`
+          : ''
+      }
     </div>
   `;
 }
@@ -338,7 +346,7 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
             <span class="v ${data.over ? 'neg' : ''}">${esc(format(free))}</span>
           </div>
           <div class="readout-row">
-            <span class="k">可処分</span>
+            <span class="k">全体</span>
             <span class="v">${esc(format(data.budget))}</span>
           </div>
         </div>
@@ -1356,19 +1364,20 @@ async function renderMissions() {
         missionSort === 'recent'
       }">新しい順</button>
     </div>
-    <div class="panel" style="margin-bottom:14px">
-      <div class="stat-line">
-        <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}</span>
-        <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
-      </div>
-      ${
-        missionSort === 'due'
-          ? `<div class="stat-line"><span>期限なし</span><span class="v">${
-              missions.filter((m) => !m.due_date).length
-            }件（末尾）</span></div>`
-          : ''
-      }
-    </div>
+    ${
+      // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
+      (() => {
+        const undated = missions.filter((m) => !m.due_date).length;
+        return `<div class="panel tight">
+          <div class="stat-line">
+            <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}${
+              missionSort === 'due' && undated ? `（期限なし ${undated}）` : ''
+            }</span>
+            <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
+          </div>
+        </div>`;
+      })()
+    }
     <div class="list" id="mission-list">
       ${
         missions.length
@@ -1396,7 +1405,7 @@ async function renderMissions() {
 
 /* ---------- 設定 ---------- */
 
-// タイムは週、ウォレットは月を1期間として可処分量を管理する。
+// タイムは週、ウォレットは月を1期間として使える量を管理する。
 const BUDGET_UI = {
   time: {
     title: 'タイム（週別）',
@@ -1439,7 +1448,7 @@ function budgetSection(kind, rows) {
                  data-key="${esc(row.key)}"
                  data-original="${ui.toInput(row.amount)}"
                  value="${ui.toInput(row.amount)}"
-                 aria-label="${esc(row.label)} の可処分${esc(ui.unit)}" />
+                 aria-label="${esc(row.label)} の${esc(ui.unit)}" />
           ${
             row.source === 'override'
               ? `<button type="button" class="ghost" data-reset="${esc(row.key)}">既定へ</button>`
@@ -1470,7 +1479,7 @@ async function renderSettings() {
   const grid = (settings.time_grid ?? '').length === 168 ? settings.time_grid : '0'.repeat(168);
 
   viewEl.innerHTML = `
-    <div class="section-title">週の可処分タイム</div>
+    <div class="section-title">週のタイム</div>
     <div class="panel" id="time-grid-panel">
       <div class="tg-top">
         <span class="tg-total" id="tg-total"></span>
@@ -1487,7 +1496,7 @@ async function renderSettings() {
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
-    <div class="section-title">既定の可処分ウォレット</div>
+    <div class="section-title">既定のウォレット</div>
     <form class="panel" id="settings-form">
       <div class="field">
         <label for="monthly-money">月あたり（円）</label>
@@ -2254,7 +2263,7 @@ async function renderVault() {
         <div class="vault-row">
           <div>
             <div class="vault-month">${esc(month.label)}</div>
-            <div class="vault-detail">可処分 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
+            <div class="vault-detail">全体 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
               fmtMoney(month.consumed),
             )}</div>
           </div>
@@ -2285,7 +2294,7 @@ async function renderVault() {
   });
 }
 
-/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+/* ---------- 週のタイムを表で選ぶ ---------- */
 
 const WEEK_HEAD = ['月', '火', '水', '木', '金', '土', '日'];
 
@@ -2367,7 +2376,7 @@ function wireTimeGrid(root, initial) {
   root.querySelector('#tg-save').addEventListener('click', async () => {
     try {
       await api('/settings/time-grid', { method: 'PUT', body: { grid: grid.join('') } });
-      toast('週の可処分タイムを保存しました');
+      toast('週のタイムを保存しました');
       await renderSettings();
     } catch (err) {
       toast(err.message, true);
