@@ -630,6 +630,37 @@ const SPARK = {
   palette: { g: GOLD },
 };
 
+// 棚番＝フラスコを1つずつ見て回る小さいもの。
+// 2等身。仕立てた服ではなく、白い布をただ巻いて頭からかぶっただけ。
+// 顔も布の下で、肌は出さない。
+// 左右対称の合わせ目を入れると仕立て服に見えるので、皺は斜めに短く散らす。
+// 裾も揃えない。布は真っ直ぐには落ちない。
+// 白のままだと紙の上で消えるので、輪郭を1本回して縁を拾う。
+const KEEPER = {
+  rows: [
+    '......oooo......',
+    '.....owwwwo.....',
+    '....owwwwwwo....',
+    '....owswwwwo....',
+    '....oswwwwwo....',
+    '....owwwwwwo....',
+    '.....owwwwo.....',
+    '...owwwwwwwwo...',
+    '..owwwwwwwwwo...',
+    '..owwwwwwswwwo..',
+    '..owwwwwwwswwo..',
+    '...owswwwwwwwo..',
+    '...owwswwwwwo...',
+    '...owwwwwwswo...',
+    '...owwwwwwwo....',
+    '.....oo..oo.....',
+  ],
+  palette: { o: '#8a8778', w: '#fbf8ec', s: '#dcd8c5' },
+};
+
+
+
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -650,6 +681,7 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  keeper: KEEPER,
   astrolabe: ASTROLABE,
   spark: SPARK,
   ingot: INGOT,
