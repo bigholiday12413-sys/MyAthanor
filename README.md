@@ -37,12 +37,17 @@ DB は初回起動時に自動作成される。バックアップは `data/` �
 スマホから見た目と操作感を確かめるためのもの。
 
 ```
-https://<user>.github.io/MyAthanor/
+https://bigholiday12413-sys.github.io/MyAthanor/
 ```
 
-**初回だけリポジトリ側の設定が要る。**
+Pages は workflow 側で有効にする（`configure-pages` の `enablement: true`）ので、
+ふだんは設定画面を触らなくてよい。うまく有効にならなかったときだけ
 Settings → Pages → Source を **GitHub Actions** にする。
 `main` に入る前に見たいときは、Actions → Pages → Run workflow でブランチを選べば出る。
+
+**出るのは見本版だけで、持ち主のデータは1件も載らない。**
+見本版は `demo/seed.js` の作り物をブラウザの中の SQLite に入れて動いていて、
+`data/myathanor.db` は組み立てにも配信にも関わらない。
 
 仕組みは「本体のコードをそのまま持っていき、DB の1ファイルだけ差し替える」。
 
