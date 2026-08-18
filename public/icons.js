@@ -489,6 +489,54 @@ const HELM = {
   },
 };
 
+// 週の紙。7枚並べて曜日を数える。右下が折れていて、左の縁が少し欠けている。
+// 面は白より温かくしておく。白いカードの上に白い紙を置くと枠しか見えず、
+// 「点線の四角」になってしまう。欠けも1か所だけ。増やすと点線に戻る。
+const SHEET = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '...ppppppppppo..',
+    '..oppppppppppo..',
+    '..opppppppppof..',
+    '..oppppppppoff..',
+    '..opppppppoffd..',
+    '..oppppppoffdd..',
+    '..oooooooffddd..',
+    '................',
+  ],
+  palette: { o: TRAIL, p: '#f6f2e3', f: '#ded2b0', d: '#c2b287' },
+};
+
+// 済んだ日の紙。印を入れる。
+const SHEET_DONE = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..opppppppvppo..',
+    '..oppppppvvppo..',
+    '..opvpppvvvppo..',
+    '...pvvpvvvpppo..',
+    '..opvvvvvppppo..',
+    '..oppvvvppppof..',
+    '..opppvppppoff..',
+    '..opppppppoffd..',
+    '..oppppppoffdd..',
+    '..oooooooffddd..',
+    '................',
+  ],
+  palette: { o: TRAIL, p: '#f6f2e3', f: '#ded2b0', d: '#c2b287', v: GREEN },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -509,6 +557,8 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  sheet: SHEET,
+  'sheet-done': SHEET_DONE,
 };
 
 const RENDERED = Object.fromEntries(

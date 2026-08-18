@@ -6,6 +6,7 @@ import {
   parseDateKey,
   daysInMonth,
   weekdayIndex,
+  weeklyShare,
 } from './period.js';
 
 // タイムは分、ウォレットは円。どちらも整数で保持する。
@@ -727,21 +728,21 @@ export function clearTimeGrid() {
 
 /* ---------- 金庫 ---------- */
 
-// 月が終わると、その月のウォレットの余り（全体 − 消費済み）が金庫に積まれる。
+// 週が終わると、その週のウォレットの余り（全体 − 消費済み）が金庫に積まれる。
 // 進行中の今月はまだ積まない。使いすぎた月は目減りする。
 export function getVault(now = new Date()) {
   const settings = getSettings();
   const current = periods.money.of(now);
   const firstLog = db.prepare(`SELECT MIN(occurred_at) AS at FROM log`).get().at;
 
-  const months = [];
+  const weeks = [];
   if (firstLog) {
     let period = periods.money.of(new Date(firstLog));
     let guard = 0;
     while (period && period.key < current.key && guard < 600) {
       const budget = resolveBudget('money', period.key);
       const consumed = consumedIn('money', period);
-      months.push({
+      weeks.push({
         ...period,
         budget: budget.amount,
         budget_source: budget.source,
@@ -753,17 +754,17 @@ export function getVault(now = new Date()) {
     }
   }
 
-  const deposited = months.reduce((sum, month) => sum + month.surplus, 0);
+  const deposited = weeks.reduce((sum, week) => sum + week.surplus, 0);
   const currentBudget = resolveBudget('money', current.key).amount;
 
   return {
     initial: settings.vault_initial,
     deposited,
     balance: settings.vault_initial + deposited,
-    // 今月が終わったら積まれる見込み。
+    // 今週が終わったら積まれる見込み。
     pending: currentBudget - consumedIn('money', current),
     current_period: current,
-    months: months.reverse(),
+    weeks: weeks.reverse(),
   };
 }
 
@@ -798,13 +799,15 @@ function requirePeriod(kind, periodKey) {
 }
 
 // その期間に使える量。個別設定があればそれを、無ければ既定値を返す。
+// ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから返す。
 export function resolveBudget(kind, periodKey) {
   requireKind(kind);
   const row = db
     .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
     .get(kind, periodKey);
   if (row) return { amount: row.amount, source: 'override' };
-  return { amount: getSettings()[DEFAULT_COLUMN[kind]], source: 'default' };
+  const stored = getSettings()[DEFAULT_COLUMN[kind]];
+  return { amount: kind === 'money' ? weeklyShare(stored) : stored, source: 'default' };
 }
 
 function consumedIn(kind, period) {
@@ -1665,10 +1668,11 @@ export function getDungeon({ onlyLegacy = false } = {}) {
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
+  // どちらも同じ週。刻みが揃ったので、期間はひとつだけ取ればよい。
   const week = periods.time.of(now);
-  const month = periods.money.of(now);
+  const moneyWeek = periods.money.of(now);
   const timeBudget = resolveBudget('time', week.key);
-  const moneyBudget = resolveBudget('money', month.key);
+  const moneyBudget = resolveBudget('money', moneyWeek.key);
 
   const spent = (period) =>
     db
@@ -1708,7 +1712,7 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
     .get().count;
 
-  // 今月のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+  // 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
   const spendByGoods = db
     .prepare(`
       SELECT COALESCE(goods, 'event') AS goods,
@@ -1718,14 +1722,14 @@ export function getSummary(now = new Date()) {
       WHERE occurred_at >= ? AND occurred_at < ? AND money_spent <> 0
       GROUP BY COALESCE(goods, 'event')
     `)
-    .all(month.start, month.end);
+    .all(moneyWeek.start, moneyWeek.end);
 
   const plannedWeek = plannedMissions(week);
-  const plannedMonth = plannedMissions(month);
+  const plannedMoney = plannedMissions(moneyWeek);
 
   // 定期イベントのこれから起きる回も消費予定に含める。
   const recurringWeek = plannedRecurring(week, now);
-  const recurringMonth = plannedRecurring(month, now);
+  const recurringMoney = plannedRecurring(moneyWeek, now);
 
   const build = (budget, consumed, fromMissions, fromRecurring, period) => {
     const plannedValue = fromMissions + fromRecurring;
@@ -1754,15 +1758,15 @@ export function getSummary(now = new Date()) {
       unit: 'jpy',
       ...build(
         moneyBudget.amount,
-        spent(month).money,
-        plannedMonth.money,
-        recurringMonth.money,
-        month,
+        spent(moneyWeek).money,
+        plannedMoney.money,
+        recurringMoney.money,
+        moneyWeek,
       ),
       budget_source: moneyBudget.source,
-      due_mission_count: plannedMonth.count,
+      due_mission_count: plannedMoney.count,
     },
-    // 今月のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
+    // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
     wallet_by_goods: ['food', 'gear', 'event'].map((goods) => {
       const row = spendByGoods.find((item) => item.goods === goods);
       return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };

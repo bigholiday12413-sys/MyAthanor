@@ -311,6 +311,23 @@ function wireMissionActions(container, onChanged) {
 /* ---------- ホーム ---------- */
 
 // リソースは2色の試験管で示す。下から 消費済み（薬草色）、消費予定（琥珀）。
+const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+
+/* 週の紙。月曜から7枚並べ、済んだ日から順に印が入る。
+   タイムもウォレットも週で見るようになったので、いま週のどこに居るのかを
+   数字より先に置く。今日の紙にはまだ印を入れない。終わっていないので。 */
+function weekSheets(now = new Date()) {
+  const today = (now.getDay() + 6) % 7;
+  return `<div class="week-sheets" aria-label="今週">${WEEKDAYS.map((day, index) => {
+    const done = index < today;
+    const isToday = index === today;
+    return `<div class="sheet ${done ? 'is-done' : ''} ${isToday ? 'is-today' : ''}">
+      ${icon(done ? 'sheet-done' : 'sheet', 'sheet-px', isToday ? { o: '#4a8236' } : null)}
+      <span class="sheet-day">${day}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 function tubeCard({ name, period, data, format, plannedLabel = '消費予定' }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
@@ -398,15 +415,10 @@ async function renderHome() {
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [summary, active, vault] = await Promise.all([
-    api('/summary'),
-    api('/missions?status=active&sort=due'),
-    api('/vault'),
-  ]);
-
-  const upcoming = active.slice(0, 5);
+  const [summary, vault] = await Promise.all([api('/summary'), api('/vault')]);
 
   viewEl.innerHTML = `
+    ${weekSheets()}
     <div class="section-title">リソース</div>
     <div class="tubes">
       ${tubeCard({
@@ -418,10 +430,10 @@ async function renderHome() {
       })}
       ${tubeCard({
         name: 'ウォレット',
-        period: `月 ${summary.money.period.label}`,
+        period: `週 ${summary.money.period.label}`,
         data: summary.money,
         format: fmtMoney,
-        plannedLabel: '今月予定',
+        plannedLabel: '今週予定',
       })}
     </div>
 
@@ -438,8 +450,8 @@ async function renderHome() {
         <span class="v">${summary.active_mission_count}</span>
       </div>
       <div class="stat-line">
-        <span>うち今週まで／今月まで</span>
-        <span class="v">${summary.time.due_mission_count} / ${summary.money.due_mission_count}</span>
+        <span>うち今週まで</span>
+        <span class="v">${summary.time.due_mission_count}</span>
       </div>
       ${
         summary.time.planned_recurring || summary.money.planned_recurring
@@ -456,9 +468,9 @@ async function renderHome() {
     </div>
 
     ${
-      // 今月のウォレットが何に出ていったか。家計簿として見るのはここ。
+      // 今週のウォレットが何に出ていったか。家計簿として見るのはここ。
       summary.wallet_by_goods.some((row) => row.money)
-        ? `<div class="section-title">今月の出どころ</div>
+        ? `<div class="section-title">今週の出どころ</div>
            <div class="panel">${walletBars(summary.wallet_by_goods)}</div>`
         : ''
     }
@@ -477,23 +489,7 @@ async function renderHome() {
         : ''
     }
 
-    <div class="section-title">進行中のミッション</div>
-    <div class="list" id="home-missions">
-      ${
-        upcoming.length
-          ? upcoming.map((m) => missionCard(m)).join('')
-          : '<div class="empty">進行中のミッションはありません</div>'
-      }
-    </div>
-    ${
-      active.length > upcoming.length
-        ? `<div class="btn-row"><a class="link" href="#/missions">他 ${active.length - upcoming.length} 件を表示 →</a></div>`
-        : ''
-    }
   `;
-
-  wireMissionActions(document.getElementById('home-missions'), renderHome);
-  wireLegacy(document.getElementById('home-missions'), renderHome);
 }
 
 /* ---------- ストリーム ---------- */
@@ -1418,7 +1414,7 @@ const BUDGET_UI = {
     format: fmtTime,
   },
   money: {
-    title: 'ウォレット（月別）',
+    title: 'ウォレット（週別）',
     unit: '円',
     step: '100',
     toInput: (amount) => amount,
@@ -1498,11 +1494,15 @@ async function renderSettings() {
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
-    <div class="section-title">既定のウォレット</div>
+    <div class="section-title">報酬</div>
     <form class="panel" id="settings-form">
       <div class="field">
         <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
+      </div>
+      <div class="stat-line">
+        <span>週のウォレット</span>
+        <span class="v" id="weekly-share">${esc(fmtMoney(Math.round(settings.monthly_money / 4)))}</span>
       </div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
@@ -1543,6 +1543,13 @@ async function renderSettings() {
     ${budgetSection('time', timeBudgets)}
     ${budgetSection('money', moneyBudgets)}
   `;
+
+  // 打っている最中に、4で割った週ぶんが見えるようにする。
+  const rewardInput = document.getElementById('monthly-money');
+  rewardInput.addEventListener('input', () => {
+    document.getElementById('weekly-share').textContent =
+      fmtMoney(Math.round(Number(rewardInput.value || 0) / 4));
+  });
 
   document.getElementById('settings-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1627,7 +1634,6 @@ async function renderSettings() {
 
 /* ---------- 定期イベント ---------- */
 
-const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
 const FREQ_LABEL = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
 
 function scheduleText(recurrence) {
@@ -2254,28 +2260,28 @@ async function renderVault() {
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
-    <div class="section-title">月ごとの積立<span class="section-count">${
-      vault.months.length
+    <div class="section-title">週ごとの積立<span class="section-count">${
+      vault.weeks.length
     }</span></div>
     ${
-      vault.months.length
-        ? `<div class="panel">${vault.months
+      vault.weeks.length
+        ? `<div class="panel">${vault.weeks
             .map(
-              (month) => `
+              (week) => `
         <div class="vault-row">
           <div>
-            <div class="vault-month">${esc(month.label)}</div>
-            <div class="vault-detail">全体 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
-              fmtMoney(month.consumed),
+            <div class="vault-month">${esc(week.label)}</div>
+            <div class="vault-detail">全体 ${esc(fmtMoney(week.budget))} − 消費 ${esc(
+              fmtMoney(week.consumed),
             )}</div>
           </div>
-          <div class="vault-surplus ${month.surplus < 0 ? 'neg' : ''}">${
-            month.surplus >= 0 ? '+' : ''
-          }${esc(fmtMoney(month.surplus))}</div>
+          <div class="vault-surplus ${week.surplus < 0 ? 'neg' : ''}">${
+            week.surplus >= 0 ? '+' : ''
+          }${esc(fmtMoney(week.surplus))}</div>
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだ終わった月がありません</div>'
+        : '<div class="empty">まだ終わった週がありません</div>'
     }
   `;
 

@@ -2082,6 +2082,54 @@ a.room-title {
   opacity: 1;
 }
 
+/* ---------- 週の紙 ---------- */
+
+/* 7枚を等幅で並べる。狭い画面でも折り返さない。 */
+.week-sheets {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 3px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+}
+
+.sheet-px {
+  width: 26px;
+  height: 26px;
+}
+
+.sheet-day {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+}
+
+/* まだ来ていない日は紙を伏せておく。 */
+.sheet:not(.is-done):not(.is-today) .sheet-px {
+  opacity: 0.45;
+}
+
+.sheet.is-today {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
+.sheet.is-today .sheet-day {
+  color: var(--green-dark);
+  font-weight: 700;
+}
+
 /* ---------- ページ送り ---------- */
 
 .pager {

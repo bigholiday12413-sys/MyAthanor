@@ -1,5 +1,6 @@
 // 集計期間の算出。
-// タイムは「週あたり」（月曜始まり）、ウォレットは「月あたり」で管理する。
+// タイムもウォレットも「週あたり」（月曜始まり）で管理する。
+// ウォレットの既定値だけは月あたりの報酬として持ち、4で割って週に均す。
 // 境界はサーバのローカルタイムゾーンで判定し、SQLite に格納した ISO(UTC)
 // 文字列と比較できるよう UTC の ISO に揃えて返す。
 
@@ -56,17 +57,6 @@ function week(start) {
   };
 }
 
-function month(start) {
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
-  return {
-    unit: 'month',
-    key: `${start.getFullYear()}-${pad(start.getMonth() + 1)}`,
-    label: `${start.getFullYear()}/${pad(start.getMonth() + 1)}`,
-    start: start.toISOString(),
-    end: end.toISOString(),
-  };
-}
-
 export const periods = {
   // タイム：週単位
   time: {
@@ -90,29 +80,30 @@ export const periods = {
     },
   },
 
-  // ウォレット：月単位
+  // ウォレット：週単位。タイムと同じ刻みで見るために揃えた。
+  // 月あたりで持っている報酬は、既定値を出すときに4で割る。
   money: {
     kind: 'money',
-    unit: 'month',
+    unit: 'week',
     of(date = new Date()) {
-      return month(new Date(date.getFullYear(), date.getMonth(), 1));
+      return week(mondayOf(date));
     },
-    // キーは YYYY-MM。
     fromKey(key) {
-      const m = /^(\d{4})-(\d{2})$/.exec(String(key ?? ''));
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? ''));
       if (!m) return null;
-      const monthNumber = Number(m[2]);
-      if (monthNumber < 1 || monthNumber > 12) return null;
-      return month(new Date(Number(m[1]), monthNumber - 1, 1));
+      const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (Number.isNaN(date.getTime())) return null;
+      return week(mondayOf(date));
     },
     shift(key, offset) {
       const base = this.fromKey(key);
       if (!base) return null;
-      const start = new Date(base.start);
-      return month(new Date(start.getFullYear(), start.getMonth() + offset, 1));
+      return week(mondayOf(addDays(new Date(base.start), offset * 7)));
     },
   },
 };
 
+// 月あたりの報酬を、1週ぶんに均す。月を4週として割り切る。
+export const weeklyShare = (monthly) => Math.round((Number(monthly) || 0) / 4);
+
 export const currentWeek = (now = new Date()) => periods.time.of(now);
-export const currentMonth = (now = new Date()) => periods.money.of(now);
