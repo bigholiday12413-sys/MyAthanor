@@ -676,6 +676,30 @@ const KEEPER = {
 
 
 
+// 週の表。曜日を縦の仕切りで割り、塗ったマスを緑で出す。
+// 設定の「週のタイム」へ行くための札。
+const TIMEGRID = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..o..oggo..o.o..',
+    '..oggoggo..ogo..',
+    '..oggoggo..ogo..',
+    '..oggo..oggogo..',
+    '..o..o..oggogo..',
+    '..o..o..oggo.o..',
+    '..o..o..oggo.o..',
+    '..o..o..o..o.o..',
+    '..o..o..o..o.o..',
+    '..o..o..o..o.o..',
+    '..oooooooooooo..',
+    '................',
+    '................',
+  ],
+  palette: { o: STONE, g: GREEN },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -696,6 +720,7 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  timegrid: TIMEGRID,
   keeper: KEEPER,
   astrolabe: ASTROLABE,
   spark: SPARK,

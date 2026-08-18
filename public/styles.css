@@ -573,15 +573,23 @@ body::after {
   min-width: 0;
 }
 
+/* 値は縮めない。狭いときは折り返して次の行へ落とす。
+   縮めると桁が切れて、金額が読めなくなる。 */
 .readout-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 4px;
+  gap: 0 4px;
   padding-bottom: 3px;
   font-family: var(--mono);
   font-size: 11px;
   border-bottom: 1px dotted var(--line);
+}
+
+.readout-row .v {
+  flex: none;
+  margin-left: auto;
 }
 
 .readout-row .k {

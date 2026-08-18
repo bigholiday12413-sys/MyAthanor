@@ -393,12 +393,13 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
       <div class="projection">
         ${
           /* 名前は書かない。上に引いた線と、緑と赤の使い分けで、差し引きだと読める。
-             貯めておけるものがあるほうだけ、左に置く。タイムは貯まらないので空ける。
+             左には、その管の元をたどれる先を置く。ウォレットは金庫（貯まった額つき）、
+             タイムは週の表（貯まらないので絵だけ）。
              空でも枠は残す。片方だけ丈が変わると、2本の管の目盛りがずれて見える。 */
           store
-            ? `<a class="proj-store" href="${store.href}">${icon(store.icon)}<span>${esc(
-                store.text,
-              )}</span></a>`
+            ? `<a class="proj-store" href="${store.href}" aria-label="${esc(store.label)}">${icon(
+                store.icon,
+              )}${store.text ? `<span>${esc(store.text)}</span>` : ''}</a>`
             : '<span class="proj-store is-empty"></span>'
         }
         <span class="v ${data.remaining < 0 ? 'neg' : ''}">${
@@ -663,6 +664,8 @@ async function renderHome() {
         data: summary.time,
         format: fmtTime,
         plannedLabel: '今週予定',
+        // タイムは貯まらないので数は出さない。使える幅を決めに行く入口だけ置く。
+        store: { icon: 'timegrid', href: '#/settings', label: '週のタイムを決める' },
       })}
       ${tubeCard({
         name: 'ウォレット',
@@ -670,7 +673,7 @@ async function renderHome() {
         format: fmtMoney,
         plannedLabel: '今週予定',
         href: '#/used',
-        store: { icon: 'coins', text: fmtMoney(vault.balance), href: '#/vault' },
+        store: { icon: 'coins', text: fmtMoney(vault.balance), href: '#/vault', label: '金庫' },
       })}
     </div>
 
