@@ -630,6 +630,52 @@ const SPARK = {
   palette: { g: GOLD },
 };
 
+// 棚番＝フラスコを1つずつ見て回る小さいもの。
+// 2等身。仕立てた服ではなく、白い布をただ巻いて頭からかぶっただけ。
+// いつも横を向いている（進む向き）。布は右前だけ開けて、前髪と、鼻と顎の
+// 輪郭だけを出す。目は描かない。点で目を入れると顔が主役になってしまう。
+// 頭には黒い魔女帽を斜めにかぶせる。つばから右上へ立ち上げ、途中で折って、
+// 先端は後頭部の側へ垂らす。真っ直ぐ尖らせると硬い三角にしか見えない。
+// 体は裾に向けて丸めない。丸めると雪だるまになるので、真っ直ぐ落として裾で切り、
+// 後ろ（進む向きの反対）へ布を引きずらせる。
+// 帽子のぶん縦に伸びるので、この絵だけ 16x20 で持ち、viewBox も合わせる。
+// 左右対称の合わせ目を入れると仕立て服に見えるので、皺は斜めに短く散らす。
+// 裾も揃えない。布は真っ直ぐには落ちない。
+// 白のままだと紙の上で消えるので、輪郭を1本回して縁を拾う。
+const KEEPER = {
+  rows: [
+    '..kkk...........',
+    '..kkkkk.........',
+    '....kkkkk.......',
+    '.......kkkk.....',
+    '.......kkkkk....',
+    '.....kkkkkkk....',
+    '.kkkkkkkkkkkk...',
+    '.kkkooooooo.....',
+    '...owwwwhhho....',
+    '...owwwhffffo...',
+    '...owwwffffo....',
+    '...owwwwffo.....',
+    '....owwwwo......',
+    '...owwwwwwwo....',
+    '..owwwwwwwwwo...',
+    '..owwwwwwswwo...',
+    '..owwwwwwwswo...',
+    '..owswwwwwwwo...',
+    '..owwswwwwwwo...',
+    'owwswwwwwwwwo...',
+  ],
+  palette: { o: '#8a8778', w: '#fbf8ec', s: '#dcd8c5', h: '#6b5a3a', f: '#e8c9a0', k: '#23281f' },
+};
+
+
+
+
+
+
+
+
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -650,6 +696,7 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  keeper: KEEPER,
   astrolabe: ASTROLABE,
   spark: SPARK,
   ingot: INGOT,

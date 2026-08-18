@@ -346,7 +346,7 @@ function weekSheets(now = new Date()) {
 }
 
 // 期間は出さない。上の週の紙がいつの話かを示していて、両方あると二度言うことになる。
-function tubeCard({ name, data, format, plannedLabel = '消費予定', href = null }) {
+function tubeCard({ name, data, format, plannedLabel = '消費予定', href = null, store = null }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
@@ -391,8 +391,19 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
         </div>
       </div>
       <div class="projection">
-        <span>フォーキャスト</span>
-        <span class="v ${data.remaining < 0 ? 'neg' : ''}">${esc(format(data.remaining))}</span>
+        ${
+          /* 名前は書かない。上に引いた線と、緑と赤の使い分けで、差し引きだと読める。
+             貯めておけるものがあるほうだけ、左に置く。タイムは貯まらないので空ける。
+             空でも枠は残す。片方だけ丈が変わると、2本の管の目盛りがずれて見える。 */
+          store
+            ? `<a class="proj-store" href="${store.href}">${icon(store.icon)}<span>${esc(
+                store.text,
+              )}</span></a>`
+            : '<span class="proj-store is-empty"></span>'
+        }
+        <span class="v ${data.remaining < 0 ? 'neg' : ''}">${
+          data.remaining > 0 ? '+' : ''
+        }${esc(format(data.remaining))}</span>
       </div>
     </div>
   `;
@@ -438,6 +449,13 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
+/* 棚番の絵だけ縦に長い（帽子のぶん）。共通の icon() は 16x16 を前提に
+   viewBox を書くので、ここだけ自前で組む。 */
+function keeperMark() {
+  return `<svg class="px keeper-px" viewBox="0 0 16 20" shape-rendering="crispEdges"
+    aria-hidden="true" focusable="false">${iconBody('keeper')}</svg>`;
+}
+
 /* 丸底フラスコ。他の絵と同じくドット絵で描く。
    中身の高さだけが変わるので、型を1つ持って行ごとに塗り分ける。 */
 const FLASK_ROWS = [
@@ -462,27 +480,37 @@ const FLASK_ROWS = [
 // 液が入りうる行（首から底の1つ上まで）。
 const FLASK_BODY = [2, 14];
 
+/* 満タンにはしない。口まで詰まっていると、揺らせば溢れるように見えて落ち着かない。
+   実際の調合も口いっぱいには入れない。 */
+const FLASK_MAX = 0.8;
+
+// 液は2色。地を暗くして、水面と縁に明るいほうを1段だけ置く。
 const FLASK_TONE = {
-  far: '#4a8236',
-  soon: '#a8802a',
-  over: '#b8442c',
+  far: { deep: '#35682a', lit: '#7cb356' },
+  soon: { deep: '#7d5f18', lit: '#c9a03f' },
+  over: { deep: '#8c3322', lit: '#cf5a3f' },
 };
 
 function flaskRows(ratio, spill) {
   const [top, bottom] = FLASK_BODY;
   const rows = FLASK_ROWS.map((row) => row.split(''));
   const height = bottom - top + 1;
-  const fill = Math.round(ratio * height);
+  const fill = Math.max(1, Math.round(ratio * height));
+  const surface = bottom - fill + 1;
 
-  for (let y = bottom; y > bottom - fill; y -= 1) {
+  for (let y = bottom; y >= surface; y -= 1) {
     const row = rows[y];
     const left = row.indexOf('o');
     const right = row.lastIndexOf('o');
-    for (let x = left + 1; x < right; x += 1) if (row[x] === '.') row[x] = 'l';
+    for (let x = left + 1; x < right; x += 1) {
+      if (row[x] !== '.') continue;
+      // 水面の1行と、その下の左肩だけを明るくする。全部明るいと平たく見える。
+      row[x] = y === surface || (y === surface + 1 && x <= left + 2) ? 'h' : 'l';
+    }
   }
   // 吹きこぼれ。口の脇に粒を散らす。
   if (spill) {
-    for (const [x, y] of [[4, 1], [11, 2], [3, 3], [12, 4]]) rows[y][x] = 'l';
+    for (const [x, y] of [[4, 1], [11, 2], [3, 3], [12, 4]]) rows[y][x] = 'h';
   }
   return rows.map((row) => row.join(''));
 }
@@ -492,16 +520,17 @@ function flask(mission, weekEnd) {
   const over = left < 0;
   // 週の残りぶんを満たすところから、期限に向かって減っていく。
   const span = Math.max(1, daysUntil(weekEnd) + 1);
-  const ratio = over ? 0 : Math.max(0.1, Math.min(1, (left + 1) / span));
+  const ratio = over ? 0 : Math.max(0.1, Math.min(FLASK_MAX, ((left + 1) / span) * FLASK_MAX));
   const key = over ? 'over' : left <= 1 ? 'soon' : 'far';
   const href = `#/${mission.source_type}/${mission.source_id}`;
 
   const body = toRects({
     rows: flaskRows(ratio, over),
     palette: {
-      o: over ? FLASK_TONE.over : '#8fa79c',
+      o: over ? FLASK_TONE.over.deep : '#8fa79c',
       c: '#8a5a2b',
-      l: FLASK_TONE[key],
+      l: FLASK_TONE[key].deep,
+      h: FLASK_TONE[key].lit,
     },
   });
 
@@ -513,17 +542,69 @@ function flask(mission, weekEnd) {
   `;
 }
 
-function shelf(missions, weekEnd) {
+/* 奥に控えているぶん。今週に期限が無いプロセスは、棚の奥にまだ残っている、
+   という見せ方にする。数を書く代わりに、影のフラスコを並べて丈で出す。 */
+const BACK_MAX = 5;
+
+function backFlasks(count) {
+  if (count <= 0) return '';
+  const shown = Math.min(count, BACK_MAX);
+  const body = toRects({
+    rows: flaskRows(0.45, false),
+    palette: { o: '#c7c6b9', c: '#c2b287', l: '#dfded2', h: '#eceadf' },
+  });
+  return `<a class="shelf-back" href="#/missions" aria-label="奥に ${count} 本">
+    ${Array.from({ length: shown }, () =>
+      `<svg viewBox="0 0 16 16" shape-rendering="crispEdges"
+            aria-hidden="true" focusable="false">${body}</svg>`).join('')}
+  </a>`;
+}
+
+function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
   const shown = missions.slice(0, SHELF_MAX);
   const rest = missions.length - shown.length;
+  const n = shown.length;
+  if (!n && !back && !recurring) return '';
+
+  /* 棚番。1秒ごとに隣のフラスコへ移り、端まで行ったら向きを変えて戻る。
+     動かすのは transform だけなので合成で済み、本数が増えても値段は変わらない。
+     steps(n) で n 区間に割ると、位置は 0 から n-1 番目まで飛び飛びに出る。
+     持ち幅がちょうど1つぶんなので、100% + 隙間 = 隣までの距離になる。
+     往復は alternate。折り返しは体ごと裏返して、進む向きに顔を向ける。 */
+  const keeper =
+    n > 1
+      ? `<div class="shelf-walk">
+           <span class="keeper" style="--n:${n};
+                 animation-duration:${n}s; animation-timing-function:steps(${n}, end)">
+             <span class="keeper-face" style="animation-duration:${n * 2}s">
+               ${keeperMark()}
+             </span>
+           </span>
+         </div>`
+      : `<div class="shelf-walk">
+           <span class="keeper is-still"><span class="keeper-face">${keeperMark()}</span></span>
+         </div>`;
+
+  /* 定期イベントは棚に並べない。勝手に起きるもので、こちらが仕込むものではない。
+     右上から吊るしておいて、来る回のぶんだけ札に出す。 */
+  const hung = recurring
+    ? `<a class="hanging" href="#/recurrences" aria-label="定期イベント">
+         <i class="hanging-cord"></i>${icon('hourglass')}
+       </a>`
+    : '';
+
   return `
     <div class="shelf">
-      <div class="shelf-row">${shown.map((m) => flask(m, weekEnd)).join('')}</div>
+      ${hung}
+      <div class="shelf-stage">
+        ${backFlasks(back + Math.max(0, rest))}
+        <div class="shelf-row">${shown.map((m) => flask(m, weekEnd)).join('')}</div>
+      </div>
       <div class="shelf-board"></div>
+      ${n ? keeper : ''}
       <div class="shelf-names">
         ${shown.map((m) => `<span>${esc(clip(m.title, 5))}</span>`).join('')}
       </div>
-      ${rest > 0 ? `<a class="link shelf-more" href="#/missions">他 ${rest} 本 →</a>` : ''}
     </div>
   `;
 }
@@ -586,41 +667,18 @@ async function renderHome() {
         format: fmtMoney,
         plannedLabel: '今週予定',
         href: '#/used',
+        store: { icon: 'coins', text: fmtMoney(vault.balance), href: '#/vault' },
       })}
     </div>
 
-    <a class="card nav-card vault-line" href="#/vault">
-      ${icon('coins')}
-      <span class="vault-line-label">金庫</span>
-      <span class="vault-line-value">${esc(fmtMoney(vault.balance))}</span>
-    </a>
-
     ${
-      // 調合棚。今週のうちに期限が来るぶんだけ。
-      due.length ? `<div class="section-title">調合棚</div>${shelf(due, weekEnd)}` : ''
+      // 調合棚。今週のぶんは棚の上、それ以外は奥に控えている。
+      // 数を並べて書かない。棚に何本あるかがそのまま今週の数になる。
+      shelf(due, weekEnd, {
+        back: Math.max(0, summary.active_mission_count - due.length),
+        recurring: summary.time.planned_recurring || summary.money.planned_recurring,
+      })
     }
-
-    <div class="section-title">現況</div>
-    <div class="panel">
-      <div class="stat-line">
-        <span>進行中プロセス</span>
-        <span class="v">${summary.active_mission_count}</span>
-      </div>
-      <div class="stat-line">
-        <span>うち今週まで</span>
-        <span class="v">${summary.time.due_mission_count}</span>
-      </div>
-      ${
-        summary.time.planned_recurring || summary.money.planned_recurring
-          ? `<div class="stat-line">
-               <span><a class="link" href="#/recurrences">定期イベント →</a></span>
-               <span class="v">${esc(fmtTime(summary.time.planned_recurring))} · ${esc(
-                 fmtMoney(summary.money.planned_recurring),
-               )}</span>
-             </div>`
-          : ''
-      }
-    </div>
 
     ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
