@@ -12,6 +12,14 @@ import {
 // タイムは分、ウォレットは円。どちらも整数で保持する。
 const nowIso = () => new Date().toISOString();
 
+/* 入力が不正なときの投げ物。status を付けておくと routes.js の handle() が
+   そのまま HTTP に落としてくれるので、ルート側で try/catch を書かずに済む。 */
+function badRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 function int(value, { min = 0 } = {}) {
   const n = Math.round(Number(value ?? 0));
   if (!Number.isFinite(n)) return min;
@@ -343,6 +351,14 @@ function decorate(mission) {
   };
 }
 
+// 周期は日数。0 と空は「繰り返さない」。
+function repeatDays(value) {
+  if (value === undefined || value === null || value === '' || Number(value) === 0) return null;
+  const days = int(value);
+  if (days < 1 || days > 365) throw badRequest('repeat_days must be 1..365');
+  return days;
+}
+
 export function createMission({
   title,
   source_type,
@@ -352,6 +368,7 @@ export function createMission({
   cauldron_id,
   start_date,
   due_date,
+  repeat_days,
 }) {
   // 大釜に入れる場合は、器と同じ元エントリに揃える。
   let sourceType = source_type;
@@ -372,13 +389,14 @@ export function createMission({
   const startKey = optionalDate(start_date, 'start_date');
   const dueKey = optionalDate(due_date, 'due_date');
   checkDateOrder(startKey, dueKey);
+  const every = repeatDays(repeat_days);
 
   const { lastInsertRowid } = db
     .prepare(`
       INSERT INTO mission
         (title, source_type, source_id, status, estimated_time, estimated_money,
-         created_at, cauldron_id, start_date, due_date)
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+         created_at, cauldron_id, start_date, due_date, repeat_days)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       requireTitle(title),
@@ -390,6 +408,7 @@ export function createMission({
       cauldron_id ?? null,
       startKey,
       dueKey,
+      every,
     );
   refreshCauldron(cauldron_id);
   return getMission(Number(lastInsertRowid));
@@ -402,14 +421,81 @@ export function getMission(id) {
 }
 
 // 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
+/* ---------- 繰り返すプロセス ----------
+
+   周期（日）を持つプロセスが「種」。そこから一回きりのプロセスが生えてくる。
+   種そのものは棚にも一覧にも出さず、繰り返しの側にだけ並ぶ。
+   生えたものは自分で立てたものと同じに扱えて、完了も断念もできる。
+
+   無限には作れないので、今日から HORIZON 日先までを保つ。
+   読むたびに足りないぶんを継ぎ足すので、使っている限り先が尽きない。 */
+
+const REPEAT_HORIZON = 90;
+const REPEAT_MAX = 60; // 一度に生やす上限。周期1日でも走り続けないように
+
+// 種から、まだ生えていない日付ぶんを生やす。
+function growRepeats(now = new Date()) {
+  const seeds = db
+    .prepare(`SELECT * FROM mission WHERE repeat_days IS NOT NULL AND status = 'active'`)
+    .all();
+  if (seeds.length === 0) return;
+
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const horizon = addDays(today, REPEAT_HORIZON);
+
+  transaction(() => {
+    for (const seed of seeds) {
+      const every = Math.max(1, int(seed.repeat_days));
+      // 前回どこまで生やしたか。無ければ開始日（無ければ今日）から。
+      const from = parseDateKey(seed.repeat_through)
+        ?? parseDateKey(seed.start_date)
+        ?? new Date(today);
+      let cursor = parseDateKey(seed.repeat_through) ? addDays(from, every) : from;
+      // 過去に遡って生やさない。止まっていた間のぶんは作らず、今日から拾い直す。
+      while (cursor < today) cursor = addDays(cursor, every);
+
+      let made = 0;
+      while (cursor <= horizon && made < REPEAT_MAX) {
+        const key = dateKey(cursor);
+        const exists = db
+          .prepare(`SELECT 1 FROM mission WHERE repeat_of = ? AND due_date = ?`)
+          .get(seed.id, key);
+        if (!exists) {
+          db.prepare(`
+            INSERT INTO mission
+              (title, source_type, source_id, status, estimated_time, estimated_money,
+               created_at, due_date, repeat_of)
+            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+          `).run(
+            seed.title,
+            seed.source_type,
+            seed.source_id,
+            seed.estimated_time,
+            seed.estimated_money,
+            nowIso(),
+            key,
+            seed.id,
+          );
+          made += 1;
+        }
+        db.prepare(`UPDATE mission SET repeat_through = ? WHERE id = ?`).run(key, seed.id);
+        cursor = addDays(cursor, every);
+      }
+    }
+  });
+}
+
 const MISSION_ORDER = {
   due: `ORDER BY (effective_due_date IS NULL), effective_due_date ASC, m.created_at ASC, m.id ASC`,
   recent: `ORDER BY COALESCE(m.completed_at, m.created_at) DESC, m.id DESC`,
 };
 
-// due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
-// 期限を持たないものは落とす。棚に並べる先が無いため。
-export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
+/* due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
+   期限を持たないものは落とす。棚に並べる先が無いため。
+   repeat を渡すと、繰り返しの種だけ／種を除いたぶんだけに分かれる。 */
+export function listMissions({ status, sort = 'recent', due_by = null, repeat = 'once' } = {}) {
+  growRepeats();
   const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
   const where = [];
   const params = [];
@@ -423,8 +509,15 @@ export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
     where.push('effective_due_date IS NOT NULL AND effective_due_date <= ?');
     params.push(key);
   }
+  // 種は周期を持つもの。一回きりの側には出さない。
+  if (repeat === 'seed') where.push('m.repeat_days IS NOT NULL');
+  else if (repeat === 'once') where.push('m.repeat_days IS NULL');
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   return db.prepare(`${MISSION_SELECT} ${clause} ${order}`).all(...params).map(decorate);
+}
+
+export function isRepeatFilter(value) {
+  return value === 'once' || value === 'seed' || value === 'all';
 }
 
 export function isMissionSort(sort) {
@@ -443,7 +536,7 @@ export function listMissionsBySource(source_type, source_id) {
 
 export function updateMission(
   id,
-  { title, estimated_time, estimated_money, start_date, due_date },
+  { title, estimated_time, estimated_money, start_date, due_date, repeat_days },
 ) {
   const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
   if (!row) throw notFound('mission');
@@ -452,10 +545,12 @@ export function updateMission(
     start_date === undefined ? row.start_date : optionalDate(start_date, 'start_date');
   const dueKey = due_date === undefined ? row.due_date : optionalDate(due_date, 'due_date');
   checkDateOrder(startKey, dueKey);
+  const every = repeat_days === undefined ? row.repeat_days : repeatDays(repeat_days);
 
   db.prepare(`
     UPDATE mission
-       SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?
+       SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?,
+           repeat_days = ?
      WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
@@ -463,8 +558,15 @@ export function updateMission(
     estimated_money === undefined ? row.estimated_money : int(estimated_money),
     startKey,
     dueKey,
+    every,
     id,
   );
+  // 周期を止めたら、まだ手を付けていない先のぶんは引き上げる。
+  if (every === null && row.repeat_days !== null) {
+    db.prepare(`
+      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
+    `).run(id, dateKey(new Date()));
+  }
   return getMission(id);
 }
 
@@ -473,6 +575,12 @@ export function completeMission(id) {
   return transaction(() => {
     const mission = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
     if (!mission) throw notFound('mission');
+    // 種は完了しない。回り続けるものなので、終わるのは止めたときだけ。
+    if (mission.repeat_days !== null) {
+      const err = new Error('a repeating process cannot be completed');
+      err.status = 409;
+      throw err;
+    }
     if (mission.status === 'done') {
       const log = db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(id);
       return { mission: decorate(mission), log: log ?? null };
@@ -506,6 +614,12 @@ export function abandonMission(id) {
     throw err;
   }
   db.prepare(`UPDATE mission SET status = 'abandoned', completed_at = NULL WHERE id = ?`).run(id);
+  // 種を止めたら、まだ手を付けていない先のぶんは引き上げる。
+  if (row.repeat_days !== null) {
+    db.prepare(`
+      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
+    `).run(id, dateKey(new Date()));
+  }
   refreshCauldron(row.cauldron_id);
   return getMission(id);
 }
@@ -526,6 +640,35 @@ export function reopenMission(id) {
 
 export function isMissionStatus(status) {
   return MISSION_STATUSES.has(status);
+}
+
+/* ---------- 固定費 ---------- */
+
+/* 繰り返すプロセスは、毎回考えて決めるものではなく、決まって出ていくもの。
+   なので週ごとの消費予定として立てず、報酬と同じ「月ぶんの固定費」として扱い、
+   1週ぶんに均して可処分から先に引く。
+
+   週ごとに立てると、家賃の来た週だけ真っ赤になって、他の週が実態より豊かに見える。
+   均せば、どの週も「固定費を払ったあとに手元に残るぶん」を出す。
+
+   種の見積もりは1回ぶんなので、1週あたりは 見積 × 7 ÷ 周期。
+   周期30日のものは月ぶんがちょうど戻る。報酬側の4分割よりわずかに厳しく出るが、
+   足りないより余るほうが安全なので寄せない。 */
+function fixedPerWeek() {
+  return db
+    .prepare(`
+      SELECT estimated_time, estimated_money, repeat_days
+      FROM mission WHERE status = 'active' AND repeat_days IS NOT NULL
+    `)
+    .all()
+    .reduce(
+      (sum, seed) => ({
+        time: sum.time + Math.round((seed.estimated_time * 7) / seed.repeat_days),
+        money: sum.money + Math.round((seed.estimated_money * 7) / seed.repeat_days),
+        count: sum.count + 1,
+      }),
+      { time: 0, money: 0, count: 0 },
+    );
 }
 
 /* ---------- settings ---------- */
@@ -591,13 +734,15 @@ export function getVault(now = new Date()) {
   const settings = getSettings();
   const current = periods.money.of(now);
   const firstLog = db.prepare(`SELECT MIN(occurred_at) AS at FROM log`).get().at;
+  // 何週ぶんも回すので、固定費は先に1回だけ数える。
+  const fixed = fixedPerWeek().money;
 
   const weeks = [];
   if (firstLog) {
     let period = periods.money.of(new Date(firstLog));
     let guard = 0;
     while (period && period.key < current.key && guard < 600) {
-      const budget = resolveBudget('money', period.key);
+      const budget = resolveBudget('money', period.key, fixed);
       const consumed = consumedIn('money', period);
       weeks.push({
         ...period,
@@ -612,7 +757,7 @@ export function getVault(now = new Date()) {
   }
 
   const deposited = weeks.reduce((sum, week) => sum + week.surplus, 0);
-  const currentBudget = resolveBudget('money', current.key).amount;
+  const currentBudget = resolveBudget('money', current.key, fixed).amount;
 
   return {
     initial: settings.vault_initial,
@@ -655,23 +800,35 @@ function requirePeriod(kind, periodKey) {
   return period;
 }
 
-// その期間に使える量。個別設定があればそれを、無ければ既定値を返す。
-// ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから返す。
-export function resolveBudget(kind, periodKey) {
+/* その期間に入ってくる量から固定費を引いて、実際に使える量を出す。
+   個別設定があればそれを、無ければ既定値を入ってくる量として使う。
+   ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから引く。
+
+   固定費は個別設定の週からも引く。可処分の定義を1つに保つため。
+   一覧のように何期間ぶんも回す側では、先に数えて渡せば1回で済む。 */
+export function resolveBudget(kind, periodKey, fixed = fixedPerWeek()[kind]) {
   requireKind(kind);
   const row = db
     .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
     .get(kind, periodKey);
-  if (row) return { amount: row.amount, source: 'override' };
   const stored = getSettings()[DEFAULT_COLUMN[kind]];
-  return { amount: kind === 'money' ? weeklyShare(stored) : stored, source: 'default' };
+  const gross = row ? row.amount : kind === 'money' ? weeklyShare(stored) : stored;
+  return { amount: gross - fixed, gross, fixed, source: row ? 'override' : 'default' };
 }
+
+/* 循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。
+   数えると同じ出費を2回引くことになる。
+   出どころのプロセスが無い普通のログは、LEFT JOIN の結果が NULL なので残る。 */
+const NOT_FROM_REPEAT = `
+  LEFT JOIN mission src ON src.id = l.source_mission_id
+  WHERE src.repeat_of IS NULL
+`;
 
 function consumedIn(kind, period) {
   return db
     .prepare(`
-      SELECT COALESCE(SUM(${SPENT_COLUMN[kind]}), 0) AS total
-      FROM log WHERE occurred_at >= ? AND occurred_at < ?
+      SELECT COALESCE(SUM(l.${SPENT_COLUMN[kind]}), 0) AS total
+      FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
     `)
     .get(period.start, period.end).total;
 }
@@ -683,6 +840,8 @@ export function listBudgets(kind, { past = 5, future = 1 } = {}) {
   const current = scale.of();
   const back = Math.min(Math.max(int(past), 0), 60);
   const ahead = Math.min(Math.max(int(future), 0), 12);
+
+  const fixed = fixedPerWeek()[kind];
 
   const found = new Map();
   for (let offset = -back; offset <= ahead; offset += 1) {
@@ -697,10 +856,12 @@ export function listBudgets(kind, { past = 5, future = 1 } = {}) {
   return [...found.values()]
     .sort((a, b) => b.start.localeCompare(a.start))
     .map((period) => {
-      const budget = resolveBudget(kind, period.key);
+      const budget = resolveBudget(kind, period.key, fixed);
       return {
         ...period,
         amount: budget.amount,
+        gross: budget.gross,
+        fixed: budget.fixed,
         source: budget.source,
         consumed: consumedIn(kind, period),
         is_current: period.key === current.key,
@@ -724,416 +885,6 @@ export function clearBudget(kind, periodKey) {
   const period = requirePeriod(kind, periodKey);
   db.prepare(`DELETE FROM budget WHERE kind = ? AND period_key = ?`).run(kind, period.key);
   return { kind, ...period, ...resolveBudget(kind, period.key) };
-}
-
-/* ---------- recurrence（定期イベント） ---------- */
-
-// 初回同期で遡る上限。開始日をうんと過去にしても大量生成にならないようにする。
-const BACKFILL_LIMIT_DAYS = 366;
-
-function badRequest(message) {
-  const err = new Error(message);
-  err.status = 400;
-  return err;
-}
-
-function requireDateKey(value, label) {
-  const date = parseDateKey(value);
-  if (!date) throw badRequest(`${label} must be YYYY-MM-DD`);
-  return date;
-}
-
-// 定義の妥当性を確認し、DB に入れる形に正規化する。
-function normalizeRecurrence(input, base = null) {
-  const freq = input.freq ?? base?.freq;
-  if (!['daily', 'weekly', 'monthly'].includes(freq)) {
-    throw badRequest('freq must be daily, weekly or monthly');
-  }
-
-  let weekday = null;
-  if (freq === 'weekly') {
-    const value = input.weekday ?? base?.weekday;
-    weekday = int(value);
-    if (value === undefined || value === null || weekday < 0 || weekday > 6) {
-      throw badRequest('weekday must be 0 (Mon) .. 6 (Sun)');
-    }
-  }
-
-  let monthDay = null;
-  if (freq === 'monthly') {
-    const value = input.month_day ?? base?.month_day;
-    monthDay = int(value);
-    if (value === undefined || value === null || monthDay < 1 || monthDay > 31) {
-      throw badRequest('month_day must be 1..31');
-    }
-  }
-
-  const startKey = input.start_date ?? base?.start_date ?? dateKey(new Date());
-  const start = requireDateKey(startKey, 'start_date');
-
-  const endInput = input.end_date === undefined ? base?.end_date ?? null : input.end_date;
-  const endKey = endInput === null || endInput === '' ? null : endInput;
-  if (endKey !== null) {
-    const end = requireDateKey(endKey, 'end_date');
-    if (end < start) throw badRequest('end_date must not be before start_date');
-  }
-
-  return {
-    title: requireTitle(input.title ?? base?.title),
-    freq,
-    weekday,
-    month_day: monthDay,
-    time_spent: int(input.time_spent ?? base?.time_spent ?? 0),
-    money_spent: int(input.money_spent ?? base?.money_spent ?? 0),
-    start_date: dateKey(start),
-    end_date: endKey,
-    active: (input.active ?? base?.active ?? 1) ? 1 : 0,
-  };
-}
-
-// [from, to]（両端含む・ローカル日付）に含まれる開催日を列挙する。
-function scheduleDates(recurrence, from, to) {
-  const start = parseDateKey(recurrence.start_date);
-  const end = recurrence.end_date ? parseDateKey(recurrence.end_date) : null;
-  if (!start) return [];
-
-  const first = from > start ? from : start;
-  const last = end && end < to ? end : to;
-  if (first > last) return [];
-
-  const dates = [];
-  const guard = 2000;
-
-  if (recurrence.freq === 'daily') {
-    for (let d = first; d <= last && dates.length < guard; d = addDays(d, 1)) {
-      dates.push(dateKey(d));
-    }
-    return dates;
-  }
-
-  if (recurrence.freq === 'weekly') {
-    const shift = (recurrence.weekday - weekdayIndex(first) + 7) % 7;
-    for (let d = addDays(first, shift); d <= last && dates.length < guard; d = addDays(d, 7)) {
-      dates.push(dateKey(d));
-    }
-    return dates;
-  }
-
-  // monthly: 無い日付（2月31日など）はその月の末日に寄せる
-  let cursor = new Date(first.getFullYear(), first.getMonth(), 1);
-  while (cursor <= last && dates.length < guard) {
-    const day = Math.min(
-      recurrence.month_day,
-      daysInMonth(cursor.getFullYear(), cursor.getMonth()),
-    );
-    const date = new Date(cursor.getFullYear(), cursor.getMonth(), day);
-    if (date >= first && date <= last) dates.push(dateKey(date));
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-  }
-  return dates;
-}
-
-function isScheduled(recurrence, key) {
-  const date = parseDateKey(key);
-  if (!date) return false;
-  return scheduleDates(recurrence, date, date).length === 1;
-}
-
-function getOccurrenceRow(recurrenceId, key) {
-  return db
-    .prepare(`SELECT * FROM occurrence WHERE recurrence_id = ? AND date = ?`)
-    .get(recurrenceId, key);
-}
-
-// 定義の値に、その回の上書きを重ねた実効値。
-function effectiveValues(recurrence, occurrence) {
-  return {
-    title: occurrence?.title ?? recurrence.title,
-    time_spent: occurrence?.time_spent ?? recurrence.time_spent,
-    money_spent: occurrence?.money_spent ?? recurrence.money_spent,
-  };
-}
-
-function writeLogForOccurrence(recurrence, key, occurrence) {
-  const values = effectiveValues(recurrence, occurrence);
-  const occurredAt = parseDateKey(key).toISOString();
-  const { lastInsertRowid } = db
-    .prepare(`
-      INSERT INTO log (title, occurred_at, time_spent, money_spent, source_recurrence_id)
-      VALUES (?, ?, ?, ?, ?)
-    `)
-    .run(values.title, occurredAt, values.time_spent, values.money_spent, recurrence.id);
-
-  db.prepare(`
-    INSERT INTO occurrence (recurrence_id, date, status, log_id) VALUES (?, ?, 'scheduled', ?)
-    ON CONFLICT (recurrence_id, date) DO UPDATE SET log_id = excluded.log_id
-  `).run(recurrence.id, key, Number(lastInsertRowid));
-
-  return Number(lastInsertRowid);
-}
-
-// 開催日が来た回をログにする。スキップ済み・ログ化済みは触らない。
-export function syncRecurrences(now = new Date()) {
-  const active = db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all();
-  if (active.length === 0) return 0;
-
-  const todayKey = dateKey(now);
-  const today = parseDateKey(todayKey);
-  const floor = addDays(today, -BACKFILL_LIMIT_DAYS);
-
-  return transaction(() => {
-    let created = 0;
-    for (const recurrence of active) {
-      const resume = recurrence.materialized_through
-        ? addDays(parseDateKey(recurrence.materialized_through), 1)
-        : parseDateKey(recurrence.start_date);
-      const from = resume > floor ? resume : floor;
-      if (from > today) continue;
-
-      for (const key of scheduleDates(recurrence, from, today)) {
-        const occurrence = getOccurrenceRow(recurrence.id, key);
-        if (occurrence?.status === 'skipped' || occurrence?.log_id) continue;
-        writeLogForOccurrence(recurrence, key, occurrence);
-        created += 1;
-      }
-      db.prepare(`UPDATE recurrence SET materialized_through = ? WHERE id = ?`)
-        .run(todayKey, recurrence.id);
-    }
-    return created;
-  });
-}
-
-function decorateRecurrence(recurrence, now = new Date()) {
-  const today = parseDateKey(dateKey(now));
-  const horizon = addDays(today, 400);
-  const next = scheduleDates(recurrence, addDays(today, 1), horizon).find(
-    (key) => getOccurrenceRow(recurrence.id, key)?.status !== 'skipped',
-  );
-  return { ...recurrence, active: Boolean(recurrence.active), next_date: next ?? null };
-}
-
-export function listRecurrences() {
-  return db
-    .prepare(`SELECT * FROM recurrence ORDER BY active DESC, id DESC`)
-    .all()
-    .map((row) => decorateRecurrence(row));
-}
-
-export function getRecurrence(id) {
-  const row = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!row) throw notFound('recurrence');
-  return decorateRecurrence(row);
-}
-
-export function createRecurrence(input) {
-  const values = normalizeRecurrence(input ?? {});
-  const { lastInsertRowid } = db
-    .prepare(`
-      INSERT INTO recurrence
-        (title, freq, weekday, month_day, time_spent, money_spent,
-         start_date, end_date, active, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    .run(
-      values.title,
-      values.freq,
-      values.weekday,
-      values.month_day,
-      values.time_spent,
-      values.money_spent,
-      values.start_date,
-      values.end_date,
-      values.active,
-      new Date().toISOString(),
-    );
-  syncRecurrences();
-  return getRecurrence(Number(lastInsertRowid));
-}
-
-export function updateRecurrence(id, input) {
-  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!current) throw notFound('recurrence');
-  const values = normalizeRecurrence(input ?? {}, current);
-
-  db.prepare(`
-    UPDATE recurrence
-       SET title = ?, freq = ?, weekday = ?, month_day = ?, time_spent = ?,
-           money_spent = ?, start_date = ?, end_date = ?, active = ?
-     WHERE id = ?
-  `).run(
-    values.title,
-    values.freq,
-    values.weekday,
-    values.month_day,
-    values.time_spent,
-    values.money_spent,
-    values.start_date,
-    values.end_date,
-    values.active,
-    id,
-  );
-  syncRecurrences();
-  return getRecurrence(id);
-}
-
-// 定義を消しても、生成済みのログは記録として残す。
-export function deleteRecurrence(id) {
-  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!current) throw notFound('recurrence');
-  return transaction(() => {
-    db.prepare(`DELETE FROM occurrence WHERE recurrence_id = ?`).run(id);
-    db.prepare(`DELETE FROM recurrence WHERE id = ?`).run(id);
-    return { id, deleted: true };
-  });
-}
-
-// 直近の回を、過去 back 回・先 ahead 回ぶん並べる。
-export function listOccurrences(recurrenceId, { back = 4, ahead = 4 } = {}) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-
-  const backCount = Math.min(Math.max(int(back), 0), 60);
-  const aheadCount = Math.min(Math.max(int(ahead), 0), 60);
-  const todayKey = dateKey(new Date());
-  const today = parseDateKey(todayKey);
-
-  // 頻度に応じて十分広い範囲を取ってから、今日の前後で切り出す。
-  const span = { daily: 1, weekly: 7, monthly: 31 }[recurrence.freq];
-  const all = scheduleDates(
-    recurrence,
-    addDays(today, -span * (backCount + 2)),
-    addDays(today, span * (aheadCount + 2)),
-  );
-  const past = all.filter((key) => key <= todayKey).slice(-backCount);
-  const future = all.filter((key) => key > todayKey).slice(0, aheadCount);
-
-  return [...past, ...future]
-    .reverse()
-    .map((key) => {
-      const occurrence = getOccurrenceRow(recurrenceId, key);
-      const values = effectiveValues(recurrence, occurrence);
-      return {
-        recurrence_id: recurrenceId,
-        date: key,
-        status: occurrence?.status ?? 'scheduled',
-        ...values,
-        log_id: occurrence?.log_id ?? null,
-        is_overridden: Boolean(
-          occurrence &&
-            (occurrence.title !== null ||
-              occurrence.time_spent !== null ||
-              occurrence.money_spent !== null),
-        ),
-        is_past: key <= todayKey,
-      };
-    });
-}
-
-// その回だけ値を変える／スキップする。ログ化済みならログにも反映する。
-export function updateOccurrence(recurrenceId, key, input) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
-
-  const status = input.status ?? undefined;
-  if (status !== undefined && !['scheduled', 'skipped'].includes(status)) {
-    throw badRequest('status must be scheduled or skipped');
-  }
-
-  return transaction(() => {
-    const current = getOccurrenceRow(recurrenceId, key);
-    const next = {
-      status: status ?? current?.status ?? 'scheduled',
-      title:
-        input.title === undefined
-          ? current?.title ?? null
-          : input.title === null || input.title === ''
-            ? null
-            : requireTitle(input.title),
-      time_spent:
-        input.time_spent === undefined
-          ? current?.time_spent ?? null
-          : input.time_spent === null
-            ? null
-            : int(input.time_spent),
-      money_spent:
-        input.money_spent === undefined
-          ? current?.money_spent ?? null
-          : input.money_spent === null
-            ? null
-            : int(input.money_spent),
-    };
-
-    db.prepare(`
-      INSERT INTO occurrence (recurrence_id, date, status, title, time_spent, money_spent, log_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (recurrence_id, date) DO UPDATE
-        SET status = excluded.status, title = excluded.title,
-            time_spent = excluded.time_spent, money_spent = excluded.money_spent
-    `).run(
-      recurrenceId,
-      key,
-      next.status,
-      next.title,
-      next.time_spent,
-      next.money_spent,
-      current?.log_id ?? null,
-    );
-
-    const logId = current?.log_id ?? null;
-    const values = effectiveValues(recurrence, next);
-
-    if (next.status === 'skipped') {
-      // 行かなかった回。生成済みのログは取り消す。
-      if (logId) {
-        db.prepare(`DELETE FROM log WHERE id = ?`).run(logId);
-        db.prepare(`UPDATE occurrence SET log_id = NULL WHERE recurrence_id = ? AND date = ?`)
-          .run(recurrenceId, key);
-      }
-    } else if (logId) {
-      db.prepare(`UPDATE log SET title = ?, time_spent = ?, money_spent = ? WHERE id = ?`)
-        .run(values.title, values.time_spent, values.money_spent, logId);
-    } else if (key <= dateKey(new Date())) {
-      // スキップを取り消した過去の回は、その場でログに戻す。
-      writeLogForOccurrence(recurrence, key, getOccurrenceRow(recurrenceId, key));
-    }
-
-    return listOccurrences(recurrenceId).find((row) => row.date === key) ?? null;
-  });
-}
-
-// その回の個別変更を取り消し、定義どおりに戻す。
-export function resetOccurrence(recurrenceId, key) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
-
-  return updateOccurrence(recurrenceId, key, {
-    status: 'scheduled',
-    title: null,
-    time_spent: null,
-    money_spent: null,
-  });
-}
-
-// 期間内のこれから起きる回（明日以降）の合計。今日ぶんは既にログなので数えない。
-function plannedRecurring(period, now) {
-  const today = parseDateKey(dateKey(now));
-  const from = addDays(today, 1);
-  const to = new Date(new Date(period.end).getTime() - 1);
-  const totals = { time: 0, money: 0 };
-  if (from > to) return totals;
-
-  for (const recurrence of db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all()) {
-    for (const key of scheduleDates(recurrence, from, to)) {
-      const occurrence = getOccurrenceRow(recurrence.id, key);
-      if (occurrence?.status === 'skipped') continue;
-      const values = effectiveValues(recurrence, occurrence);
-      totals.time += values.time_spent;
-      totals.money += values.money_spent;
-    }
-  }
-  return totals;
 }
 
 /* ---------- 大釜（ミッションのTODOリスト） ---------- */
@@ -1517,22 +1268,25 @@ export function getDungeon({ since = null, until = null } = {}) {
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
+  growRepeats(now);
   // どちらも同じ週。刻みが揃ったので、期間はひとつだけ取ればよい。
   const week = periods.time.of(now);
   const moneyWeek = periods.money.of(now);
-  const timeBudget = resolveBudget('time', week.key);
-  const moneyBudget = resolveBudget('money', moneyWeek.key);
+  const fixed = fixedPerWeek();
+  const timeBudget = resolveBudget('time', week.key, fixed.time);
+  const moneyBudget = resolveBudget('money', moneyWeek.key, fixed.money);
 
   const spent = (period) =>
     db
       .prepare(`
-        SELECT COALESCE(SUM(time_spent), 0) AS time, COALESCE(SUM(money_spent), 0) AS money
-        FROM log WHERE occurred_at >= ? AND occurred_at < ?
+        SELECT COALESCE(SUM(l.time_spent), 0) AS time, COALESCE(SUM(l.money_spent), 0) AS money
+        FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
       `)
       .get(period.start, period.end);
 
-  // 消費予定は期限で絞る。期限が期間の終わりまでに来る進行中ミッションが対象。
-  // 期限切れのものも含める。過ぎていても払う／やるぶんなので、視界から消すと危ない。
+  /* 消費予定は期限で絞る。期限が期間の終わりまでに来る進行中プロセスが対象。
+     期限切れのものも含める。過ぎていても払う／やるぶんなので、視界から消すと危ない。
+     循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。 */
   const plannedMissions = (period) =>
     db
       .prepare(`
@@ -1541,53 +1295,55 @@ export function getSummary(now = new Date()) {
                COUNT(*) AS count
         FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
         WHERE m.status = 'active'
+          AND m.repeat_of IS NULL
           AND COALESCE(m.due_date, c.due_date) IS NOT NULL
           AND COALESCE(m.due_date, c.due_date) <= ?
       `)
       .get(dateKey(new Date(new Date(period.end).getTime() - 1)));
 
-  // 期限を持たないミッション。試験管には乗らないので、別枠で見せて見落としを防ぐ。
+  /* 期限を持たないプロセス。試験管には乗らないので、別枠で見せて見落としを防ぐ。
+     種も期限を持たないが、こちらは固定費として乗っているので外す。 */
   const undated = db
     .prepare(`
       SELECT COALESCE(SUM(m.estimated_time), 0) AS time,
              COALESCE(SUM(m.estimated_money), 0) AS money,
              COUNT(*) AS count
       FROM mission m LEFT JOIN cauldron c ON c.id = m.cauldron_id
-      WHERE m.status = 'active' AND COALESCE(m.due_date, c.due_date) IS NULL
+      WHERE m.status = 'active'
+        AND m.repeat_days IS NULL
+        AND COALESCE(m.due_date, c.due_date) IS NULL
     `)
     .get();
 
+  /* 進行中の数。繰り返しは種を1つと数え、そこから生えたものは数えない。
+     先まで生やしてあるぶんを足すと、増えるのは数字だけで中身は同じになる。 */
   const activeCount = db
-    .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
+    .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active' AND repeat_of IS NULL`)
     .get().count;
 
-  // 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+  /* 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+     管の消費済みの内訳なので、外す条件も管と揃える。 */
   const spendByGoods = db
     .prepare(`
-      SELECT COALESCE(goods, 'event') AS goods,
-             COALESCE(SUM(money_spent), 0) AS money,
+      SELECT COALESCE(l.goods, 'event') AS goods,
+             COALESCE(SUM(l.money_spent), 0) AS money,
              COUNT(*) AS count
-      FROM log
-      WHERE occurred_at >= ? AND occurred_at < ? AND money_spent <> 0
-      GROUP BY COALESCE(goods, 'event')
+      FROM log l ${NOT_FROM_REPEAT}
+        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
+      GROUP BY COALESCE(l.goods, 'event')
     `)
     .all(moneyWeek.start, moneyWeek.end);
 
   const plannedWeek = plannedMissions(week);
   const plannedMoney = plannedMissions(moneyWeek);
 
-  // 定期イベントのこれから起きる回も消費予定に含める。
-  const recurringWeek = plannedRecurring(week, now);
-  const recurringMoney = plannedRecurring(moneyWeek, now);
-
-  const build = (budget, consumed, fromMissions, fromRecurring, period) => {
-    const plannedValue = fromMissions + fromRecurring;
+  const build = (budget, consumed, fromMissions, period) => {
+    const plannedValue = fromMissions;
     return {
       budget,
       consumed,
       planned: plannedValue,
       planned_missions: fromMissions,
-      planned_recurring: fromRecurring,
       // 進行中ミッションを全て完了した場合の残量
       remaining: budget - consumed - plannedValue,
       remaining_now: budget - consumed,
@@ -1599,20 +1355,18 @@ export function getSummary(now = new Date()) {
   return {
     time: {
       unit: 'minutes',
-      ...build(timeBudget.amount, spent(week).time, plannedWeek.time, recurringWeek.time, week),
+      ...build(timeBudget.amount, spent(week).time, plannedWeek.time, week),
       budget_source: timeBudget.source,
+      gross: timeBudget.gross,
+      fixed: timeBudget.fixed,
       due_mission_count: plannedWeek.count,
     },
     money: {
       unit: 'jpy',
-      ...build(
-        moneyBudget.amount,
-        spent(moneyWeek).money,
-        plannedMoney.money,
-        recurringMoney.money,
-        moneyWeek,
-      ),
+      ...build(moneyBudget.amount, spent(moneyWeek).money, plannedMoney.money, moneyWeek),
       budget_source: moneyBudget.source,
+      gross: moneyBudget.gross,
+      fixed: moneyBudget.fixed,
       due_mission_count: plannedMoney.count,
     },
     // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
@@ -1623,8 +1377,7 @@ export function getSummary(now = new Date()) {
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,
-    recurrence_count: db
-      .prepare(`SELECT COUNT(*) AS total FROM recurrence WHERE active = 1`)
-      .get().total,
+    // 固定費の本数。種が何本あって引かれているかを設定で見せるため。
+    fixed_count: fixed.count,
   };
 }

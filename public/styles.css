@@ -573,15 +573,23 @@ body::after {
   min-width: 0;
 }
 
+/* 値は縮めない。狭いときは折り返して次の行へ落とす。
+   縮めると桁が切れて、金額が読めなくなる。 */
 .readout-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 4px;
+  gap: 0 4px;
   padding-bottom: 3px;
   font-family: var(--mono);
   font-size: 11px;
   border-bottom: 1px dotted var(--line);
+}
+
+.readout-row .v {
+  flex: none;
+  margin-left: auto;
 }
 
 .readout-row .k {
@@ -810,6 +818,11 @@ body::after {
 
 .card-meta .hot {
   color: var(--gold-dark);
+}
+
+/* 引かれるぶんの札。可処分から先に持っていかれることを色で言う。 */
+.card-meta .neg {
+  color: var(--danger);
 }
 
 /* ---------- フィルタ ---------- */
@@ -1315,6 +1328,7 @@ input[type='range']::-moz-range-thumb {
 
 /* 盤は残りぜんぶを使う。縦にも横にも合わせて縮めるので、1画面に収まる。 */
 .board {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1323,10 +1337,48 @@ input[type='range']::-moz-range-thumb {
   border-radius: 2px;
 }
 
+/* 盤の覗き窓。等倍では盤がちょうど収まり、拡げたぶんだけ中を繰れる。
+   繰りをここで止めて、後ろのページ送りへ渡さない。 */
+.board-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 盤の寸法は JS が入れる。等倍のときだけ枠にぴったり合う。 */
 .map {
   display: block;
-  width: 100%;
-  height: 100%;
+  margin: auto;
+}
+
+/* 倍率の手。「書き留める」が右下に居るので、左下へ置く。 */
+.board-zoom {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.board-zoom button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--green-dark);
+  /* 盤の上に置くので、下が透けないように塗る。 */
+  background: #f7f5ec;
+  opacity: 0.94;
+}
+
+.board-zoom button:disabled {
+  color: #b0b0a2;
+  border-color: var(--line-soft);
+  background: #f1f0e8;
 }
 
 .map a {
@@ -2009,56 +2061,20 @@ a.room-title {
   gap: 4px;
 }
 
+/* 棚番はこの中を歩くので、位置の基準にする。 */
+.shelf-row {
+  position: relative;
+}
+
 /* 棚の上。手前に今週のフラスコ、その1段奥に控えのぶんが並ぶ。 */
 .shelf-stage {
   display: flex;
   flex-direction: column;
 }
 
-/* 奥の棚。小さく・薄くして、後ろに引っ込んで見せる。
-   右上は吊るしもののぶんを空けておく。 */
-.shelf-back {
-  display: flex;
-  justify-content: flex-end;
-  gap: 1px;
-  min-height: 20px;
-  margin-bottom: 2px;
-  padding-right: 26px;
-  opacity: 0.8;
-  text-decoration: none;
-}
-
-.shelf-back svg {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
-/* 定期イベントは棚に並べず、右上から吊るす。
-   勝手に起きるもので、こちらが仕込むものではないため。 */
-.hanging {
-  position: absolute;
-  top: 0;
-  right: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-decoration: none;
-}
-
-.hanging-cord {
-  width: 1px;
-  height: 12px;
-  background: var(--trail);
-}
-
-.hanging .px {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
+/* 循環から生えたフラスコには印を重ねる。 */
 .flask {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -2068,61 +2084,85 @@ a.room-title {
   text-decoration: none;
 }
 
-.flask svg {
+.flask .flask-cycle {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  width: 11px;
+  height: 11px;
+}
+
+/* 札の上の循環の印。題のうしろに小さく添える。 */
+.cycle-mark {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-left: 4px;
+}
+
+/* 本体だけ。重ねる印には効かせない。 */
+.flask > svg {
   width: 100%;
   max-width: 44px;
   height: auto;
 }
 
-/* 棚番。棚の前を1秒ごとに隣のフラスコへ移る。
-   幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。 */
-.shelf-walk {
-  position: relative;
-  height: 22px;
-  margin-bottom: 2px;
-}
-
+/* 棚番。フラスコと同じ段を、同じ棚板の上で歩く。
+   幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。
+   位置と向きと柄で animation が3枚要るので、入れ子にして1枚ずつ持たせる。
+   道筋は本数で変わるため、@keyframes の名前と長さは app.js が入れる。 */
 .keeper {
   position: absolute;
   left: 0;
   bottom: 0;
   display: block;
   width: calc((100% - (var(--n, 1) - 1) * 4px) / var(--n, 1));
-  animation-name: keeper-walk;
   animation-iteration-count: infinite;
-  /* 端まで行ったら折り返す。 */
-  animation-direction: alternate;
 }
 
 /* 折り返したら体ごと裏返して、進む向きに顔を向ける。 */
 .keeper-face {
   display: block;
-  animation-name: keeper-face;
-  animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
 
+/* 柄を重ねる箱。中身が全部浮いているので、縦横比で背を確保する。 */
+.keeper-frames {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 44px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 20;
+}
+
+/* 3枚を同じ場所に重ね、表に出す1枚だけを不透明にする。 */
+.keeper-frame {
+  position: absolute;
+  inset: 0;
+  display: block;
+  opacity: 0;
+  animation-iteration-count: infinite;
+}
+
+/* 動かないときは1枚しか置かないので、それを出しておく。 */
+.keeper.is-still .keeper-frame { opacity: 1; }
+
+/* フラスコと同じ大きさで立たせる。並んだときに背丈が揃う。 */
 .keeper-px {
   display: block;
-  width: 16px;
-  height: 20px;
-  margin: 0 auto;
-}
-
-@keyframes keeper-walk {
-  from { transform: translateX(0); }
-  to { transform: translateX(calc((100% + 4px) * var(--n))); }
-}
-
-@keyframes keeper-face {
-  0%, 49.99% { transform: scaleX(1); }
-  50%, 100% { transform: scaleX(-1); }
+  width: 100%;
+  height: 100%;
 }
 
 /* 動きを減らす設定なら、いちばん左に立たせたままにする。 */
 @media (prefers-reduced-motion: reduce) {
   .keeper,
-  .keeper-face { animation: none; }
+  .keeper-face,
+  .keeper-frame { animation: none; }
+
+  .keeper .keeper-frame { opacity: 0; }
+  .keeper .keeper-frame:first-child { opacity: 1; }
 }
 
 /* 棚板。フラスコが乗っている板を1本の線で出す。 */

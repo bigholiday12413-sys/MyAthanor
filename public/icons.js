@@ -639,6 +639,8 @@ const SPARK = {
 // 体は裾に向けて丸めない。丸めると雪だるまになるので、真っ直ぐ落として裾で切り、
 // 後ろ（進む向きの反対）へ布を引きずらせる。
 // 帽子のぶん縦に伸びるので、この絵だけ 16x20 で持ち、viewBox も合わせる。
+// 歩く柄を3枚。輪郭は同じで、布の皺の寄り方と裾の広がりだけが違う。
+// 1歩ごとに柄を替えることで、滑って動くのではなく歩いて見える。
 // 左右対称の合わせ目を入れると仕立て服に見えるので、皺は斜めに短く散らす。
 // 裾も揃えない。布は真っ直ぐには落ちない。
 // 白のままだと紙の上で消えるので、輪郭を1本回して縁を拾う。
@@ -663,7 +665,59 @@ const KEEPER = {
     '..owwwwwwwswo...',
     '..owswwwwwwwo...',
     '..owwswwwwwwo...',
-    'owwswwwwwwwwo...',
+    'owwwwwwwwwwwo...',
+  ],
+  palette: { o: '#8a8778', w: '#fbf8ec', s: '#dcd8c5', h: '#6b5a3a', f: '#e8c9a0', k: '#23281f' },
+};
+
+const KEEPER_B = {
+  rows: [
+    '..kkk...........',
+    '..kkkkk.........',
+    '....kkkkk.......',
+    '.......kkkk.....',
+    '.......kkkkk....',
+    '.....kkkkkkk....',
+    '.kkkkkkkkkkkk...',
+    '.kkkooooooo.....',
+    '...owwwwhhho....',
+    '...owwwhffffo...',
+    '...owwwffffo....',
+    '...owwwwffo.....',
+    '....owwwwo......',
+    '...owwwwwwwo....',
+    '..owwwwwswwwo...',
+    '..owwwwwwwwwo...',
+    '..owwwwwwswwo...',
+    '..owwswwwwwwo...',
+    '..owswwwwwwwo...',
+    '.owwwwwwwwwwo...',
+  ],
+  palette: { o: '#8a8778', w: '#fbf8ec', s: '#dcd8c5', h: '#6b5a3a', f: '#e8c9a0', k: '#23281f' },
+};
+
+const KEEPER_C = {
+  rows: [
+    '..kkk...........',
+    '..kkkkk.........',
+    '....kkkkk.......',
+    '.......kkkk.....',
+    '.......kkkkk....',
+    '.....kkkkkkk....',
+    '.kkkkkkkkkkkk...',
+    '.kkkooooooo.....',
+    '...owwwwhhho....',
+    '...owwwhffffo...',
+    '...owwwffffo....',
+    '...owwwwffo.....',
+    '....owwwwo......',
+    '...owwwwwwwo....',
+    '..owwwwwwwswo...',
+    '..owwwwwswwwo...',
+    '..owwwwwwwwwo...',
+    '..oswwwwwwwwo...',
+    '..owwwswwwwwo...',
+    'owwwwwwwwwwo....',
   ],
   palette: { o: '#8a8778', w: '#fbf8ec', s: '#dcd8c5', h: '#6b5a3a', f: '#e8c9a0', k: '#23281f' },
 };
@@ -671,6 +725,59 @@ const KEEPER = {
 
 
 
+
+
+
+
+
+
+// 週の表。曜日を縦の仕切りで割り、塗ったマスを緑で出す。
+// 設定の「週のタイム」へ行くための札。
+const TIMEGRID = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..o..oggo..o.o..',
+    '..oggoggo..ogo..',
+    '..oggoggo..ogo..',
+    '..oggo..oggogo..',
+    '..o..o..oggogo..',
+    '..o..o..oggo.o..',
+    '..o..o..oggo.o..',
+    '..o..o..o..o.o..',
+    '..o..o..o..o.o..',
+    '..o..o..o..o.o..',
+    '..oooooooooooo..',
+    '................',
+    '................',
+  ],
+  palette: { o: STONE, g: GREEN },
+};
+
+// 循環。2本の弧が輪になって追いかけ合う印。繰り返すプロセスに添える。
+// 線は2ドット。1ドットだと13px まで縮めたとき輪が消えて点線に見える。
+const CYCLE = {
+  rows: [
+    '................',
+    '.....gggggg.....',
+    '...gggggggggg...',
+    '..ggg......ggg..',
+    '..gg........ggg.',
+    '.gg..........ggg',
+    '.gg...........gg',
+    '.gg.............',
+    '.............gg.',
+    'gg...........gg.',
+    'ggg..........gg.',
+    '.ggg........gg..',
+    '..ggg......ggg..',
+    '...gggggggggg...',
+    '.....gggggg.....',
+    '................',
+  ],
+  palette: { g: GREEN_DARK },
+};
 
 
 
@@ -696,7 +803,11 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  cycle: CYCLE,
+  timegrid: TIMEGRID,
   keeper: KEEPER,
+  'keeper-b': KEEPER_B,
+  'keeper-c': KEEPER_C,
   astrolabe: ASTROLABE,
   spark: SPARK,
   ingot: INGOT,

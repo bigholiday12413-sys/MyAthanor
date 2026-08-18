@@ -143,6 +143,13 @@ export const ADDED_COLUMNS = [
   // 買ったものの別。'food'＝消え物（糧）、'gear'＝残るもの（装備）。
   // NULL は出来事としてのログで、ここまでの記録はすべてこれに当たる。
   ['log', 'goods', 'TEXT'],
+  // 繰り返すプロセス。周期（日）を持つものが種で、そこから一回きりのプロセスが
+  // 生えてくる。種そのものは棚にも一覧にも出さず、周期だけを持っている。
+  ['mission', 'repeat_days', 'INTEGER'],
+  // 種から生えたものが、どの種から来たか。NULL は自分で立てたもの。
+  ['mission', 'repeat_of', 'INTEGER'],
+  // 種がどの日付ぶんまで生やし終えたか（YYYY-MM-DD）。
+  ['mission', 'repeat_through', 'TEXT'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。

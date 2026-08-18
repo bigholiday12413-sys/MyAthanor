@@ -24,17 +24,6 @@ function id(req) {
   return value;
 }
 
-// 開催日が来た定期イベントを、どのリクエストの処理よりも先にログ化しておく。
-// 同期済みの日は空ループなので実質ただの SELECT で済む。
-api.use((_req, _res, next) => {
-  try {
-    store.syncRecurrences();
-    next();
-  } catch (err) {
-    next(err);
-  }
-});
-
 /* ストリーム */
 const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
 
@@ -98,7 +87,13 @@ api.get('/missions', handle((req, res) => {
     err.status = 400;
     throw err;
   }
-  res.json(store.listMissions({ status, sort, due_by: req.query.due_by ?? null }));
+  const repeat = req.query.repeat ?? 'once';
+  if (!store.isRepeatFilter(repeat)) {
+    const err = new Error('repeat must be once, seed or all');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.listMissions({ status, sort, repeat, due_by: req.query.due_by ?? null }));
 }));
 
 api.post('/missions', handle((req, res) =>
@@ -149,35 +144,6 @@ api.put('/budgets/:kind/:key', handle((req, res) => {
 
 api.delete('/budgets/:kind/:key', handle((req, res) =>
   res.json(store.clearBudget(req.params.kind, req.params.key))));
-
-/* 定期イベント */
-api.get('/recurrences', handle((_req, res) => res.json(store.listRecurrences())));
-
-api.post('/recurrences', handle((req, res) =>
-  res.status(201).json(store.createRecurrence(req.body ?? {}))));
-
-api.get('/recurrences/:id', handle((req, res) => {
-  const recurrenceId = id(req);
-  res.json({
-    ...store.getRecurrence(recurrenceId),
-    occurrences: store.listOccurrences(recurrenceId, {
-      back: req.query.back ?? 4,
-      ahead: req.query.ahead ?? 4,
-    }),
-  });
-}));
-
-api.patch('/recurrences/:id', handle((req, res) =>
-  res.json(store.updateRecurrence(id(req), req.body ?? {}))));
-
-api.delete('/recurrences/:id', handle((req, res) => res.json(store.deleteRecurrence(id(req)))));
-
-/* 定期イベントの個別の回 */
-api.patch('/recurrences/:id/occurrences/:date', handle((req, res) =>
-  res.json(store.updateOccurrence(id(req), req.params.date, req.body ?? {}))));
-
-api.delete('/recurrences/:id/occurrences/:date', handle((req, res) =>
-  res.json(store.resetOccurrence(id(req), req.params.date))));
 
 /* 大釜（ミッションのTODOリスト） */
 api.post('/cauldrons', handle((req, res) =>

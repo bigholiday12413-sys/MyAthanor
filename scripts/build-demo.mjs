@@ -3,7 +3,7 @@
    src/store.js は './db.js' を読むので、そこに WASM 版を置けば
    ロジックには一切手を入れずにブラウザで動く。 */
 
-import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,7 @@ await rm(site, { recursive: true, force: true });
 await mkdir(join(site, 'src'), { recursive: true });
 await mkdir(join(site, 'demo'), { recursive: true });
 
-/* 画面。index.html と sw.js は見本版のものに差し替えるので持っていかない。 */
+/* 画面。sw.js は見本版では使わないので持っていかない。 */
 for (const file of ['app.js', 'icons.js', 'styles.css']) {
   await cp(join(root, 'public', file), join(site, file));
 }
@@ -33,7 +33,38 @@ await cp(join(root, 'demo', 'db.js'), join(site, 'src', 'db.js'));
 for (const file of ['sqlite.js', 'express.js', 'seed.js', 'main.js']) {
   await cp(join(root, 'demo', file), join(site, 'demo', file));
 }
-await cp(join(root, 'demo', 'index.html'), join(site, 'index.html'));
+/* index.html は本体のものから組み立てる。写しを持つと、タブの名前を変えた時に
+   片方だけ古いまま残る（実際にダンジョン／ミッションのまま出ていた）。
+   違うのは「見本である断り」と、読み込む部品の3点だけなので、そこだけ差し替える。 */
+const shell = await readFile(join(root, 'public', 'index.html'), 'utf8');
+const banner = await readFile(join(root, 'demo', 'banner.html'), 'utf8');
+const [bannerHead, bannerBody] = banner.split('<!-- body -->');
+
+const demoIndex = shell
+  // Pages はサブパスに置かれるので、絶対パスでは引けない。
+  .replaceAll('href="/', 'href="./')
+  .replaceAll('src="/', 'src="./')
+  .replace('<title>MyAthanor</title>', '<title>MyAthanor（見本）</title>')
+  .replace('</head>', `${bannerHead}  </head>`)
+  .replace('    <div class="app">', `    <div class="app">\n${bannerBody.trimEnd()}`)
+  // 更新の知らせとサービスワーカーは本体だけのもの。
+  .replace(/ *<div class="update-badge"[\s\S]*?<\/div>\n/, '')
+  .replace(/ *<script type="module" src="\.\/app\.js"><\/script>\n/, '')
+  .replace(/ *<script>\n +if \('serviceWorker'[\s\S]*?<\/script>\n/, '')
+  .replace('  </body>', `    <script src="./demo/sql-wasm.js"></script>
+    <script type="importmap">
+      { "imports": { "express": "./demo/express.js" } }
+    </script>
+    <script type="module" src="./demo/main.js"></script>
+  </body>`);
+
+for (const gone of ['update-badge', 'serviceWorker', 'src="/app.js"']) {
+  if (demoIndex.includes(gone)) throw new Error(`index.html に ${gone} が残っている`);
+}
+for (const need of ['アストロラーベ', 'demo/main.js', 'demo-banner']) {
+  if (!demoIndex.includes(need)) throw new Error(`index.html に ${need} が無い`);
+}
+await writeFile(join(site, 'index.html'), demoIndex);
 
 /* WASM の SQLite */
 const dist = join(root, 'node_modules', 'sql.js', 'dist');
