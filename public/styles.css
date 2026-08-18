@@ -304,13 +304,33 @@ body::after {
   column-fill: auto;
 }
 
+/* 盤の画面。段にも割らず流しもせず、残りの高さを全部盤に渡す。 */
+.view.is-board {
+  display: flex;
+  flex-direction: column;
+  column-width: auto !important;
+  columns: auto;
+  overflow: hidden;
+}
+
+/* 2ページぶんまでは段に割らず、そのまま縦へ流す。
+   1画面に少し足りないだけで送らせるより、指で流したほうが早い。 */
+.view.is-scroll {
+  column-width: auto !important;
+  columns: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* 末尾が「書き留める」の下に隠れないよう、そのぶん空けておく。 */
+  padding-bottom: calc(var(--pad) + 62px);
+}
+
 /* 枠のあるものはページの境で割らない。断ち切られると別物に見えてしまう。
    ただし大釜のように1画面近い高さになりうる容器まで割らないと、
    入りきらないぶんが丸ごと次ページへ送られて、前のページが白く空く。
    そういう容器は割れるようにしておき、枠は割れた先にも引き直す。 */
 .card,
 .panel,
-.region,
 .map-legend,
 .tubes,
 .tg,
@@ -319,8 +339,7 @@ body::after {
 .budget-row,
 .occurrence-row,
 .stat-line,
-.filters,
-.tag-bar {
+.filters {
   break-inside: avoid;
 }
 
@@ -378,6 +397,12 @@ body::after {
   border: 1px solid var(--edge);
   border-radius: 2px;
   box-shadow: var(--frame);
+}
+
+/* 数字を1行だけ置く帯。額装のぶんの余白が要らない。 */
+.panel.tight {
+  margin-bottom: 8px;
+  padding: 8px 12px;
 }
 
 /* 四隅の鉤。額装の留め金のつもり。 */
@@ -449,12 +474,6 @@ body::after {
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--text);
-}
-
-.tube-period {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--dim);
 }
 
 .tube-wrap {
@@ -628,12 +647,12 @@ body::after {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .card {
   display: block;
-  padding: 13px 14px;
+  padding: 10px 14px;
   color: inherit;
   text-decoration: none;
   background: var(--surface);
@@ -779,7 +798,7 @@ body::after {
 .filters {
   display: flex;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .filter {
@@ -823,14 +842,6 @@ body::after {
   color: var(--dim);
 }
 
-.field .hint,
-.hint {
-  margin-top: 6px;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--dim);
-}
 
 input,
 select,
@@ -951,7 +962,63 @@ button:disabled {
   flex: 1;
 }
 
-/* ---------- 期間ごとの可処分量 ---------- */
+/* 札の足もと。日付と操作を1行に並べ、日付を開いたときだけ下へ折り返す。 */
+.card-foot {
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.card-meta .link {
+  padding: 4px 0;
+}
+
+/* 出どころは右端へ。ミッションの中では軽い項目にする。 */
+.card-meta.is-right {
+  justify-content: flex-end;
+}
+
+.card-foot > .mission-dates {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
+/* 期限は押せる操作なので、他の操作と同じ見た目の押しボタンにする。
+   点線の枠だと「畳んである見出し」に見えて、押すものだと分からない。 */
+.card-foot > .mission-dates > summary {
+  gap: 5px;
+  min-height: 40px;
+  padding: 0 10px;
+  justify-content: center;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.18);
+}
+
+.card-foot > .mission-dates > summary .px {
+  width: 14px;
+  height: 14px;
+}
+
+.card-foot > .mission-dates[open] > summary {
+  background: rgba(78, 139, 58, 0.09);
+}
+
+/* 開いたら1行を占め、入力欄は下に落とす。 */
+.card-foot > .mission-dates[open] {
+  flex-basis: 100%;
+  order: 1;
+}
+
+/* ---------- 期間ごとに使える量 ---------- */
 
 .budget-row {
   display: grid;
@@ -1064,132 +1131,12 @@ button:disabled {
   text-align: right;
 }
 
-/* ---------- タグ ---------- */
-
-.tag-bar {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding-bottom: 4px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.card .chips {
-  margin-top: 7px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  padding: 4px 9px;
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--text);
-  white-space: nowrap;
-  background: var(--surface);
-  border: 1px solid var(--edge);
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
-}
-
-.chip b {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--dim);
-}
-
-.chip.is-on {
-  color: #ffffff;
-  background: var(--green);
-  border-color: var(--green-deep);
-}
-
-.chip.is-on b {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-/* カード上のタグは押せないので平たく置く。 */
-.chip.is-flat {
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--dim);
-  background: transparent;
-  border-style: dashed;
-}
-
-/* 外す印。17×14 では隣の文字に触れてしまう。粒ごと厚くして的にする。 */
-.chip button {
-  position: relative;
-  display: inline-flex;
-  min-height: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: 0 -6px 0 0;
-  padding: 0;
-  font-family: var(--mono);
-  font-size: 15px;
-  line-height: 1;
-  color: var(--dim);
-  background: none;
-  border: none;
-  box-shadow: none;
-}
-
-/* 粒の縁までしか塗っていないので、判定だけ指の幅まで出す。
-   隣の粒の × とは粒1つぶん離れているので、取り合いにならない。 */
-.chip button::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 44px;
-  height: 44px;
-  transform: translate(-50%, -50%);
-}
-
-.chip:has(button) {
-  padding-right: 4px;
-}
-
-.chips-empty {
-  font-size: 12px;
-  color: var(--dim);
-}
-
-.tag-add {
-  margin-top: 12px;
-}
-
-.tag-add button {
-  flex: 0 0 84px;
-}
-
 .section-count {
   margin-left: 2px;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 400;
   color: var(--dim);
-}
-
-.tag-name {
-  padding: 7px 8px;
-  font-size: 15px;
 }
 
 /* ---------- アイデアの温度 ---------- */
@@ -1311,87 +1258,56 @@ input[type='range']::-moz-range-thumb {
 
 /* ---------- ダンジョン ---------- */
 
-.region {
-  margin-bottom: 20px;
-  padding: 12px 0 6px;
-  background: var(--surface);
-  border: 1px solid var(--edge);
-  border-radius: 3px;
-  box-shadow: var(--frame);
-}
-
-.region-stat {
+/* 盤は1枚きり。区画には割らない。
+   何と何が関わっているかは、派生したミッションだけが決める。 */
+.board-stat {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 4px 12px;
-  padding: 0 12px 7px;
+  margin-bottom: 8px;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
 }
 
-.region-stat .hot {
+.board-stat .hot {
   color: var(--gold-dark);
 }
 
-/* 盤は画面より大きくなるので、区画の中だけで動かす。
-   地はいちばん暗くしておく。節と軌道の光がここに乗る。 */
-.map-scroll {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  max-height: min(360px, 42dvh);
-  margin: 2px 0 0;
-  padding: 0;
-  background: #fbfaf5;
-  border-top: 1px solid var(--edge);
-  border-bottom: 1px solid var(--edge);
+.board-stat .spacer {
+  flex: 1;
 }
 
-.map-scroll + .map-scroll {
-  margin-top: 12px;
+/* 古びたダンジョン。畳んである間は1行しか取らない。 */
+.dig {
+  flex: none;
+  margin: 0 0 6px;
 }
 
-/* 入口しか無い道。盤にすると場所を食うだけなので、押せる粒として並べる。 */
-.seeds {
+.dig-form {
+  padding-bottom: 6px;
+}
+
+.dig-form .row {
+  gap: 8px;
+}
+
+/* 盤は残りぜんぶを使う。縦にも横にも合わせて縮めるので、1画面に収まる。 */
+.board {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 12px 2px;
-}
-
-.map-scroll + .seeds {
-  padding-top: 10px;
-}
-
-.seed {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 44px;
-  max-width: 100%;
-  padding: 0 10px 0 4px;
-  font-size: 12px;
-  color: var(--text);
-  text-decoration: none;
-  background: var(--surface);
+  background: #fbfaf5;
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
-}
-
-.seed span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.seed:active {
-  background: #eef0ea;
 }
 
 .map {
   display: block;
-  max-width: none;
+  width: 100%;
+  height: 100%;
 }
 
 .map a {
@@ -1996,16 +1912,27 @@ a.room-title {
 .tab {
   display: flex;
   flex: 1;
+  min-width: 0;
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 8px 4px 9px;
+  padding: 8px 2px 9px;
   font-family: var(--serif);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   color: var(--dim);
   text-decoration: none;
+}
+
+/* 「アストロラーベ」は他より長い。字を詰めて4つとも収める。 */
+.tab-label {
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .tab-mark {
@@ -2042,6 +1969,102 @@ a.room-title {
 .tab.is-active .tab-mark {
   opacity: 1;
 }
+
+/* ---------- 調合棚 ---------- */
+
+/* 上の試験管と同じガラスの一家。丸底のフラスコを期限の早い順に並べる。
+   中身の高さが残り日数で、過ぎたものは口から吹きこぼれる。 */
+.shelf {
+  margin-bottom: 14px;
+  padding: 8px 10px 10px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: var(--frame);
+}
+
+.shelf-row,
+.shelf-names {
+  display: flex;
+  gap: 4px;
+}
+
+.flask {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-decoration: none;
+}
+
+.flask svg {
+  width: 100%;
+  max-width: 44px;
+  height: auto;
+}
+
+/* 棚板。フラスコが乗っている板を1本の線で出す。 */
+.shelf-board {
+  height: 3px;
+  margin: 2px 0 4px;
+  background: var(--trail);
+  border-radius: 1px;
+}
+
+.shelf-names span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--dim);
+  text-align: center;
+  word-break: break-all;
+}
+
+.shelf-more {
+  display: block;
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ---------- 週の紙 ---------- */
+
+/* 7枚を等幅で並べる。狭い画面でも折り返さない。 */
+.week-sheets {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.sheet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 0;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+}
+
+.sheet-px {
+  width: 30px;
+  height: 30px;
+}
+
+/* まだ来ていない日は紙を伏せておく。 */
+.sheet:not(.is-done):not(.is-today) .sheet-px {
+  opacity: 0.45;
+}
+
+.sheet.is-today {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
 
 /* ---------- ページ送り ---------- */
 
@@ -2226,10 +2249,6 @@ body.is-paged .toast {
 .mission-date-form button {
   padding: 7px 10px;
   font-size: 12px;
-}
-
-.region-stat .over {
-  color: var(--danger);
 }
 
 .panel.warn {
@@ -2501,7 +2520,7 @@ textarea {
   color: var(--danger);
 }
 
-/* ---------- 週の可処分タイムの表 ---------- */
+/* ---------- 週のタイムの表 ---------- */
 
 .tg-top {
   display: flex;

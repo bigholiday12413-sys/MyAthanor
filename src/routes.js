@@ -36,14 +36,21 @@ api.use((_req, _res, next) => {
 });
 
 /* ストリーム */
-api.get('/stream', handle((req, res) => {
-  const type = req.query.type ?? 'all';
-  if (!['all', 'idea', 'log', 'food', 'gear'].includes(type)) {
-    const err = new Error('type must be all, idea, log, food or gear');
+const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
+
+function streamType(value, fallback = 'all') {
+  const type = value ?? fallback;
+  if (type !== null && !STREAM_TYPES.includes(type)) {
+    const err = new Error(`type must be ${STREAM_TYPES.join(', ')}`);
     err.status = 400;
     throw err;
   }
-  res.json(store.listStream({ type, limit: req.query.limit ?? 200, tag: req.query.tag ?? null }));
+  return type;
+}
+
+api.get('/stream', handle((req, res) => {
+  const type = streamType(req.query.type);
+  res.json(store.listStream({ type, limit: req.query.limit ?? 200 }));
 }));
 
 /* 新規追加（種別を選んでテキストのみ） */
@@ -91,7 +98,7 @@ api.get('/missions', handle((req, res) => {
     err.status = 400;
     throw err;
   }
-  res.json(store.listMissions({ status, sort }));
+  res.json(store.listMissions({ status, sort, due_by: req.query.due_by ?? null }));
 }));
 
 api.post('/missions', handle((req, res) =>
@@ -115,7 +122,7 @@ api.post('/missions/:id/reopen', handle((req, res) =>
 api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
 api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
 
-// 週の可処分タイムを表の塗りで決める。塗ったマスの数がそのまま時間になる。
+// 週のタイムを表の塗りで決める。塗ったマスの数がそのまま時間になる。
 api.put('/settings/time-grid', handle((req, res) => {
   const { grid } = req.body ?? {};
   res.json(grid === null ? store.clearTimeGrid() : store.setTimeGrid(grid));
@@ -124,7 +131,7 @@ api.put('/settings/time-grid', handle((req, res) => {
 /* 金庫 */
 api.get('/vault', handle((_req, res) => res.json(store.getVault())));
 
-/* 期間ごとの可処分量 */
+/* 期間ごとに使える量 */
 api.get('/budgets', handle((req, res) => {
   const { kind, past, future } = req.query;
   res.json(store.listBudgets(kind, { past, future }));
@@ -187,19 +194,7 @@ api.delete('/cauldrons/:id', handle((req, res) => res.json(store.deleteCauldron(
 api.post('/cauldrons/:id/materials', handle((req, res) =>
   res.status(201).json(store.addMaterials(id(req), req.body?.items))));
 
-/* タグ */
-api.get('/tags', handle((_req, res) => res.json(store.listTags())));
-api.post('/tags', handle((req, res) => res.status(201).json(store.createTag(req.body ?? {}))));
-api.patch('/tags/:id', handle((req, res) => res.json(store.renameTag(id(req), req.body ?? {}))));
-api.delete('/tags/:id', handle((req, res) => res.json(store.deleteTag(id(req)))));
-
-// アイデア／ログに付くタグを名前の配列で置き換える。
-api.put('/entries/:kind/:id/tags', handle((req, res) =>
-  res.json(store.setEntryTags(req.params.kind, id(req), req.body?.tags))));
-
-/* レガシー */
-api.get('/legacies', handle((_req, res) => res.json(store.listLegacies())));
-
+/* レガシー：盤の上で輝かせるかどうかだけの印。 */
 api.put('/legacies/:kind/:id', handle((req, res) => {
   const value = req.body?.is_legacy;
   if (typeof value !== 'boolean') {
@@ -210,9 +205,13 @@ api.put('/legacies/:kind/:id', handle((req, res) => {
   res.json(store.setLegacy(req.params.kind, id(req), value));
 }));
 
-/* ダンジョン */
+/* ダンジョン：区画に割らない1枚の盤。
+   since / until（YYYY-MM-DD）で載せる期間を切る。既定は直近1か月。 */
 api.get('/dungeon', handle((req, res) =>
-  res.json(store.getDungeon({ onlyLegacy: req.query.legacy === '1' }))));
+  res.json(store.getDungeon({
+    since: req.query.since ?? null,
+    until: req.query.until ?? null,
+  }))));
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));

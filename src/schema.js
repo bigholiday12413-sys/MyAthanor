@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS settings (
   monthly_money INTEGER NOT NULL DEFAULT 0
 );
 
--- 期間ごとの可処分量。行が無い期間は settings の既定値を使う。
+-- 期間ごとに使える量。行が無い期間は settings の既定値を使う。
 -- period_key は kind='time' なら週の月曜日 (YYYY-MM-DD)、
 -- kind='money' なら月 (YYYY-MM)。
 CREATE TABLE IF NOT EXISTS budget (
@@ -135,7 +135,7 @@ export const ADDED_COLUMNS = [
   ['idea', 'body', 'TEXT'],
   // 金庫：月が終わったときのウォレットの余りが積まれていく。初期残高も持てる。
   ['settings', 'vault_initial', 'INTEGER NOT NULL DEFAULT 0'],
-  // 週の可処分タイムを表で選んだときの塗り。168文字（曜日×24時間）の 0/1。
+  // 週のタイムを表で選んだときの塗り。168文字（曜日×24時間）の 0/1。
   ['settings', 'time_grid', 'TEXT'],
   // 大釜の期日。素材が自分の期限を持たなければ、これを引き継ぐ。
   ['cauldron', 'start_date', 'TEXT'],

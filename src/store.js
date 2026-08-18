@@ -6,6 +6,7 @@ import {
   parseDateKey,
   daysInMonth,
   weekdayIndex,
+  weeklyShare,
 } from './period.js';
 
 // タイムは分、ウォレットは円。どちらも整数で保持する。
@@ -31,121 +32,6 @@ function notFound(what) {
   const err = new Error(`${what} not found`);
   err.status = 404;
   return err;
-}
-
-/* ---------- tag ---------- */
-
-const ENTRY_KINDS = new Set(['idea', 'log']);
-
-function requireEntryKind(kind) {
-  if (!ENTRY_KINDS.has(kind)) {
-    const err = new Error('kind must be "idea" or "log"');
-    err.status = 400;
-    throw err;
-  }
-  return kind;
-}
-
-// 表記ゆれで別タグにならないよう、前後の空白と連続空白を潰す。
-function normalizeTagName(name) {
-  const trimmed = String(name ?? '').trim().replace(/\s+/g, ' ');
-  if (!trimmed) {
-    const err = new Error('tag name is required');
-    err.status = 400;
-    throw err;
-  }
-  if (trimmed.length > 24) {
-    const err = new Error('tag name must be 24 characters or fewer');
-    err.status = 400;
-    throw err;
-  }
-  return trimmed;
-}
-
-function findOrCreateTag(name) {
-  const normalized = normalizeTagName(name);
-  const existing = db.prepare(`SELECT * FROM tag WHERE name = ?`).get(normalized);
-  if (existing) return existing;
-  const { lastInsertRowid } = db
-    .prepare(`INSERT INTO tag (name, created_at) VALUES (?, ?)`)
-    .run(normalized, nowIso());
-  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(Number(lastInsertRowid));
-}
-
-export function listTags() {
-  return db
-    .prepare(`
-      SELECT t.id, t.name,
-             COALESCE(SUM(CASE WHEN e.kind = 'idea' THEN 1 ELSE 0 END), 0) AS idea_count,
-             COALESCE(SUM(CASE WHEN e.kind = 'log' THEN 1 ELSE 0 END), 0) AS log_count,
-             COUNT(e.tag_id) AS total
-      FROM tag t
-      LEFT JOIN entry_tag e ON e.tag_id = t.id
-      GROUP BY t.id
-      ORDER BY total DESC, t.name ASC
-    `)
-    .all();
-}
-
-export function createTag({ name }) {
-  return findOrCreateTag(name);
-}
-
-export function renameTag(id, { name }) {
-  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-  if (!row) throw notFound('tag');
-  const normalized = normalizeTagName(name);
-  const clash = db.prepare(`SELECT id FROM tag WHERE name = ? AND id <> ?`).get(normalized, id);
-  if (clash) {
-    const err = new Error('a tag with that name already exists');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE tag SET name = ? WHERE id = ?`).run(normalized, id);
-  return db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-}
-
-export function deleteTag(id) {
-  const row = db.prepare(`SELECT * FROM tag WHERE id = ?`).get(id);
-  if (!row) throw notFound('tag');
-  return transaction(() => {
-    db.prepare(`DELETE FROM entry_tag WHERE tag_id = ?`).run(id);
-    db.prepare(`DELETE FROM tag WHERE id = ?`).run(id);
-    return { id, deleted: true };
-  });
-}
-
-export function tagsFor(kind, entryId) {
-  return db
-    .prepare(`
-      SELECT t.id, t.name FROM entry_tag e
-      JOIN tag t ON t.id = e.tag_id
-      WHERE e.kind = ? AND e.entry_id = ?
-      ORDER BY t.name ASC
-    `)
-    .all(kind, entryId);
-}
-
-// 名前の配列でまるごと置き換える。無い名前は作る。
-export function setEntryTags(kind, entryId, names) {
-  requireEntryKind(kind);
-  if (kind === 'idea') getIdea(entryId);
-  else getLog(entryId);
-  if (!Array.isArray(names)) {
-    const err = new Error('tags must be an array of names');
-    err.status = 400;
-    throw err;
-  }
-
-  return transaction(() => {
-    const ids = new Set(names.map((name) => findOrCreateTag(name).id));
-    db.prepare(`DELETE FROM entry_tag WHERE kind = ? AND entry_id = ?`).run(kind, entryId);
-    const insert = db.prepare(
-      `INSERT OR IGNORE INTO entry_tag (kind, entry_id, tag_id) VALUES (?, ?, ?)`,
-    );
-    for (const tagId of ids) insert.run(kind, entryId, tagId);
-    return tagsFor(kind, entryId);
-  });
 }
 
 /* ---------- アイデアの温度 ---------- */
@@ -190,7 +76,6 @@ export function getIdea(id) {
   return {
     ...withTemperature(row),
     kind: 'idea',
-    tags: tagsFor('idea', id),
     cauldrons: listCauldronsBySource('idea', id),
     missions: listMissionsBySource('idea', id),
   };
@@ -232,7 +117,7 @@ export function listSpells() {
       ORDER BY i.created_at DESC, i.id DESC
     `)
     .all()
-    .map((row) => ({ ...row, tags: tagsFor('idea', row.id) }));
+    .map((row) => ({ ...row }));
 }
 
 export function getSpell(id) {
@@ -240,7 +125,6 @@ export function getSpell(id) {
   return {
     ...row,
     kind: 'spell',
-    tags: tagsFor('idea', id),
     missions: listMissionsBySource('idea', id),
   };
 }
@@ -274,7 +158,6 @@ export function deleteSpell(id) {
     throw err;
   }
   return transaction(() => {
-    db.prepare(`DELETE FROM entry_tag WHERE kind = 'idea' AND entry_id = ?`).run(id);
     db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
     return { id, deleted: true };
   });
@@ -328,7 +211,6 @@ export function getLog(id) {
     kind: 'log',
     source_mission: source,
     source_recurrence: recurrence,
-    tags: tagsFor('log', id),
     cauldrons: listCauldronsBySource('log', id),
     missions: listMissionsBySource('log', id),
   };
@@ -355,7 +237,7 @@ export function updateLog(id, { title, occurred_at, time_spent, money_spent, goo
 /* ---------- stream ---------- */
 
 // アイデアとログを時系列で混ぜて返す。
-export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
+export function listStream({ type = 'all', limit = 200 } = {}) {
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
@@ -385,20 +267,6 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
     .prepare(`${parts.join(' UNION ALL ')} ORDER BY at DESC, kind ASC, id DESC LIMIT ?`)
     .all(int(limit, { min: 1 }));
 
-  const links = db
-    .prepare(`
-      SELECT e.kind, e.entry_id, t.id, t.name FROM entry_tag e
-      JOIN tag t ON t.id = e.tag_id
-      ORDER BY t.name ASC
-    `)
-    .all();
-  const tagsByEntry = new Map();
-  for (const link of links) {
-    const key = `${link.kind}:${link.entry_id}`;
-    if (!tagsByEntry.has(key)) tagsByEntry.set(key, []);
-    tagsByEntry.get(key).push({ id: link.id, name: link.name });
-  }
-
   const counts = db
     .prepare(`
       SELECT source_type, source_id, COUNT(*) AS total,
@@ -410,17 +278,14 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
 
   const now = new Date();
   const halfLife = getSettings().cooling_half_life_days;
-  const tagId = tag === null || tag === undefined || tag === '' ? null : int(tag);
 
   return rows
     .map((row) => {
       const c = byKey.get(`${row.kind}:${row.id}`);
-      const tags = tagsByEntry.get(`${row.kind}:${row.id}`) ?? [];
       return {
         ...row,
         from_mission: Boolean(row.from_mission),
         from_recurrence: Boolean(row.from_recurrence),
-        tags,
         current_temperature:
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
@@ -428,8 +293,7 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
         mission_count: c ? c.total : 0,
         active_mission_count: c ? c.active : 0,
       };
-    })
-    .filter((row) => tagId === null || row.tags.some((t) => t.id === tagId));
+    });
 }
 
 /* ---------- mission ---------- */
@@ -543,12 +407,24 @@ const MISSION_ORDER = {
   recent: `ORDER BY COALESCE(m.completed_at, m.created_at) DESC, m.id DESC`,
 };
 
-export function listMissions({ status, sort = 'recent' } = {}) {
+// due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
+// 期限を持たないものは落とす。棚に並べる先が無いため。
+export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
   const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
-  const rows = status
-    ? db.prepare(`${MISSION_SELECT} WHERE m.status = ? ${order}`).all(status)
-    : db.prepare(`${MISSION_SELECT} ${order}`).all();
-  return rows.map(decorate);
+  const where = [];
+  const params = [];
+  if (status) {
+    where.push('m.status = ?');
+    params.push(status);
+  }
+  if (due_by !== null) {
+    const key = parseDateKey(due_by) ? due_by : null;
+    if (!key) throw badRequest('invalid due_by');
+    where.push('effective_due_date IS NOT NULL AND effective_due_date <= ?');
+    params.push(key);
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return db.prepare(`${MISSION_SELECT} ${clause} ${order}`).all(...params).map(decorate);
 }
 
 export function isMissionSort(sort) {
@@ -685,7 +561,7 @@ export function updateSettings({
   return getSettings();
 }
 
-/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+/* ---------- 週のタイムを表で選ぶ ---------- */
 
 // 曜日×24時間の 168 マス。index = 曜日(0=月) * 24 + 時。
 export const GRID_CELLS = 7 * 24;
@@ -709,21 +585,21 @@ export function clearTimeGrid() {
 
 /* ---------- 金庫 ---------- */
 
-// 月が終わると、その月のウォレットの余り（可処分 − 消費済み）が金庫に積まれる。
+// 週が終わると、その週のウォレットの余り（全体 − 消費済み）が金庫に積まれる。
 // 進行中の今月はまだ積まない。使いすぎた月は目減りする。
 export function getVault(now = new Date()) {
   const settings = getSettings();
   const current = periods.money.of(now);
   const firstLog = db.prepare(`SELECT MIN(occurred_at) AS at FROM log`).get().at;
 
-  const months = [];
+  const weeks = [];
   if (firstLog) {
     let period = periods.money.of(new Date(firstLog));
     let guard = 0;
     while (period && period.key < current.key && guard < 600) {
       const budget = resolveBudget('money', period.key);
       const consumed = consumedIn('money', period);
-      months.push({
+      weeks.push({
         ...period,
         budget: budget.amount,
         budget_source: budget.source,
@@ -735,21 +611,21 @@ export function getVault(now = new Date()) {
     }
   }
 
-  const deposited = months.reduce((sum, month) => sum + month.surplus, 0);
+  const deposited = weeks.reduce((sum, week) => sum + week.surplus, 0);
   const currentBudget = resolveBudget('money', current.key).amount;
 
   return {
     initial: settings.vault_initial,
     deposited,
     balance: settings.vault_initial + deposited,
-    // 今月が終わったら積まれる見込み。
+    // 今週が終わったら積まれる見込み。
     pending: currentBudget - consumedIn('money', current),
     current_period: current,
-    months: months.reverse(),
+    weeks: weeks.reverse(),
   };
 }
 
-/* ---------- budget（期間ごとの可処分量） ---------- */
+/* ---------- budget（期間ごとに使える量） ---------- */
 
 // 既定値（settings）のどの列が、どちらのリソースに対応するか。
 const DEFAULT_COLUMN = { time: 'weekly_time', money: 'monthly_money' };
@@ -779,14 +655,16 @@ function requirePeriod(kind, periodKey) {
   return period;
 }
 
-// その期間の可処分量。個別設定があればそれを、無ければ既定値を返す。
+// その期間に使える量。個別設定があればそれを、無ければ既定値を返す。
+// ウォレットの既定値は月あたりの報酬なので、1週ぶんに均してから返す。
 export function resolveBudget(kind, periodKey) {
   requireKind(kind);
   const row = db
     .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
     .get(kind, periodKey);
   if (row) return { amount: row.amount, source: 'override' };
-  return { amount: getSettings()[DEFAULT_COLUMN[kind]], source: 'default' };
+  const stored = getSettings()[DEFAULT_COLUMN[kind]];
+  return { amount: kind === 'money' ? weeklyShare(stored) : stored, source: 'default' };
 }
 
 function consumedIn(kind, period) {
@@ -1431,23 +1309,6 @@ export function setLegacy(kind, id, value) {
   return kind === 'log' ? getLog(id) : getMission(id);
 }
 
-export function listLegacies() {
-  const logs = db
-    .prepare(`SELECT * FROM log WHERE is_legacy = 1 ORDER BY occurred_at DESC`)
-    .all()
-    .map((row) => ({ ...row, type: 'log', at: row.occurred_at }));
-  const missions = db
-    .prepare(`SELECT * FROM mission WHERE is_legacy = 1 ORDER BY completed_at DESC`)
-    .all()
-    .map((row) => ({
-      ...row,
-      type: 'mission',
-      at: row.completed_at ?? row.created_at,
-      source_title: sourceTitle(row.source_type, row.source_id),
-    }));
-  return [...logs, ...missions].sort((a, b) => String(b.at).localeCompare(String(a.at)));
-}
-
 /* ---------- ダンジョン（たまった情報を道として見る） ----------
 
    部屋   = アイデア／ログ。実際に起きたこと・思いついたこと。
@@ -1456,10 +1317,33 @@ export function listLegacies() {
             進行中の通路は掘りかけ、断念した通路は崩れて行き止まり。
    大釜   = ひとつの部屋から出る通路のうち、同じ器に入っているものの束。
    深さ   = 道を進んだ順。子は必ず親より後に生まれるので、深さは時間の順序でもある。
-   区画   = タグ。道のどこかに付いたタグで、その道全体が区画に属する。
-   宝箱   = レガシー。                                                        */
+   宝箱   = レガシー。盤の上で輝かせるかどうかだけの印。
+
+   区画には割らない。何と何が関わっているかは、派生したミッションだけが決める。  */
 
 const DUNGEON_MAX_DEPTH = 12;
+
+// 期間の端。日付だけを受け取り、その日の始まり／終わりの ISO に直す。
+function dayStartIso(key) {
+  const date = parseDateKey(key);
+  if (!date) throw badRequest('invalid date');
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function dayEndIso(key) {
+  const date = parseDateKey(key);
+  if (!date) throw badRequest('invalid date');
+  date.setHours(23, 59, 59, 999);
+  return date.toISOString();
+}
+
+function monthsAgoIso(months) {
+  const date = new Date();
+  date.setMonth(date.getMonth() - months);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
 
 function corridorFrom(mission, depth) {
   const generated =
@@ -1517,7 +1401,6 @@ function dungeonRoom(type, row, depth) {
     is_legacy: Boolean(row.is_legacy),
     from_recurrence: type === 'log' ? Boolean(row.source_recurrence_id) : false,
     temperature: type === 'idea' ? withTemperature(row).current_temperature : null,
-    tags: tagsFor(type, row.id),
     corridors: loose,
     cauldrons: [...bundles.values()],
   };
@@ -1539,6 +1422,8 @@ function accumulate(room) {
     planned_time: 0,
     planned_money: 0,
     depth: 1,
+    // その道でいちばん新しい出来事。盤に載せるかどうかはこれで決める。
+    last_at: room.at,
   };
 
   for (const corridor of eachCorridor(room)) {
@@ -1553,6 +1438,7 @@ function accumulate(room) {
       continue;
     }
     const sub = accumulate(corridor.room);
+    if (String(sub.last_at) > String(totals.last_at)) totals.last_at = sub.last_at;
     totals.rooms += sub.rooms;
     totals.corridors += sub.corridors;
     totals.cauldrons += sub.cauldrons;
@@ -1566,91 +1452,76 @@ function accumulate(room) {
   return totals;
 }
 
-// 道のどこかに付いたタグを集める。入口だけでなく途中で付けたタグでも辿れるように。
-function collectTags(room, into = new Map()) {
-  for (const tag of room.tags) into.set(tag.id, tag);
-  for (const corridor of eachCorridor(room)) {
-    if (corridor.room) collectTags(corridor.room, into);
-  }
-  return into;
-}
+/* 探索の入口＝アイデア全部と、ミッション由来ではないログ。
+   区画には割らない。ひとつの盤に全部載せて、関わりは派生したミッションだけが決める。
 
-// 探索の入口＝アイデア全部と、ミッション由来ではないログ。
-export function getDungeon({ onlyLegacy = false } = {}) {
-  const roots = [
+   期間を切って載せる道を選ぶ。既定は直近1か月で、それより古い道は盤から降ろす。
+   全部を載せ続けると、何年ぶんかの記録がいずれ盤を埋めて読めなくなるため。
+   道が古いかどうかは、その道でいちばん新しい出来事で決める。
+   入口が古くても、そこから最近も掘っているなら現役として残す。 */
+export function getDungeon({ since = null, until = null } = {}) {
+  const from = since === null ? monthsAgoIso(1) : dayStartIso(since);
+  const to = until === null ? null : dayEndIso(until);
+
+  const roads = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
-    // 糧は食べれば消える。盤に残すと買った回数だけ節が増えて読めなくなる。
     ...db
-      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL AND goods IS NOT 'food'`)
+      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
     .map((room) => ({ ...room, totals: accumulate(room) }))
-    .filter((room) => !onlyLegacy || room.totals.legacies > 0);
-
-  // タグごとの区画に振り分ける。タグが1つも無い道は「未踏」に集める。
-  const regions = new Map();
-  const push = (key, tag, room) => {
-    if (!regions.has(key)) regions.set(key, { tag, roads: [] });
-    regions.get(key).roads.push(room);
-  };
-  for (const room of roots) {
-    const tags = [...collectTags(room).values()].sort((a, b) => a.name.localeCompare(b.name));
-    if (tags.length === 0) push('__none__', null, room);
-    else for (const tag of tags) push(tag.id, tag, room);
-  }
-
-  return [...regions.values()]
-    .map((region) => {
-      const totals = region.roads.reduce(
-        (sum, road) => ({
-          roads: sum.roads + 1,
-          rooms: sum.rooms + road.totals.rooms,
-          corridors: sum.corridors + road.totals.corridors,
-          cauldrons: sum.cauldrons + road.totals.cauldrons,
-          legacies: sum.legacies + road.totals.legacies,
-          consumed_time: sum.consumed_time + road.totals.consumed_time,
-          consumed_money: sum.consumed_money + road.totals.consumed_money,
-          planned_time: sum.planned_time + road.totals.planned_time,
-          planned_money: sum.planned_money + road.totals.planned_money,
-          depth: Math.max(sum.depth, road.totals.depth),
-        }),
-        {
-          roads: 0,
-          rooms: 0,
-          corridors: 0,
-          cauldrons: 0,
-          legacies: 0,
-          consumed_time: 0,
-          consumed_money: 0,
-          planned_time: 0,
-          planned_money: 0,
-          depth: 0,
-        },
-      );
-      // 深い道から見せる。同じ深さなら新しい順。
-      const roads = [...region.roads].sort((a, b) =>
-        b.totals.depth !== a.totals.depth
-          ? b.totals.depth - a.totals.depth
-          : String(b.at).localeCompare(String(a.at)),
-      );
-      return { tag: region.tag, totals, roads };
+    .filter((room) => {
+      const last = String(room.totals.last_at);
+      if (from && last < from) return false;
+      if (to && last > to) return false;
+      return true;
     })
-    .sort((a, b) => {
-      if (!a.tag) return 1; // 未踏は最後
-      if (!b.tag) return -1;
-      if (b.totals.rooms !== a.totals.rooms) return b.totals.rooms - a.totals.rooms;
-      return a.tag.name.localeCompare(b.tag.name);
-    });
+    // 深い道から。同じ深さなら新しい順。盤の並びをここで決めておく。
+    .sort((a, b) =>
+      b.totals.depth !== a.totals.depth
+        ? b.totals.depth - a.totals.depth
+        : String(b.at).localeCompare(String(a.at)),
+    );
+
+  const totals = roads.reduce(
+    (sum, road) => ({
+      roads: sum.roads + 1,
+      rooms: sum.rooms + road.totals.rooms,
+      corridors: sum.corridors + road.totals.corridors,
+      cauldrons: sum.cauldrons + road.totals.cauldrons,
+      legacies: sum.legacies + road.totals.legacies,
+      consumed_time: sum.consumed_time + road.totals.consumed_time,
+      consumed_money: sum.consumed_money + road.totals.consumed_money,
+      planned_time: sum.planned_time + road.totals.planned_time,
+      planned_money: sum.planned_money + road.totals.planned_money,
+      depth: Math.max(sum.depth, road.totals.depth),
+    }),
+    {
+      roads: 0,
+      rooms: 0,
+      corridors: 0,
+      cauldrons: 0,
+      legacies: 0,
+      consumed_time: 0,
+      consumed_money: 0,
+      planned_time: 0,
+      planned_money: 0,
+      depth: 0,
+    },
+  );
+
+  return { totals, roads, period: { since: from, until: to } };
 }
 
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
+  // どちらも同じ週。刻みが揃ったので、期間はひとつだけ取ればよい。
   const week = periods.time.of(now);
-  const month = periods.money.of(now);
+  const moneyWeek = periods.money.of(now);
   const timeBudget = resolveBudget('time', week.key);
-  const moneyBudget = resolveBudget('money', month.key);
+  const moneyBudget = resolveBudget('money', moneyWeek.key);
 
   const spent = (period) =>
     db
@@ -1690,7 +1561,7 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
     .get().count;
 
-  // 今月のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+  // 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
   const spendByGoods = db
     .prepare(`
       SELECT COALESCE(goods, 'event') AS goods,
@@ -1700,14 +1571,14 @@ export function getSummary(now = new Date()) {
       WHERE occurred_at >= ? AND occurred_at < ? AND money_spent <> 0
       GROUP BY COALESCE(goods, 'event')
     `)
-    .all(month.start, month.end);
+    .all(moneyWeek.start, moneyWeek.end);
 
   const plannedWeek = plannedMissions(week);
-  const plannedMonth = plannedMissions(month);
+  const plannedMoney = plannedMissions(moneyWeek);
 
   // 定期イベントのこれから起きる回も消費予定に含める。
   const recurringWeek = plannedRecurring(week, now);
-  const recurringMonth = plannedRecurring(month, now);
+  const recurringMoney = plannedRecurring(moneyWeek, now);
 
   const build = (budget, consumed, fromMissions, fromRecurring, period) => {
     const plannedValue = fromMissions + fromRecurring;
@@ -1736,15 +1607,15 @@ export function getSummary(now = new Date()) {
       unit: 'jpy',
       ...build(
         moneyBudget.amount,
-        spent(month).money,
-        plannedMonth.money,
-        recurringMonth.money,
-        month,
+        spent(moneyWeek).money,
+        plannedMoney.money,
+        recurringMoney.money,
+        moneyWeek,
       ),
       budget_source: moneyBudget.source,
-      due_mission_count: plannedMonth.count,
+      due_mission_count: plannedMoney.count,
     },
-    // 今月のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
+    // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
     wallet_by_goods: ['food', 'gear', 'event'].map((goods) => {
       const row = spendByGoods.find((item) => item.goods === goods);
       return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };

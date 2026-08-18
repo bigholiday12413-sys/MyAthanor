@@ -1,10 +1,10 @@
 /* MyAthanor — フロントエンド（ビルドなしの ES モジュール） */
 
-import { icon, iconBody, KIND_ICON } from './icons.js';
+import { icon, iconBody, toRects, KIND_ICON } from './icons.js';
 
 /* いったん伏せてあるもの。表と API と保存済みの値はそのまま残してあるので、
-   true に戻せば元通り出る。伏せている間も、大釜に入っているミッションは
-   ふつうのミッションとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
+   true に戻せば元通り出る。伏せている間も、大釜に入っているプロセスは
+   ふつうのプロセスとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
 const SHOW = { temperature: false, cauldron: false };
 
 const viewEl = document.getElementById('view');
@@ -132,13 +132,26 @@ for (const el of tabsEl.querySelectorAll('.tab-mark')) {
   el.innerHTML = icon(el.dataset.icon);
 }
 
-/* ---------- ミッションの期日 ---------- */
+/* ---------- プロセスの期日 ---------- */
 
 const todayKey = () => {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
+
+// 月曜始まりの週の終わり（日曜）。棚に並べる範囲を決めるのに使う。
+const dateKeyOf = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+function summaryWeekEnd(now = new Date()) {
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  return new Date(monday.getTime() + 7 * 86_400_000);
+}
 
 const daysUntil = (key) =>
   Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
@@ -184,7 +197,7 @@ function missionDates(mission) {
   const range = dueRange(mission);
   return `
     <details class="mission-dates">
-      <summary>${range ? esc(range) : '日付を決める'}</summary>
+      <summary>${icon('hourglass')}<span>${range ? esc(range) : '期限'}</span></summary>
       <form class="mission-date-form" data-dates="${mission.id}">
         <div class="row">
           <div class="field">
@@ -227,11 +240,11 @@ function missionCard(mission, { showSource = true } = {}) {
               ? `<span class="badge">〜${esc(fmtShortDay(mission.effective_due_date))}</span>`
               : ''
         }
-        ${mission.is_legacy ? `<span class="badge now">${icon('chest')}レガシー</span>` : ''}
+        ${mission.is_legacy ? `<span class="badge now">${icon('spark')}レガシー</span>` : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
-      <div class="card-title">${icon('parchment')}<span>${esc(mission.title)}</span></div>
+      <div class="card-title">${icon(KIND_ICON.mission)}<span>${esc(mission.title)}</span></div>
       ${
         mission.estimated_time || mission.estimated_money
           ? `<div class="card-meta">
@@ -248,19 +261,29 @@ function missionCard(mission, { showSource = true } = {}) {
           : ''
       }
       ${
+        // 出どころは右端へ寄せる。プロセスの中では重さの軽い項目で、
+        // 辿るのは盤のほうが主なので、左からは外す。
         showSource && mission.source_title
-          ? `<div class="card-meta">
-               <a class="link" href="${sourceHref}">↳ ${esc(KIND_LABEL[mission.source_type])}: ${esc(mission.source_title)}</a>
+          ? `<div class="card-meta is-right">
+               <a class="link" href="${sourceHref}">${esc(clip(mission.source_title, 10))} ↗</a>
              </div>`
           : ''
       }
-      ${mission.status === 'active' ? missionDates(mission) : ''}
-      ${actions ? `<div class="btn-row">${actions}</div>` : ''}
+      ${
+        // 日付と操作を1行に混ぜる。別々の行に置くと札が241pxになり、
+        // 1画面に1枚しか乗らなくなる。開いたときだけ下へ折り返す。
+        mission.status === 'active' || actions
+          ? `<div class="btn-row card-foot">
+               ${mission.status === 'active' ? missionDates(mission) : ''}
+               ${actions}
+             </div>`
+          : ''
+      }
     </div>
   `;
 }
 
-// ミッションカードの完了／断念／再開と、期日の保存をまとめて処理する。
+// プロセスカードの完了／断念／再開と、期日の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
   container.addEventListener('submit', async (event) => {
     const form = event.target.closest('form[data-dates]');
@@ -285,7 +308,7 @@ function wireMissionActions(container, onChanged) {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     const { act, id } = button.dataset;
-    if (act === 'abandon' && !confirm('このミッションを断念しますか？')) return;
+    if (act === 'abandon' && !confirm('このプロセスを断念しますか？')) return;
     button.disabled = true;
     try {
       await api(`/missions/${id}/${act}`, { method: 'POST' });
@@ -303,7 +326,27 @@ function wireMissionActions(container, onChanged) {
 /* ---------- ホーム ---------- */
 
 // リソースは2色の試験管で示す。下から 消費済み（薬草色）、消費予定（琥珀）。
-function tubeCard({ name, period, data, format, plannedLabel = '消費予定' }) {
+const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+
+/* 週の紙。月曜から7枚並べ、済んだ日から順に印が入る。
+   タイムもウォレットも週で見るようになったので、いま週のどこに居るのかを
+   数字より先に置く。今日の紙にはまだ印を入れない。終わっていないので。
+   曜日の文字は出さない。左から月曜と決まっていて、印の数で何日目かが読める。
+   読み上げには要るので、名前だけ aria-label に残す。 */
+function weekSheets(now = new Date()) {
+  const today = (now.getDay() + 6) % 7;
+  return `<div class="week-sheets">${WEEKDAYS.map((day, index) => {
+    const done = index < today;
+    const isToday = index === today;
+    return `<div class="sheet ${done ? 'is-done' : ''} ${isToday ? 'is-today' : ''}"
+      aria-label="${day}${isToday ? '（今日）' : done ? '（済）' : ''}">
+      ${icon(done ? 'sheet-done' : 'sheet', 'sheet-px', isToday ? { o: '#4a8236' } : null)}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// 期間は出さない。上の週の紙がいつの話かを示していて、両方あると二度言うことになる。
+function tubeCard({ name, data, format, plannedLabel = '消費予定', href = null }) {
   const total = Math.max(data.budget, data.consumed + data.planned, 1);
   const pct = (value) => Math.max(0, Math.min(100, (value / total) * 100));
   const free = Math.max(0, data.budget - data.consumed - data.planned);
@@ -311,8 +354,12 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
   return `
     <div class="tube-card">
       <div class="tube-head">
-        <span class="tube-name">${esc(name)}</span>
-        <span class="tube-period">${esc(period)}</span>
+        ${
+          // 飛び先があるものは見出しごとリンクにする。別の行を足すより場所を食わない。
+          href
+            ? `<a class="tube-name is-link" href="${href}">${esc(name)} →</a>`
+            : `<span class="tube-name">${esc(name)}</span>`
+        }
       </div>
       <div class="tube-wrap">
         <div class="tube ${data.over ? 'is-over' : ''}">
@@ -338,21 +385,22 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
             <span class="v ${data.over ? 'neg' : ''}">${esc(format(free))}</span>
           </div>
           <div class="readout-row">
-            <span class="k">可処分</span>
+            <span class="k">全体</span>
             <span class="v">${esc(format(data.budget))}</span>
           </div>
         </div>
       </div>
       <div class="projection">
-        <span>やり切ったら</span>
+        <span>フォーキャスト</span>
         <span class="v ${data.remaining < 0 ? 'neg' : ''}">${esc(format(data.remaining))}</span>
       </div>
     </div>
   `;
 }
 
-/* 今月のウォレットの内訳。金額の大小がそのまま帯の長さになる。
-   数字だけだと割合が読めず、家計簿として見るときに効かない。 */
+/* ユーズド＝今週のウォレットが何に出ていったか。
+   金額の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
+   家計簿として見るときに効かない。行を押すとストリームのその絞り込みへ飛ぶ。 */
 const GOODS_TONE = { food: 'var(--green)', gear: '#9aa5ab', event: 'var(--gold-dark)' };
 const GOODS_NAME = { food: '糧', gear: '装備', event: '出来事' };
 
@@ -365,9 +413,12 @@ function walletBars(rows) {
       (row) => `
         <div class="spend">
           <div class="spend-head">
-            <a class="spend-name" href="#/stream?">${
+            <a class="spend-name" href="#/stream?type=${
+              // 出来事＝素のログ。ストリームの絞り込みでは 'log' に当たる。
+              row.goods === 'event' ? 'log' : row.goods
+            }">${
               row.goods === 'event' ? '' : icon(KIND_ICON[row.goods])
-            }<span>${GOODS_NAME[row.goods]}</span></a>
+            }<span>${GOODS_NAME[row.goods]}</span> →</a>
             <span class="spend-count">${row.count}件</span>
             <span class="spend-money">${esc(fmtMoney(row.money))}</span>
           </div>
@@ -380,40 +431,161 @@ function walletBars(rows) {
     .join('');
 }
 
+/* ユーズド。ホームからは外して、ウォレットの試験管の先に置く。
+   ホームは「いま週のどこに居るか」だけでよく、内訳は見に行くもの。 */
+/* 調合棚。今週のうちに期限が来るプロセスを、丸底フラスコとして棚に並べる。
+   中身の高さが残り日数で、期限が近いほど減っている。過ぎたものは吹きこぼれる。
+   上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
+const SHELF_MAX = 6;
+
+/* 丸底フラスコ。他の絵と同じくドット絵で描く。
+   中身の高さだけが変わるので、型を1つ持って行ごとに塗り分ける。 */
+const FLASK_ROWS = [
+  '......cccc......',
+  '......cccc......',
+  '......o..o......',
+  '......o..o......',
+  '......o..o......',
+  '.....o....o.....',
+  '....o......o....',
+  '...o........o...',
+  '..o..........o..',
+  '..o..........o..',
+  '.o............o.',
+  '.o............o.',
+  '.o............o.',
+  '..o..........o..',
+  '..oo........oo..',
+  '....oooooooo....',
+];
+
+// 液が入りうる行（首から底の1つ上まで）。
+const FLASK_BODY = [2, 14];
+
+const FLASK_TONE = {
+  far: '#4a8236',
+  soon: '#a8802a',
+  over: '#b8442c',
+};
+
+function flaskRows(ratio, spill) {
+  const [top, bottom] = FLASK_BODY;
+  const rows = FLASK_ROWS.map((row) => row.split(''));
+  const height = bottom - top + 1;
+  const fill = Math.round(ratio * height);
+
+  for (let y = bottom; y > bottom - fill; y -= 1) {
+    const row = rows[y];
+    const left = row.indexOf('o');
+    const right = row.lastIndexOf('o');
+    for (let x = left + 1; x < right; x += 1) if (row[x] === '.') row[x] = 'l';
+  }
+  // 吹きこぼれ。口の脇に粒を散らす。
+  if (spill) {
+    for (const [x, y] of [[4, 1], [11, 2], [3, 3], [12, 4]]) rows[y][x] = 'l';
+  }
+  return rows.map((row) => row.join(''));
+}
+
+function flask(mission, weekEnd) {
+  const left = daysUntil(mission.effective_due_date ?? mission.due_date);
+  const over = left < 0;
+  // 週の残りぶんを満たすところから、期限に向かって減っていく。
+  const span = Math.max(1, daysUntil(weekEnd) + 1);
+  const ratio = over ? 0 : Math.max(0.1, Math.min(1, (left + 1) / span));
+  const key = over ? 'over' : left <= 1 ? 'soon' : 'far';
+  const href = `#/${mission.source_type}/${mission.source_id}`;
+
+  const body = toRects({
+    rows: flaskRows(ratio, over),
+    palette: {
+      o: over ? FLASK_TONE.over : '#8fa79c',
+      c: '#8a5a2b',
+      l: FLASK_TONE[key],
+    },
+  });
+
+  return `
+    <a class="flask is-${key}" href="${href}" aria-label="${esc(mission.title)}">
+      <svg viewBox="0 0 16 16" shape-rendering="crispEdges"
+           aria-hidden="true" focusable="false">${body}</svg>
+    </a>
+  `;
+}
+
+function shelf(missions, weekEnd) {
+  const shown = missions.slice(0, SHELF_MAX);
+  const rest = missions.length - shown.length;
+  return `
+    <div class="shelf">
+      <div class="shelf-row">${shown.map((m) => flask(m, weekEnd)).join('')}</div>
+      <div class="shelf-board"></div>
+      <div class="shelf-names">
+        ${shown.map((m) => `<span>${esc(clip(m.title, 5))}</span>`).join('')}
+      </div>
+      ${rest > 0 ? `<a class="link shelf-more" href="#/missions">他 ${rest} 本 →</a>` : ''}
+    </div>
+  `;
+}
+
+async function renderUsed() {
+  setActiveTab('home');
+  setTopbar({ title: 'ユーズド', back: '#/home' });
+  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  const summary = await api('/summary');
+  const rows = summary.wallet_by_goods;
+  const total = rows.reduce((sum, row) => sum + row.money, 0);
+
+  viewEl.innerHTML = `
+    <div class="panel tight">
+      <div class="stat-line">
+        <span>週 ${esc(summary.money.period.label)}</span>
+        <span class="v">${esc(fmtMoney(total))}</span>
+      </div>
+    </div>
+    ${
+      total
+        ? `<div class="panel">${walletBars(rows)}</div>`
+        : '<div class="empty">今週はまだ出ていません</div>'
+    }
+  `;
+}
+
 async function renderHome() {
   setActiveTab('home');
   setTopbar({
     title: 'MyAthanor',
     action:
-      `<a class="icon-btn" href="#/spells" aria-label="スペルブック">${icon('grimoire')}</a>` +
+      `<a class="icon-btn" href="#/spells" aria-label="インゴット">${icon('ingot')}</a>` +
       `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [summary, active, vault] = await Promise.all([
+  // 今週の終わり。ここまでに期限が来るプロセスだけを棚に並べる。
+  const weekEnd = dateKeyOf(new Date(new Date(summaryWeekEnd()).getTime() - 1));
+  const [summary, vault, due] = await Promise.all([
     api('/summary'),
-    api('/missions?status=active&sort=due'),
     api('/vault'),
+    api(`/missions?status=active&sort=due&due_by=${weekEnd}`),
   ]);
 
-  const upcoming = active.slice(0, 5);
-
   viewEl.innerHTML = `
+    ${weekSheets()}
     <div class="section-title">リソース</div>
     <div class="tubes">
       ${tubeCard({
         name: 'タイム',
-        period: `週 ${summary.time.period.label}`,
         data: summary.time,
         format: fmtTime,
         plannedLabel: '今週予定',
       })}
       ${tubeCard({
         name: 'ウォレット',
-        period: `月 ${summary.money.period.label}`,
         data: summary.money,
         format: fmtMoney,
-        plannedLabel: '今月予定',
+        plannedLabel: '今週予定',
+        href: '#/used',
       })}
     </div>
 
@@ -423,15 +595,20 @@ async function renderHome() {
       <span class="vault-line-value">${esc(fmtMoney(vault.balance))}</span>
     </a>
 
+    ${
+      // 調合棚。今週のうちに期限が来るぶんだけ。
+      due.length ? `<div class="section-title">調合棚</div>${shelf(due, weekEnd)}` : ''
+    }
+
     <div class="section-title">現況</div>
     <div class="panel">
       <div class="stat-line">
-        <span>進行中ミッション</span>
+        <span>進行中プロセス</span>
         <span class="v">${summary.active_mission_count}</span>
       </div>
       <div class="stat-line">
-        <span>うち今週まで／今月まで</span>
-        <span class="v">${summary.time.due_mission_count} / ${summary.money.due_mission_count}</span>
+        <span>うち今週まで</span>
+        <span class="v">${summary.time.due_mission_count}</span>
       </div>
       ${
         summary.time.planned_recurring || summary.money.planned_recurring
@@ -443,17 +620,7 @@ async function renderHome() {
              </div>`
           : ''
       }
-      <div class="stat-line"><span>やり切った時のタイム残</span><span class="v">${esc(fmtTime(summary.time.remaining))}</span></div>
-      <div class="stat-line"><span>やり切った時のウォレット残</span><span class="v">${esc(fmtMoney(summary.money.remaining))}</span></div>
     </div>
-
-    ${
-      // 今月のウォレットが何に出ていったか。家計簿として見るのはここ。
-      summary.wallet_by_goods.some((row) => row.money)
-        ? `<div class="section-title">今月の出どころ</div>
-           <div class="panel">${walletBars(summary.wallet_by_goods)}</div>`
-        : ''
-    }
 
     ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
@@ -469,44 +636,22 @@ async function renderHome() {
         : ''
     }
 
-    <div class="section-title">進行中のミッション</div>
-    <div class="list" id="home-missions">
-      ${
-        upcoming.length
-          ? upcoming.map((m) => missionCard(m)).join('')
-          : '<div class="empty">進行中のミッションはありません</div>'
-      }
-    </div>
-    ${
-      active.length > upcoming.length
-        ? `<div class="btn-row"><a class="link" href="#/missions">他 ${active.length - upcoming.length} 件を表示 →</a></div>`
-        : ''
-    }
   `;
-
-  wireMissionActions(document.getElementById('home-missions'), renderHome);
-  wireLegacy(document.getElementById('home-missions'), renderHome);
 }
 
 /* ---------- ストリーム ---------- */
 
+const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
 let streamFilter = 'all';
-let streamView = 'time'; // time = 時系列 / tag = タグ別
-let streamTag = null;
 
 async function renderStream() {
   setActiveTab('stream');
   setTopbar({ title: 'ストリーム' });
 
-  const [items, tags] = await Promise.all([
-    api(`/stream?type=${streamFilter}${streamTag ? `&tag=${streamTag}` : ''}`),
-    api('/tags'),
-  ]);
+  const items = await api(`/stream?type=${streamFilter}`);
 
   const body =
-    streamView === 'tag'
-      ? groupedByTag(items)
-      : `<div class="list">${
+    `<div class="list">${
           items.length
             ? items.map(streamCard).join('')
             : '<div class="empty">まだ記録がありません</div>'
@@ -514,7 +659,7 @@ async function renderStream() {
 
   viewEl.innerHTML = `
     <div class="filters">
-      ${['all', 'idea', 'log', 'food', 'gear']
+      ${STREAM_TYPES
         .map(
           (type) => `<button class="filter" data-filter="${type}"
              aria-pressed="${streamFilter === type}">${
@@ -523,42 +668,12 @@ async function renderStream() {
         )
         .join('')}
     </div>
-    <div class="filters">
-      <button class="filter" data-view="time" aria-pressed="${streamView === 'time'}">時系列</button>
-      <button class="filter" data-view="tag" aria-pressed="${streamView === 'tag'}">タグ別</button>
-    </div>
-    ${
-      streamView === 'time' && tags.length
-        ? `<div class="tag-bar">
-             <button class="chip ${streamTag ? '' : 'is-on'}" data-tag="">すべて</button>
-             ${tags
-               .map(
-                 (tag) => `<button class="chip ${
-                   String(streamTag) === String(tag.id) ? 'is-on' : ''
-                 }" data-tag="${tag.id}">${esc(tag.name)} <b>${tag.total}</b></button>`,
-               )
-               .join('')}
-           </div>`
-        : ''
-    }
     ${body}
   `;
 
   for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
     button.addEventListener('click', () => {
       streamFilter = button.dataset.filter;
-      renderStream();
-    });
-  }
-  for (const button of viewEl.querySelectorAll('.filter[data-view]')) {
-    button.addEventListener('click', () => {
-      streamView = button.dataset.view;
-      renderStream();
-    });
-  }
-  for (const button of viewEl.querySelectorAll('.chip[data-tag]')) {
-    button.addEventListener('click', () => {
-      streamTag = button.dataset.tag || null;
       renderStream();
     });
   }
@@ -571,7 +686,7 @@ function streamCard(item) {
       <div class="card-top">
         <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
-        ${item.from_mission ? '<span>ミッション由来</span>' : ''}
+        ${item.from_mission ? '<span>プロセス由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
@@ -586,52 +701,14 @@ function streamCard(item) {
         }
         ${
           item.mission_count
-            ? `<span class="${item.active_mission_count ? 'hot' : ''}">ミッション ${item.mission_count}件${
+            ? `<span class="${item.active_mission_count ? 'hot' : ''}">プロセス ${item.mission_count}件${
                 item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
               }</span>`
             : ''
         }
       </div>
-      ${
-        item.tags.length
-          ? `<div class="chips">${item.tags
-              .map((tag) => `<span class="chip is-flat">${esc(tag.name)}</span>`)
-              .join('')}</div>`
-          : ''
-      }
     </a>
   `;
-}
-
-// タグ別表示。複数タグが付いた項目はそれぞれの束に出る。未分類は最後。
-function groupedByTag(items) {
-  const groups = new Map();
-  const untagged = [];
-
-  for (const item of items) {
-    if (item.tags.length === 0) {
-      untagged.push(item);
-      continue;
-    }
-    for (const tag of item.tags) {
-      if (!groups.has(tag.id)) groups.set(tag.id, { name: tag.name, items: [] });
-      groups.get(tag.id).items.push(item);
-    }
-  }
-
-  const sections = [...groups.values()].sort((a, b) => b.items.length - a.items.length);
-  if (untagged.length) sections.push({ name: '未分類', items: untagged });
-  if (sections.length === 0) return '<div class="empty">まだ記録がありません</div>';
-
-  return sections
-    .map(
-      (section) => `
-    <div class="section-title">${esc(section.name)}<span class="section-count">${
-      section.items.length
-    }</span></div>
-    <div class="list">${section.items.map(streamCard).join('')}</div>`,
-    )
-    .join('');
 }
 
 /* 思いついた時点では、種別も詳細もまだ決まっていないことが多い。
@@ -664,8 +741,7 @@ function openCapture() {
       </div>
       <div class="field capture-row">
         <input id="capture-title" autocomplete="off" enterkeyhint="done" />
-        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0"
-          placeholder="円" hidden />
+        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0" hidden />
       </div>
       <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
@@ -681,14 +757,7 @@ function openCapture() {
   const caughtEl = backdrop.querySelector('#caught');
 
   // 糧と装備は買ったものなので、金額を並べて受ける。
-  const HOLDER = {
-    idea: 'したいこと',
-    log: '起きたこと',
-    food: '食べたもの・消えるもの',
-    gear: '買ったもの・残るもの',
-  };
   function dressFor(kind) {
-    input.placeholder = HOLDER[kind];
     money.hidden = !isGoods(kind);
     if (money.hidden) money.value = '';
   }
@@ -791,9 +860,9 @@ function openCapture() {
 
 /* ---------- 詳細（アイデア／ログ） ---------- */
 
-/* ---------- 大釜（ミッションのTODOリスト） ---------- */
+/* ---------- 大釜（プロセスのTODOリスト） ---------- */
 
-// ひとつの大きなイベントに必要なミッションを素材として並べる。
+// ひとつの大きなイベントに必要なプロセスを素材として並べる。
 // 素材が全部そろうと錬成が終わる。断念した素材は必要数から外れる。
 function cauldronPanel(cauldron) {
   const { progress } = cauldron;
@@ -855,8 +924,7 @@ function cauldronPanel(cauldron) {
 
       <form class="material-add" data-add="${cauldron.id}">
         <div class="field">
-          <textarea id="mat-${cauldron.id}" rows="2"
-                    placeholder="素材を投入（1行に1つ）"></textarea>
+          <textarea id="mat-${cauldron.id}" rows="2"></textarea>
         </div>
         <div class="btn-row">
           <button type="submit">投入</button>
@@ -962,7 +1030,7 @@ function wireCauldrons(container, entryId, kind) {
       } else if (act) {
         await api(`/missions/${act.dataset.id}/${act.dataset.materialAct}`, { method: 'POST' });
       } else {
-        if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のミッションとして残ります）`)) return;
+        if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のプロセスとして残ります）`)) return;
         await api(`/cauldrons/${drop.dataset.drop}`, { method: 'DELETE' });
         toast('大釜を捨てました');
       }
@@ -1042,15 +1110,56 @@ async function renderEntry(kind, entryId) {
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
-  const [entry, allTags] = await Promise.all([api(path), api('/tags')]);
+  const entry = await api(path);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
-  // 大釜に入っているミッションは大釜のほうに出すので、こちらからは外す。
+  // 大釜に入っているプロセスは大釜のほうに出すので、こちらからは外す。
   // 大釜を伏せている間は外さない。外すとどこからも出てこなくなる。
   const loose = SHOW.cauldron
     ? entry.missions.filter((mission) => !mission.cauldron_id)
     : entry.missions;
 
   viewEl.innerHTML = `
+    ${/* いちばん使うのはプロセスを足すこと。1ページ目に置く。 */ ''}
+    <div class="section-title">プロセスを追加</div>
+    <form class="panel" id="mission-form">
+      <div class="field">
+        <input id="m-title" autocomplete="off" />
+      </div>
+      <details class="optional">
+        <summary>見積と日付</summary>
+        <div class="row">
+          <div class="field">
+            <label for="m-time">タイム（時間）</label>
+            <input id="m-time" type="number" step="0.25" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="m-money">ウォレット（円）</label>
+            <input id="m-money" type="number" step="1" min="0" value="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="m-from">いつから</label>
+            <input id="m-from" type="date" />
+          </div>
+          <div class="field">
+            <label for="m-to">いつまで</label>
+            <input id="m-to" type="date" />
+          </div>
+        </div>
+      </details>
+      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
+    </form>
+
+    <div class="section-title">${SHOW.cauldron ? '単独のプロセス' : 'プロセス'}</div>
+    <div class="list" id="entry-missions">
+      ${
+        loose.length
+          ? loose.map((m) => missionCard(m, { showSource: false })).join('')
+          : '<div class="empty">プロセスはありません</div>'
+      }
+    </div>
+
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
     <form class="panel" id="entry-form">
       <div class="field">
@@ -1089,7 +1198,7 @@ async function renderEntry(kind, entryId) {
       <div class="stat-line"><span>${kind === 'idea' ? '作成' : '発生'}</span><span class="v">${esc(fmtDate(at))}</span></div>
       ${
         entry.source_mission
-          ? `<div class="stat-line"><span>由来</span><span class="v">ミッション完了「${esc(entry.source_mission.title)}」</span></div>`
+          ? `<div class="stat-line"><span>由来</span><span class="v">プロセス完了「${esc(entry.source_mission.title)}」</span></div>`
           : ''
       }
       ${
@@ -1114,7 +1223,7 @@ async function renderEntry(kind, entryId) {
         <summary>大釜を用意する</summary>
         <form id="cauldron-new">
           <div class="field">
-            <input id="c-title" autocomplete="off" placeholder="ひとつの大きなイベント" />
+            <input id="c-title" autocomplete="off" />
           </div>
           <details class="optional">
             <summary>日付</summary>
@@ -1136,70 +1245,8 @@ async function renderEntry(kind, entryId) {
         : ''
     }
 
-    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
-    <div class="list" id="entry-missions">
-      ${
-        loose.length
-          ? loose.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">ミッションはありません</div>'
-      }
-    </div>
-
     ${SHOW.temperature && kind === 'idea' ? temperaturePanel(entry) : ''}
 
-    <div class="section-title">タグ</div>
-    <form class="panel" id="tag-form">
-      <div class="chips" id="entry-tags">
-        ${
-          entry.tags.length
-            ? entry.tags
-                .map(
-                  (tag) => `<span class="chip">${esc(tag.name)}<button type="button"
-                     data-remove="${esc(tag.name)}" aria-label="${esc(tag.name)} を外す">×</button></span>`,
-                )
-                .join('')
-            : '<span class="chips-empty">タグなし</span>'
-        }
-      </div>
-      <div class="row tag-add">
-        <input id="tag-input" list="tag-options" autocomplete="off" placeholder="タグを追加" />
-        <button type="submit">追加</button>
-      </div>
-      <datalist id="tag-options">
-        ${allTags.map((tag) => `<option value="${esc(tag.name)}"></option>`).join('')}
-      </datalist>
-    </form>
-
-    <div class="section-title">ミッションを追加</div>
-    <form class="panel" id="mission-form">
-      <div class="field">
-        <input id="m-title" autocomplete="off" placeholder="切り出すミッション" />
-      </div>
-      <details class="optional">
-        <summary>見積と日付</summary>
-        <div class="row">
-          <div class="field">
-            <label for="m-time">タイム（時間）</label>
-            <input id="m-time" type="number" step="0.25" min="0" value="0" />
-          </div>
-          <div class="field">
-            <label for="m-money">ウォレット（円）</label>
-            <input id="m-money" type="number" step="1" min="0" value="0" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="m-from">いつから</label>
-            <input id="m-from" type="date" />
-          </div>
-          <div class="field">
-            <label for="m-to">いつまで</label>
-            <input id="m-to" type="date" />
-          </div>
-        </div>
-      </details>
-      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
-    </form>
   `;
 
   const goodsToggle = document.getElementById('goods-toggle');
@@ -1228,36 +1275,6 @@ async function renderEntry(kind, entryId) {
     } catch (err) {
       toast(err.message, true);
     }
-  });
-
-  const currentTags = entry.tags.map((tag) => tag.name);
-  const saveTags = async (names, message) => {
-    try {
-      await api(`/entries/${kind}/${entryId}/tags`, { method: 'PUT', body: { tags: names } });
-      toast(message);
-      await renderEntry(kind, entryId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  };
-
-  const tagForm = document.getElementById('tag-form');
-  tagForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = document.getElementById('tag-input');
-    const name = input.value.trim();
-    if (!name) return input.focus();
-    if (currentTags.includes(name)) return toast('もう付いています');
-    await saveTags([...currentTags, name], 'タグを付けました');
-  });
-
-  tagForm.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-remove]');
-    if (!button) return;
-    await saveTags(
-      currentTags.filter((name) => name !== button.dataset.remove),
-      'タグを外しました',
-    );
   });
 
   if (SHOW.temperature && kind === 'idea') wireTemperature(entry, entryId);
@@ -1305,7 +1322,7 @@ async function renderEntry(kind, entryId) {
           due_date: document.getElementById('m-to').value || null,
         },
       });
-      toast('ミッションを追加しました');
+      toast('プロセスを追加しました');
       await renderEntry(kind, entryId);
     } catch (err) {
       toast(err.message, true);
@@ -1316,14 +1333,14 @@ async function renderEntry(kind, entryId) {
   wireLegacy(viewEl, () => renderEntry(kind, entryId));
 }
 
-/* ---------- ミッション ---------- */
+/* ---------- プロセス ---------- */
 
 let missionFilter = 'active';
 let missionSort = 'due';
 
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: 'ミッション' });
+  setTopbar({ title: 'プロセス' });
 
   const missions = await api(`/missions?status=${missionFilter}&sort=${missionSort}`);
   const totals = missions.reduce(
@@ -1351,24 +1368,25 @@ async function renderMissions() {
         missionSort === 'recent'
       }">新しい順</button>
     </div>
-    <div class="panel" style="margin-bottom:14px">
-      <div class="stat-line">
-        <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}</span>
-        <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
-      </div>
-      ${
-        missionSort === 'due'
-          ? `<div class="stat-line"><span>期限なし</span><span class="v">${
-              missions.filter((m) => !m.due_date).length
-            }件（末尾）</span></div>`
-          : ''
-      }
-    </div>
+    ${
+      // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
+      (() => {
+        const undated = missions.filter((m) => !m.due_date).length;
+        return `<div class="panel tight">
+          <div class="stat-line">
+            <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}${
+              missionSort === 'due' && undated ? `（期限なし ${undated}）` : ''
+            }</span>
+            <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
+          </div>
+        </div>`;
+      })()
+    }
     <div class="list" id="mission-list">
       ${
         missions.length
           ? missions.map((m) => missionCard(m)).join('')
-          : '<div class="empty">該当するミッションはありません</div>'
+          : '<div class="empty">該当するプロセスはありません</div>'
       }
     </div>
   `;
@@ -1391,7 +1409,7 @@ async function renderMissions() {
 
 /* ---------- 設定 ---------- */
 
-// タイムは週、ウォレットは月を1期間として可処分量を管理する。
+// タイムは週、ウォレットは月を1期間として使える量を管理する。
 const BUDGET_UI = {
   time: {
     title: 'タイム（週別）',
@@ -1402,7 +1420,7 @@ const BUDGET_UI = {
     format: fmtTime,
   },
   money: {
-    title: 'ウォレット（月別）',
+    title: 'ウォレット（週別）',
     unit: '円',
     step: '100',
     toInput: (amount) => amount,
@@ -1434,7 +1452,7 @@ function budgetSection(kind, rows) {
                  data-key="${esc(row.key)}"
                  data-original="${ui.toInput(row.amount)}"
                  value="${ui.toInput(row.amount)}"
-                 aria-label="${esc(row.label)} の可処分${esc(ui.unit)}" />
+                 aria-label="${esc(row.label)} の${esc(ui.unit)}" />
           ${
             row.source === 'override'
               ? `<button type="button" class="ghost" data-reset="${esc(row.key)}">既定へ</button>`
@@ -1465,28 +1483,25 @@ async function renderSettings() {
   const grid = (settings.time_grid ?? '').length === 168 ? settings.time_grid : '0'.repeat(168);
 
   viewEl.innerHTML = `
-    <div class="section-title">週の可処分タイム</div>
+    <div class="section-title">週のタイム</div>
     <div class="panel" id="time-grid-panel">
       <div class="tg-top">
         <span class="tg-total" id="tg-total"></span>
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
-      ${
-        settings.time_grid || !settings.weekly_time
-          ? ''
-          : `<div class="hint">いまは ${esc(
-              fmtTime(settings.weekly_time),
-            )}／週（数値で設定）。保存すると置き換わります。</div>`
-      }
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
-    <div class="section-title">既定の可処分ウォレット</div>
+    <div class="section-title">報酬</div>
     <form class="panel" id="settings-form">
       <div class="field">
         <label for="monthly-money">月あたり（円）</label>
         <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
+      </div>
+      <div class="stat-line">
+        <span>週のウォレット</span>
+        <span class="v" id="weekly-share">${esc(fmtMoney(Math.round(settings.monthly_money / 4)))}</span>
       </div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
@@ -1500,7 +1515,6 @@ async function renderSettings() {
         <input id="half-life" type="number" step="1" min="0"
                value="${settings.cooling_half_life_days}" />
       </div>
-      <div class="hint">0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>`
         : ''
@@ -1509,24 +1523,23 @@ async function renderSettings() {
     <div class="section-title">定期イベント</div>
     <a class="card nav-card" href="#/recurrences">
       <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
-      <div class="card-meta"><span>日付が来たら自動でログになります</span></div>
     </a>
 
     <div class="section-title">金庫</div>
     <a class="card nav-card" href="#/vault">
       <div class="card-title">${icon('coins')}<span>金庫の初期残高と積立</span></div>
-      <div class="card-meta"><span>月の余りが積まれていきます</span></div>
-    </a>
-
-    <div class="section-title">タグ</div>
-    <a class="card nav-card" href="#/tags">
-      <div class="card-title"><span>タグの整理</span></div>
-      <div class="card-meta"><span>名前の変更と削除</span></div>
     </a>
 
     ${budgetSection('time', timeBudgets)}
     ${budgetSection('money', moneyBudgets)}
   `;
+
+  // 打っている最中に、4で割った週ぶんが見えるようにする。
+  const rewardInput = document.getElementById('monthly-money');
+  rewardInput.addEventListener('input', () => {
+    document.getElementById('weekly-share').textContent =
+      fmtMoney(Math.round(Number(rewardInput.value || 0) / 4));
+  });
 
   document.getElementById('settings-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1611,7 +1624,6 @@ async function renderSettings() {
 
 /* ---------- 定期イベント ---------- */
 
-const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
 const FREQ_LABEL = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
 
 function scheduleText(recurrence) {
@@ -1635,7 +1647,7 @@ function recurrenceFields(recurrence = null) {
 
   return `
     <div class="field">
-      <input id="r-title" autocomplete="off" placeholder="定期的に起きること"
+      <input id="r-title" autocomplete="off"
              value="${esc(recurrence?.title ?? '')}" />
     </div>
     <div class="row">
@@ -1766,7 +1778,6 @@ async function renderRecurrences() {
     <div class="section-title">新しく登録</div>
     <form class="panel" id="recurrence-new">
       ${recurrenceFields()}
-      <div class="hint">開始日から今日までのぶんはログになります。</div>
       <div class="btn-row"><button type="submit" class="primary">登録</button></div>
     </form>
   `;
@@ -1951,13 +1962,13 @@ async function renderRecurrence(recurrenceId) {
   });
 }
 
-/* ---------- スペルブック ---------- */
+/* ---------- インゴット ---------- */
 
-// スペルは「したいこと」ではなく、良いと思った物事を持っておくもの。
+// インゴットは「したいこと」ではなく、良いと思った物事を持っておくもの。
 // 時系列の出来事ではないのでストリームには出さず、ここに溜める。
 async function renderSpells() {
   setActiveTab('home');
-  setTopbar({ title: 'スペルブック', back: '#/home' });
+  setTopbar({ title: 'インゴット', back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const spells = await api('/spells');
@@ -1965,12 +1976,12 @@ async function renderSpells() {
   viewEl.innerHTML = `
     <form class="panel" id="spell-new">
       <div class="field">
-        <input id="s-title" autocomplete="off" placeholder="良いと思った物事・考え方" />
+        <input id="s-title" autocomplete="off" />
       </div>
       <div class="btn-row"><button type="submit" class="primary">書き留める</button></div>
     </form>
 
-    <div class="section-title">スペル<span class="section-count">${spells.length}</span></div>
+    <div class="section-title">インゴット<span class="section-count">${spells.length}</span></div>
     <div class="list">
       ${
         spells.length
@@ -1988,16 +1999,9 @@ async function renderSpells() {
             spell.mission_count
               ? `<div class="card-meta"><span class="${
                   spell.active_mission_count ? 'hot' : ''
-                }">ミッション ${spell.mission_count}件${
+                }">プロセス ${spell.mission_count}件${
                   spell.active_mission_count ? `（進行中 ${spell.active_mission_count}）` : ''
                 }</span></div>`
-              : ''
-          }
-          ${
-            spell.tags.length
-              ? `<div class="chips">${spell.tags
-                  .map((tag) => `<span class="chip is-flat">${esc(tag.name)}</span>`)
-                  .join('')}</div>`
               : ''
           }
         </a>`,
@@ -2015,7 +2019,7 @@ async function renderSpells() {
     if (!title) return input.focus();
     try {
       const created = await api('/spells', { method: 'POST', body: { title } });
-      toast('スペルを書き留めました');
+      toast('インゴットを書き留めました');
       location.hash = `#/spell/${created.id}`;
     } catch (err) {
       toast(err.message, true);
@@ -2025,19 +2029,19 @@ async function renderSpells() {
 
 async function renderSpell(spellId) {
   setActiveTab('home');
-  setTopbar({ title: 'スペル', back: '#/spells' });
+  setTopbar({ title: 'インゴット', back: '#/spells' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [spell, allTags] = await Promise.all([api(`/spells/${spellId}`), api('/tags')]);
+  const spell = await api(`/spells/${spellId}`);
 
   viewEl.innerHTML = `
     <form class="panel" id="spell-form">
       <div class="field">
-        <label for="title">スペル</label>
+        <label for="title">インゴット</label>
         <input id="title" value="${esc(spell.title)}" autocomplete="off" />
       </div>
       <div class="field">
-        <textarea id="body" rows="5" placeholder="思ったことを書き留める">${esc(
+        <textarea id="body" rows="5">${esc(
           spell.body ?? '',
         )}</textarea>
       </div>
@@ -2047,30 +2051,7 @@ async function renderSpell(spellId) {
       </div>
     </form>
 
-    <div class="section-title">タグ</div>
-    <form class="panel" id="tag-form">
-      <div class="chips" id="entry-tags">
-        ${
-          spell.tags.length
-            ? spell.tags
-                .map(
-                  (tag) => `<span class="chip">${esc(tag.name)}<button type="button"
-                     data-remove="${esc(tag.name)}" aria-label="${esc(tag.name)} を外す">×</button></span>`,
-                )
-                .join('')
-            : '<span class="chips-empty">タグなし</span>'
-        }
-      </div>
-      <div class="row tag-add">
-        <input id="tag-input" list="tag-options" autocomplete="off" placeholder="タグを追加" />
-        <button type="submit">追加</button>
-      </div>
-      <datalist id="tag-options">
-        ${allTags.map((tag) => `<option value="${esc(tag.name)}"></option>`).join('')}
-      </datalist>
-    </form>
-
-    <div class="section-title">ここから出たミッション</div>
+    <div class="section-title">ここから出たプロセス</div>
     <div class="list" id="entry-missions">
       ${
         spell.missions.length
@@ -2079,10 +2060,10 @@ async function renderSpell(spellId) {
       }
     </div>
 
-    <div class="section-title">ミッションを切り出す</div>
+    <div class="section-title">プロセスを切り出す</div>
     <form class="panel" id="mission-form">
       <div class="field">
-        <input id="m-title" autocomplete="off" placeholder="このスペルからやること" />
+        <input id="m-title" autocomplete="off" />
       </div>
       <details class="optional">
         <summary>見積と日付</summary>
@@ -2130,49 +2111,19 @@ async function renderSpell(spellId) {
   });
 
   document.getElementById('spell-delete').addEventListener('click', async () => {
-    if (!confirm('このスペルを捨てますか？')) return;
+    if (!confirm('このインゴットを捨てますか？')) return;
     try {
       await api(`/spells/${spellId}`, { method: 'DELETE' });
-      toast('スペルを捨てました');
+      toast('インゴットを捨てました');
       location.hash = '#/spells';
     } catch (err) {
       toast(
         err.message === 'spell still has missions'
-          ? 'ミッションが残っているので捨てられません'
+          ? 'プロセスが残っているので捨てられません'
           : err.message,
         true,
       );
     }
-  });
-
-  // タグは idea として持っているので、既存の経路をそのまま使う。
-  const currentTags = spell.tags.map((tag) => tag.name);
-  const saveTags = async (names, message) => {
-    try {
-      await api(`/entries/idea/${spellId}/tags`, { method: 'PUT', body: { tags: names } });
-      toast(message);
-      await reload();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  };
-
-  const tagForm = document.getElementById('tag-form');
-  tagForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = document.getElementById('tag-input');
-    const name = input.value.trim();
-    if (!name) return input.focus();
-    if (currentTags.includes(name)) return toast('もう付いています');
-    await saveTags([...currentTags, name], 'タグを付けました');
-  });
-  tagForm.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-remove]');
-    if (!button) return;
-    await saveTags(
-      currentTags.filter((name) => name !== button.dataset.remove),
-      'タグを外しました',
-    );
   });
 
   document.getElementById('mission-form').addEventListener('submit', async (event) => {
@@ -2192,7 +2143,7 @@ async function renderSpell(spellId) {
           due_date: document.getElementById('m-to').value || null,
         },
       });
-      toast('ミッションを切り出しました');
+      toast('プロセスを切り出しました');
       await reload();
     } catch (err) {
       toast(err.message, true);
@@ -2238,28 +2189,28 @@ async function renderVault() {
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
-    <div class="section-title">月ごとの積立<span class="section-count">${
-      vault.months.length
+    <div class="section-title">週ごとの積立<span class="section-count">${
+      vault.weeks.length
     }</span></div>
     ${
-      vault.months.length
-        ? `<div class="panel">${vault.months
+      vault.weeks.length
+        ? `<div class="panel">${vault.weeks
             .map(
-              (month) => `
+              (week) => `
         <div class="vault-row">
           <div>
-            <div class="vault-month">${esc(month.label)}</div>
-            <div class="vault-detail">可処分 ${esc(fmtMoney(month.budget))} − 消費 ${esc(
-              fmtMoney(month.consumed),
+            <div class="vault-month">${esc(week.label)}</div>
+            <div class="vault-detail">全体 ${esc(fmtMoney(week.budget))} − 消費 ${esc(
+              fmtMoney(week.consumed),
             )}</div>
           </div>
-          <div class="vault-surplus ${month.surplus < 0 ? 'neg' : ''}">${
-            month.surplus >= 0 ? '+' : ''
-          }${esc(fmtMoney(month.surplus))}</div>
+          <div class="vault-surplus ${week.surplus < 0 ? 'neg' : ''}">${
+            week.surplus >= 0 ? '+' : ''
+          }${esc(fmtMoney(week.surplus))}</div>
         </div>`,
             )
             .join('')}</div>`
-        : '<div class="empty">まだ終わった月がありません</div>'
+        : '<div class="empty">まだ終わった週がありません</div>'
     }
   `;
 
@@ -2280,7 +2231,7 @@ async function renderVault() {
   });
 }
 
-/* ---------- 週の可処分タイムを表で選ぶ ---------- */
+/* ---------- 週のタイムを表で選ぶ ---------- */
 
 const WEEK_HEAD = ['月', '火', '水', '木', '金', '土', '日'];
 
@@ -2362,7 +2313,7 @@ function wireTimeGrid(root, initial) {
   root.querySelector('#tg-save').addEventListener('click', async () => {
     try {
       await api('/settings/time-grid', { method: 'PUT', body: { grid: grid.join('') } });
-      toast('週の可処分タイムを保存しました');
+      toast('週のタイムを保存しました');
       await renderSettings();
     } catch (err) {
       toast(err.message, true);
@@ -2374,76 +2325,6 @@ function wireTimeGrid(root, initial) {
 
 /* ---------- タグの整理 ---------- */
 
-async function renderTags() {
-  setActiveTab('home');
-  setTopbar({ title: 'タグの整理', back: '#/settings' });
-  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
-
-  const tags = await api('/tags');
-
-  viewEl.innerHTML = `
-    <div class="section-title">タグ</div>
-    ${
-      tags.length
-        ? `<form class="panel" id="tag-list">
-            ${tags
-              .map(
-                (tag) => `
-              <div class="budget-row">
-                <div>
-                  <input class="tag-name" data-id="${tag.id}"
-                         data-original="${esc(tag.name)}" value="${esc(tag.name)}" />
-                  <div class="budget-consumed">アイデア ${tag.idea_count} · ログ ${tag.log_count}</div>
-                </div>
-                <div class="budget-src">${tag.total}件</div>
-                <button type="button" class="ghost danger" data-delete="${tag.id}"
-                        data-name="${esc(tag.name)}">削除</button>
-              </div>`,
-              )
-              .join('')}
-            <div class="btn-row"><button type="submit" class="primary">名前を保存</button></div>
-          </form>`
-        : '<div class="empty">タグはまだありません</div>'
-    }
-  `;
-
-  const list = document.getElementById('tag-list');
-  if (!list) return;
-
-  list.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const changed = [...list.querySelectorAll('.tag-name')].filter(
-      (input) => input.value.trim() !== input.dataset.original,
-    );
-    if (changed.length === 0) return toast('変更はありません');
-    try {
-      for (const input of changed) {
-        await api(`/tags/${input.dataset.id}`, {
-          method: 'PATCH',
-          body: { name: input.value.trim() },
-        });
-      }
-      toast(`${changed.length}件の名前を変えました`);
-      await renderTags();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  list.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-delete]');
-    if (!button) return;
-    if (!confirm(`タグ「${button.dataset.name}」を削除しますか？`)) return;
-    try {
-      await api(`/tags/${button.dataset.delete}`, { method: 'DELETE' });
-      toast('タグを削除しました');
-      await renderTags();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
 /* ---------- レガシー ---------- */
 
 function legacyButton(kind, id, isLegacy) {
@@ -2451,7 +2332,7 @@ function legacyButton(kind, id, isLegacy) {
     <button type="button" class="ghost legacy-btn ${isLegacy ? 'is-on' : ''}"
             data-legacy-kind="${kind}" data-legacy-id="${id}"
             data-legacy-value="${isLegacy ? 0 : 1}">
-      ${icon('chest')}<span>${isLegacy ? 'レガシー解除' : 'レガシー'}</span>
+      ${icon('spark')}<span>${isLegacy ? 'レガシー解除' : 'レガシー'}</span>
     </button>
   `;
 }
@@ -2477,24 +2358,29 @@ function wireLegacy(container, onChanged) {
   });
 }
 
-/* ---------- ダンジョン ----------
+/* ---------- アストロラーベ ----------
 
-   たまっていく情報を、球体の盤として描く。
-     節 = アイデア／ログ、軌道 = ミッション、大釜の節 = 素材の束、宝箱 = レガシー。
-     中心が入口。外へ行くほど後の時間で、角度が枝分かれ。区画 = タグ。
+   たまっていく情報を、1枚の盤として描く。天体の位置を読む器具に見立てて、
+   物事どうしの関わりを角度と輪で出す。
+     節 = アイデア／ログ、軌道 = プロセス、大釜の節 = 素材の束、宝箱 = レガシー。
+     入口はいちばん内側の輪に並び、外へ行くほど後の時間で、角度が枝分かれ。
      入口からいちばん奥の掘削中まで、軌道に灯を入れて進む先を示す。
+
+   区画には割らない。何と何が関わっているかは、派生したプロセスだけが決める。
 
    光はぼかしで作らない。同じ中心の輪を段で重ねて滲みにする。
    ぼかすとこの画面だけ輪郭が溶けて、他と手ざわりが変わってしまう。 */
 
-let dungeonFilter = 'all';
-
 const GRID = {
   node: 11, // 節の半径
   ring: 74, // 軌道の間隔
-  first: 84, // 中心から最初の軌道まで。ここが狭いと内側の札が触れ合う
-  margin: 78, // いちばん外の札が収まるぶん
+  first: 84, // 中心から最初の軌道まで。ここが狭いと内側の節が触れ合う
+  margin: 40, // いちばん外の節が収まるぶん
   icon: 14,
+  spacing: 34, // 隣り合う葉のあいだに要る距離。内側の輪の大きさを決める
+  // 盤を縦長の楕円にする比。真円のままだと、縦長の画面に置いたとき
+  // 上下が大きく余って、そのぶん盤が小さく縮む。
+  aspect: 1.5,
 };
 
 // 紙に引いた盤。地を白のままにして、節と軌道を墨と葉の色で置く。
@@ -2523,8 +2409,12 @@ const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
 /* 節に (depth, slot) を振る。葉から順に区画を配り、親は子の平均に置く。
    これで枝が扇に開き、中心から外へ向かう盤になる。
    大釜は素材ごとに区画を取らず、1つに畳んで進み具合だけ出す。
-   素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。 */
-function layoutRoad(root) {
+   素材の先にさらに道が続いているものだけ、大釜から枝として伸ばす。
+
+   道は1本ずつ盤にしない。入口を全部いちばん内側の輪に並べ、
+   そこから外へ伸ばして1枚の盤にする。中心には何も置かない。
+   入口どうしは無関係で、線で結ぶと在りもしない関わりを描くことになるため。 */
+function layoutBoard(roads) {
   const nodes = [];
   let nextId = 0;
   let leaves = 0;
@@ -2583,26 +2473,52 @@ function layoutRoad(root) {
     return node;
   }
 
-  place(root, 0);
+  for (const road of roads) place(road, 1);
 
   const total = Math.max(leaves, 1);
-  const maxDepth = Math.max(...nodes.map((n) => n.depth));
-  const outer = maxDepth ? GRID.first + (maxDepth - 1) * GRID.ring : 0;
-  const center = outer + GRID.margin;
+  const maxDepth = Math.max(1, ...nodes.map((n) => n.depth));
+
+  /* いちばん内側の輪の大きさは、葉の数から決める。
+     固定にすると、入口が増えたときに内側で節が重なって団子になる。 */
+  const first = Math.max(GRID.first, (total * GRID.spacing) / (2 * Math.PI));
+  const outer = first + (maxDepth - 1) * GRID.ring;
+  const cx = outer + GRID.margin;
+  const cy = cx * GRID.aspect;
 
   for (const node of nodes) {
-    // 中心が入口。深さ1から軌道に乗る。
-    node.r = node.depth ? GRID.first + (node.depth - 1) * GRID.ring : 0;
+    node.r = first + (node.depth - 1) * GRID.ring;
     // 真上から時計回りに配る。
     node.a = -Math.PI / 2 + ((node.slot + 0.5) / total) * Math.PI * 2;
-    node.x = center + node.r * Math.cos(node.a);
-    node.y = center + node.r * Math.sin(node.a);
+    node.x = cx + node.r * Math.cos(node.a);
+    node.y = cy + node.r * GRID.aspect * Math.sin(node.a);
   }
 
-  return { nodes, center, maxDepth, size: center * 2 };
+  /* 実際に節が居るところだけを切り出す。輪はいちばん深い道の形で決まるので、
+     そのまま全体を映すと、誰も居ない外側の輪ぶんだけ盤が小さく縮む。 */
+  // 札は外へ向けて置くので、横は札1つぶん広く取る。縦は行の高さだけでよい。
+  const padX = GRID.node + 96;
+  const padY = GRID.node + 34;
+  const box = nodes.reduce(
+    (b, n) => ({
+      x0: Math.min(b.x0, n.x - padX),
+      y0: Math.min(b.y0, n.y - padY),
+      x1: Math.max(b.x1, n.x + padX),
+      y1: Math.max(b.y1, n.y + padY),
+    }),
+    { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
+  );
+
+  return {
+    nodes,
+    cx,
+    cy,
+    maxDepth,
+    first,
+    view: { x: box.x0, y: box.y0, w: box.x1 - box.x0, h: box.y1 - box.y0 },
+  };
 }
 
-const ROOM_ICON = { idea: 'stone', spell: 'sigil', log: 'footsteps' };
+const ROOM_ICON = { idea: 'stone', spell: 'ingot', log: 'footsteps' };
 
 function clip(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -2610,13 +2526,17 @@ function clip(text, max) {
 
 const n2 = (value) => Math.round(value * 100) / 100;
 
-const onRing = (center, r, a) => [center + r * Math.cos(a), center + r * Math.sin(a)];
+// 盤は楕円なので、縦だけ比をかける。
+const onRing = (cx, cy, r, a) => [
+  cx + r * Math.cos(a),
+  cy + r * GRID.aspect * Math.sin(a),
+];
 
 /* 親の軌道を子の角度まで回ってから、外へ抜ける。
    斜めに直線で結ぶと蜘蛛の巣になるので、必ず軌道に沿わせる。 */
-function trackPath(center, parent, child) {
-  const [px, py] = onRing(center, parent.r, parent.a);
-  const [bx, by] = onRing(center, child.r, child.a);
+function trackPath(cx, cy, parent, child) {
+  const [px, py] = onRing(cx, cy, parent.r, parent.a);
+  const [bx, by] = onRing(cx, cy, child.r, child.a);
   let turn = child.a - parent.a;
   while (turn > Math.PI) turn -= Math.PI * 2;
   while (turn < -Math.PI) turn += Math.PI * 2;
@@ -2624,11 +2544,12 @@ function trackPath(center, parent, child) {
   if (parent.r < 1 || Math.abs(turn) < 0.002) {
     return `M ${n2(px)} ${n2(py)} L ${n2(bx)} ${n2(by)}`;
   }
-  const [ax, ay] = onRing(center, parent.r, child.a);
+  const [ax, ay] = onRing(cx, cy, parent.r, child.a);
   const sweep = turn > 0 ? 1 : 0;
   const large = Math.abs(turn) > Math.PI ? 1 : 0;
-  return `M ${n2(px)} ${n2(py)} A ${n2(parent.r)} ${n2(parent.r)} 0 ${large} ${sweep} `
-    + `${n2(ax)} ${n2(ay)} L ${n2(bx)} ${n2(by)}`;
+  // 輪が楕円なので、弧の半径も縦だけ伸ばす。
+  return `M ${n2(px)} ${n2(py)} A ${n2(parent.r)} ${n2(parent.r * GRID.aspect)} 0 ${large} `
+    + `${sweep} ${n2(ax)} ${n2(ay)} L ${n2(bx)} ${n2(by)}`;
 }
 
 function mapPixel(name, x, y, size, overrides = null) {
@@ -2649,16 +2570,16 @@ function halo(x, y, r, rgb, steps) {
 }
 
 // 紙の斑。描き直すたびに動かないよう、道ごとの種から決める。
-function starfield(size, seed) {
+function starfield(view, seed) {
   let state = seed * 9301 + 49297;
   const next = () => {
     state = (state * 9301 + 49297) % 233280;
     return state / 233280;
   };
   const dots = [];
-  for (let i = 0; i < Math.round(size / 9); i += 1) {
-    const x = Math.round(next() * size);
-    const y = Math.round(next() * size);
+  for (let i = 0; i < Math.round((view.w + view.h) / 18); i += 1) {
+    const x = Math.round(view.x + next() * view.w);
+    const y = Math.round(view.y + next() * view.h);
     const bright = next() > 0.82;
     dots.push(`<rect x="${x}" y="${y}" width="${bright ? 2 : 1}" height="${bright ? 2 : 1}"
       fill="${SPHERE.fleck}" />`);
@@ -2667,56 +2588,13 @@ function starfield(size, seed) {
 }
 
 // 凡例の軌道も、盤と同じ「下敷きの上に細い線」で見せる。
-function trackSwatch(kind) {
-  const bed = kind === 'abandoned' ? SPHERE.bedDim : SPHERE.bed;
-  const line = { done: '#9c7325', lit: '#e6bb56', abandoned: '#3a2c17' }[kind];
-  return `<svg class="swatch" viewBox="0 0 24 12" width="24" height="12"
-    aria-hidden="true" focusable="false">
-    <path d="M0 6 H24" stroke="${bed}" stroke-width="7" stroke-linecap="round" />
-    <path d="M0 6 H24" stroke="${line}" stroke-width="2"
-      ${kind === 'abandoned' ? 'stroke-dasharray="2 4"' : ''}
-      ${kind === 'lit' ? 'stroke-dasharray="5 4"' : ''} />
-  </svg>`;
-}
-
-// 凡例の節。盤の上と同じ輪と滲みで出す。
-function nodeSwatch(kind) {
-  const hue = NODE_HUE[kind];
-  return `<svg class="swatch swatch-node" viewBox="0 0 22 22" width="22" height="22"
-    aria-hidden="true" focusable="false">
-    ${halo(11, 11, 6, hue.glow, [[2, 0.22], [4, 0.1]])}
-    <circle cx="11" cy="11" r="6" fill="${SPHERE.core}" stroke="${hue.ring}"
-      stroke-width="2" />
-  </svg>`;
-}
-
-/* 節が1つきりの道は、盤に起こしても輪が1つ描かれるだけで軌道が無い。
-   それが何十本も続くと、ダンジョンが「まだ何もしていないもの」の一覧に化ける。
-   掘った道だけを盤にして、入口しか無いものは押せる粒として畳む。 */
-function roadsOf(region) {
-  const dug = region.roads.filter((road) => road.totals.corridors > 0);
-  const seeds = region.roads.filter((road) => road.totals.corridors === 0);
-  return (
-    dug.map(roadMap).join('') +
-    (seeds.length
-      ? `<div class="seeds">${seeds
-          .map(
-            (road) => `<a class="seed" href="#/${road.type}/${road.id}">
-              ${nodeSwatch(road.type)}<span>${esc(road.title)}</span>
-            </a>`,
-          )
-          .join('')}</div>`
-      : '')
-  );
-}
-
 let mapSeq = 0;
 
-function roadMap(root) {
-  const { nodes, center, maxDepth, size } = layoutRoad(root);
+function boardMap(roads) {
+  const { nodes, cx, cy, maxDepth, first, view } = layoutBoard(roads);
   const uid = (mapSeq += 1);
 
-  // 入口から、いちばん奥の掘削中の先端まで。灯すのはこの1本だけにする。
+  // 盤ぜんたいで、いちばん奥の掘削中の先端まで。灯すのはこの1本だけにする。
   // 掘削中を全部灯すと盤が金色に埋まって、かえってどこへ向かうのか分からなくなる。
   const frontier = nodes
     .filter((node) => node.corridor?.mission.status === 'active')
@@ -2733,8 +2611,9 @@ function roadMap(root) {
   /* 軌道の案内線。節が乗る輪を薄く先に敷く。 */
   const guides = [];
   for (let depth = 1; depth <= maxDepth; depth += 1) {
-    guides.push(`<circle cx="${center}" cy="${center}"
-      r="${n2(GRID.first + (depth - 1) * GRID.ring)}" fill="none"
+    const rx = first + (depth - 1) * GRID.ring;
+    guides.push(`<ellipse cx="${n2(cx)}" cy="${n2(cy)}" rx="${n2(rx)}"
+      ry="${n2(rx * GRID.aspect)}" fill="none"
       stroke="${SPHERE.guide}" stroke-width="1" />`);
   }
 
@@ -2743,7 +2622,7 @@ function roadMap(root) {
     if (!node.parent) continue;
     const status = node.kind === 'cauldron' ? 'done' : node.corridor.mission.status;
     const on = lit.has(node.id);
-    const d = trackPath(center, node.parent, node);
+    const d = trackPath(cx, cy, node.parent, node);
 
     beds.push(`<path d="${d}" fill="none" stroke="${
       status === 'abandoned' ? SPHERE.bedDim : SPHERE.bed
@@ -2756,10 +2635,10 @@ function roadMap(root) {
       ${on ? 'stroke-dasharray="6 5"' : ''} />`);
 
     // 軌道には名前を置かない。節の名前だけで読める。
-    // 宝箱になったミッションだけ、外へ抜ける手前に印を置く。
+    // 宝箱になったプロセスだけ、外へ抜ける手前に印を置く。
     if (node.kind !== 'cauldron' && node.corridor.mission.is_legacy) {
-      const [mx, my] = onRing(center, node.r - GRID.node - 11, node.a);
-      ink.push(mapPixel('chest', mx, my, 11));
+      const [mx, my] = onRing(cx, cy, node.r - GRID.node - 11, node.a);
+      ink.push(mapPixel('spark', mx, my, 11));
     }
   }
 
@@ -2784,7 +2663,8 @@ function roadMap(root) {
     const type = isCauldron ? 'cauldron' : node.room.type;
     const hue = NODE_HUE[type] ?? NODE_HUE.log;
     const legacy = !isCauldron && node.room.is_legacy;
-    const r = node.depth === 0 ? GRID.node + 4 : GRID.node;
+    // 入口はひと回り大きくして、外へ伸びた先の節と見分けが付くようにする。
+    const r = node.depth === 1 ? GRID.node + 3 : GRID.node;
 
     glows.push(
       halo(x, y, r, hue.glow, lit.has(node.id) || legacy
@@ -2822,15 +2702,11 @@ function roadMap(root) {
       );
     }
 
-    /* 札。中心の節だけ真下に、あとは外へ向けて置く。 */
+    /* 札。外へ向けて置く。 */
     const title = isCauldron ? node.cauldron.title : node.room.title;
-    const [lx, ly] = node.depth === 0
-      ? [x, y - r - 14]
-      : onRing(center, node.r + r + 15, node.a);
+    const [lx, ly] = onRing(cx, cy, node.r + r + 15, node.a);
     const cos = Math.cos(node.a);
-    const anchor = node.depth === 0 || Math.abs(cos) < 0.25
-      ? 'middle'
-      : cos > 0 ? 'start' : 'end';
+    const anchor = Math.abs(cos) < 0.25 ? 'middle' : cos > 0 ? 'start' : 'end';
     ink.push(
       `<text class="map-node${legacy ? ' is-legacy' : ''}" x="${n2(lx)}" y="${n2(ly + 4)}"
         text-anchor="${anchor}">${esc(clip(title, 6))}</text>`,
@@ -2843,141 +2719,88 @@ function roadMap(root) {
     }
   }
 
+  /* 盤は1枚きり。幅にも高さにも合わせて縮め、全部を1画面に収める。
+     width/height を書かずに viewBox だけ渡すと、枠のほうが寸法を決める。 */
   return `
-    <div class="map-scroll" data-center="${n2(size / 2)}">
-      <svg class="map" viewBox="0 0 ${n2(size)} ${n2(size)}" width="${n2(size)}"
-           height="${n2(size)}" role="img" aria-label="${esc(root.title)} の盤">
-        <rect width="${n2(size)}" height="${n2(size)}" fill="${SPHERE.space}" />
-        ${starfield(size, uid)}${guides.join('')}
+    <div class="board">
+      <svg class="map" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}"
+           preserveAspectRatio="xMidYMid meet" role="img" aria-label="アストロラーベの盤">
+        <rect x="${n2(view.x)}" y="${n2(view.y)}" width="${n2(view.w)}"
+              height="${n2(view.h)}" fill="${SPHERE.space}" />
+        ${starfield(view, uid)}${guides.join('')}
         ${beds.join('')}${lines.join('')}${glows.join('')}${bodies.join('')}${ink.join('')}
       </svg>
     </div>
   `;
 }
 
+/* 盤に載せる期間。null は既定（直近1か月）。
+   期間を指定したものがエフェメリスで、当時の盤をそのまま呼び出す。
+   （エフェメリス＝ある日付の天体の位置をまとめた暦表） */
+let dungeonRange = null;
+
 async function renderDungeon() {
   setActiveTab('dungeon');
-  setTopbar({ title: 'ダンジョン' });
+  setTopbar({ title: dungeonRange ? 'エフェメリス' : 'アストロラーベ' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const [regions, legacies] = await Promise.all([
-    api(`/dungeon${dungeonFilter === 'legacy' ? '?legacy=1' : ''}`),
-    api('/legacies'),
-  ]);
+  const query = dungeonRange
+    ? `?since=${dungeonRange.since}${dungeonRange.until ? `&until=${dungeonRange.until}` : ''}`
+    : '';
+  const { totals, roads } = await api(`/dungeon${query}`);
+
+  const digger = `
+    <details class="optional dig" ${dungeonRange ? 'open' : ''}>
+      <summary>${icon('hourglass')}<span>エフェメリス</span></summary>
+      <form class="dig-form" id="dig-form">
+        <div class="row">
+          <div class="field">
+            <input id="dig-from" type="date" value="${esc(dungeonRange?.since ?? '')}" />
+          </div>
+          <div class="field">
+            <input id="dig-to" type="date" value="${esc(dungeonRange?.until ?? '')}" />
+          </div>
+        </div>
+        <div class="btn-row">
+          ${dungeonRange ? '<button type="button" class="ghost" id="dig-now">いま</button>' : ''}
+          <button type="submit" class="primary">合わせる</button>
+        </div>
+      </form>
+    </details>`;
 
   viewEl.innerHTML = `
-    <div class="filters">
-      <button class="filter" data-filter="all" aria-pressed="${dungeonFilter === 'all'}">全区画</button>
-      <button class="filter" data-filter="legacy" aria-pressed="${
-        dungeonFilter === 'legacy'
-      }">宝箱のある道</button>
-    </div>
-
-    <details class="optional">
-      <summary>凡例</summary>
-      <div class="map-legend">
-        <span>${nodeSwatch('idea')}アイデア</span>
-        <span>${nodeSwatch('log')}ログ</span>
-        ${SHOW.cauldron ? `<span>${nodeSwatch('cauldron')}大釜</span>` : ''}
-        <span>${trackSwatch('done')}通った軌道</span>
-        <span>${trackSwatch('lit')}灯りの軌道</span>
-        <span>${trackSwatch('abandoned')}崩落</span>
-        <span>${icon('chest')}宝箱</span>
-      </div>
-    </details>
-
+    ${digger}
     ${
-      regions.length
-        ? regions
-            .map(
-              (region) => `
-      <div class="section-title">${esc(region.tag ? region.tag.name : '未踏')}<span
-        class="section-count">${region.totals.roads}本</span></div>
-      <div class="region">
-        <div class="region-stat">
-          <span>節 ${region.totals.rooms}</span>
-          ${
-            // 掘っていない区画では軌道も深さも常に 0 と 1 になる。出しても読む値が無い。
-            region.totals.corridors
-              ? `<span>軌道 ${region.totals.corridors}</span>
-                 <span>最深 ${region.totals.depth}</span>`
-              : ''
-          }
-          ${
-            SHOW.cauldron && region.totals.cauldrons
-              ? `<span>大釜 ${region.totals.cauldrons}</span>`
-              : ''
-          }
-          ${
-            region.totals.legacies
-              ? `<span class="hot">宝箱 ${region.totals.legacies}</span>`
-              : ''
-          }
-        </div>
-        <div class="region-stat">
-          <span>費やした ${esc(fmtTime(region.totals.consumed_time))} · ${esc(
-            fmtMoney(region.totals.consumed_money),
-          )}</span>
-          ${
-            region.totals.planned_time || region.totals.planned_money
-              ? `<span class="hot">これから ${esc(fmtTime(region.totals.planned_time))} · ${esc(
-                  fmtMoney(region.totals.planned_money),
-                )}</span>`
-              : ''
-          }
-        </div>
-        ${roadsOf(region)}
-      </div>`,
-            )
-            .join('')
-        : '<div class="empty">まだ盤がありません</div>'
-    }
-
-    <div class="section-title">宝物庫</div>
-    ${
-      legacies.length
-        ? `<div class="list">${legacies
-            .map(
-              (item) => `
-        <div class="card is-legacy kind-${item.type === 'log' ? 'log' : 'mission'}">
-          <div class="card-top">
-            <span class="badge ${item.type === 'log' ? 'log' : 'done'}">${
-              item.type === 'log' ? 'ログ' : '完了ミッション'
-            }</span>
-            <span class="spacer"></span>
-            <span>${esc(fmtDate(item.at))}</span>
-          </div>
-          <div class="card-title">
-            ${icon(item.type === 'log' ? 'footsteps' : 'parchment')}
-            <span>${esc(item.title)}</span>
-            ${icon('chest', 'legacy-mark')}
-          </div>
-          <div class="card-meta">
-            <span>${esc(fmtTime(item.type === 'log' ? item.time_spent : item.estimated_time))}</span>
-            <span>${esc(fmtMoney(item.type === 'log' ? item.money_spent : item.estimated_money))}</span>
-          </div>
-          <div class="btn-row">${legacyButton(item.type, item.id, true)}</div>
-        </div>`,
-            )
-            .join('')}</div>`
-        : '<div class="empty">まだ宝箱はありません</div>'
+      roads.length
+        ? `<div class="board-stat">
+             <span>節 ${totals.rooms}</span>
+             ${totals.corridors ? `<span>軌道 ${totals.corridors}</span>` : ''}
+             ${totals.depth > 1 ? `<span>最深 ${totals.depth}</span>` : ''}
+             ${SHOW.cauldron && totals.cauldrons ? `<span>大釜 ${totals.cauldrons}</span>` : ''}
+             ${totals.legacies ? `<span class="hot">輝き ${totals.legacies}</span>` : ''}
+             <span class="spacer"></span>
+             <span>${esc(fmtTime(totals.consumed_time))} · ${esc(
+               fmtMoney(totals.consumed_money),
+             )}</span>
+           </div>
+           ${boardMap(roads)}`
+        : '<div class="empty">この期間の盤はありません</div>'
     }
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter')) {
-    button.addEventListener('click', () => {
-      dungeonFilter = button.dataset.filter;
-      renderDungeon();
-    });
-  }
-  // 盤は画面より大きいので、開いた時は入口（中心）が見えている状態にする。
-  for (const board of viewEl.querySelectorAll('.map-scroll[data-center]')) {
-    const center = Number(board.dataset.center);
-    board.scrollLeft = center - board.clientWidth / 2;
-    board.scrollTop = center - board.clientHeight / 2;
-  }
+  document.getElementById('dig-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const since = document.getElementById('dig-from').value;
+    const until = document.getElementById('dig-to').value;
+    if (!since) return toast('いつからを入れてください', true);
+    dungeonRange = { since, until: until || null };
+    renderDungeon();
+  });
 
-  wireLegacy(viewEl, renderDungeon);
+  document.getElementById('dig-now')?.addEventListener('click', () => {
+    dungeonRange = null;
+    renderDungeon();
+  });
 }
 
 /* ---------- ページ送り ----------
@@ -3014,8 +2837,33 @@ function goToPage(next) {
 // 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
 let toFirstPage = true;
 
+/* この枚数までは、めくらずに縦へ流す。
+   1画面に少し足りないだけで送る操作を強いるほうが、指の手数が増える。
+   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。 */
+const SCROLL_LIMIT = 2;
+let scrolls = false;
+
 // 中身が変わるたびに、何ページに割れたかを測り直す。
 function refitPages() {
+  /* 盤の画面だけは別扱い。段にも割らず流しもせず、残りの高さを全部使う。
+     盤は1枚で1画面に収まるように縮むので、送る先も流す先も無い。 */
+  const board = viewEl.querySelector('.board');
+  viewEl.classList.toggle('is-board', Boolean(board));
+  if (board) {
+    viewEl.classList.remove('is-scroll');
+    viewEl.style.columnWidth = '';
+    pageTotal = 1;
+    page = 0;
+    scrolls = true;
+    pagerEl.hidden = true;
+    document.body.classList.remove('is-paged');
+    toFirstPage = false;
+    return;
+  }
+
+  // 判定はいつも段組みの状態で測る。流したまま測ると必ず1ページになり、
+  // 一度縦へ倒れたらめくりへ戻れなくなる。
+  viewEl.classList.remove('is-scroll');
   const { width, gap, step, padX } = pageMetrics();
   viewEl.style.columnWidth = `${width}px`;
   const flowed = Math.max(0, viewEl.scrollWidth - padX);
@@ -3023,9 +2871,18 @@ function refitPages() {
   const split = total !== pageTotal;
 
   pageTotal = total;
-  pagerEl.hidden = pageTotal < 2;
-  document.body.classList.toggle('is-paged', pageTotal > 1);
-  goToPage(toFirstPage || split ? 0 : page);
+  scrolls = total <= SCROLL_LIMIT;
+  viewEl.classList.toggle('is-scroll', scrolls);
+  pagerEl.hidden = scrolls || pageTotal < 2;
+  document.body.classList.toggle('is-paged', !scrolls && pageTotal > 1);
+
+  if (scrolls) {
+    viewEl.scrollLeft = 0;
+    if (toFirstPage || split) viewEl.scrollTop = 0;
+    page = 0;
+  } else {
+    goToPage(toFirstPage || split ? 0 : page);
+  }
   toFirstPage = false;
 }
 
@@ -3048,11 +2905,11 @@ window.addEventListener('resize', scheduleRefit);
 
 /* 指で横に払ってもページを送る。
    地図・時間の表・文字入力の中では、そちらの操作を邪魔しないよう手を出さない。 */
-const KEEPS_TOUCH = '.map-scroll, .tg, input, textarea, select, .tag-bar, .filters';
+const KEEPS_TOUCH = '.board, .tg, input, textarea, select, .filters';
 let swipe = null;
 
 viewEl.addEventListener('pointerdown', (event) => {
-  if (event.target.closest(KEEPS_TOUCH)) return;
+  if (scrolls || event.target.closest(KEEPS_TOUCH)) return;
   swipe = { x: event.clientX, y: event.clientY };
 });
 
@@ -3072,7 +2929,7 @@ viewEl.addEventListener('pointercancel', () => {
 
 // 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
 window.addEventListener('keydown', (event) => {
-  if (event.target.closest('input, textarea, select')) return;
+  if (scrolls || event.target.closest('input, textarea, select')) return;
   if (event.key === 'ArrowRight') goToPage(page + 1);
   if (event.key === 'ArrowLeft') goToPage(page - 1);
 });
@@ -3099,13 +2956,18 @@ async function route() {
   try {
     let match;
     if (hash === '/home') return await renderHome();
-    if (hash === '/stream') return await renderStream();
+    if (hash === '/stream' || hash.startsWith('/stream?')) {
+      // ユーズドから種別を指定して来られるようにする。
+      const type = new URLSearchParams(hash.split('?')[1] ?? '').get('type');
+      if (type && STREAM_TYPES.includes(type)) streamFilter = type;
+      return await renderStream();
+    }
     if (hash === '/missions') return await renderMissions();
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/recurrences') return await renderRecurrences();
-    if (hash === '/tags') return await renderTags();
     if (hash === '/vault') return await renderVault();
+    if (hash === '/used') return await renderUsed();
     if (hash === '/spells') return await renderSpells();
     if ((match = hash.match(/^\/spell\/(\d+)$/))) {
       return await renderSpell(Number(match[1]));

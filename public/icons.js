@@ -412,7 +412,7 @@ const CHEVRON = {
 };
 
 // 横方向の連続をまとめて矩形にする。
-function toRects({ rows, palette }) {
+export function toRects({ rows, palette }) {
   const parts = [];
   rows.forEach((row, y) => {
     let x = 0;
@@ -489,6 +489,147 @@ const HELM = {
   },
 };
 
+// 週の紙。7枚並べて曜日を数える。右下が折れていて、左の縁が少し欠けている。
+// 面は白より温かくしておく。白いカードの上に白い紙を置くと枠しか見えず、
+// 「点線の四角」になってしまう。欠けも1か所だけ。増やすと点線に戻る。
+const SHEET = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '...ppppppppppo..',
+    '..oppppppppppo..',
+    '..opppppppppof..',
+    '..oppppppppoff..',
+    '..opppppppoffd..',
+    '..oppppppoffdd..',
+    '..oooooooffddd..',
+    '................',
+  ],
+  palette: { o: TRAIL, p: '#f6f2e3', f: '#ded2b0', d: '#c2b287' },
+};
+
+// 済んだ日の紙。印を入れる。
+const SHEET_DONE = {
+  rows: [
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..oppppppppppo..',
+    '..oppppppppppo..',
+    '..opppppppvppo..',
+    '..oppppppvvppo..',
+    '..opvpppvvvppo..',
+    '...pvvpvvvpppo..',
+    '..opvvvvvppppo..',
+    '..oppvvvppppof..',
+    '..opppvppppoff..',
+    '..opppppppoffd..',
+    '..oppppppoffdd..',
+    '..oooooooffddd..',
+    '................',
+  ],
+  palette: { o: TRAIL, p: '#f6f2e3', f: '#ded2b0', d: '#c2b287', v: GREEN },
+};
+
+// プロセス＝調合の1工程。丸底フラスコ。棚に並ぶものと同じ形にしてある。
+const FLASK = {
+  rows: [
+    '......cccc......',
+    '......cccc......',
+    '......oggo......',
+    '......oggo......',
+    '......oggo......',
+    '.....og..go.....',
+    '....og....go....',
+    '...og.lllll.o...',
+    '..og.lllllll.o..',
+    '..ogllllllllgo..',
+    '.ogllllllllllgo.',
+    '.ogllllllllllgo.',
+    '.ogllllllllllgo.',
+    '..ogllllllllgo..',
+    '..oogllllllgoo..',
+    '....oooooooo....',
+  ],
+  palette: { o: '#5f6d73', g: '#cfe0d8', c: WOOD, l: GREEN },
+};
+
+// インゴット＝炉から出てきた地金。意思や思いつきを、溶かして固めたもの。
+// 2本を積んで、上の1本の面を明るくする。1本だけだと札の中で潰れて読めない。
+const INGOT = {
+  rows: [
+    '................',
+    '................',
+    '......oooooo....',
+    '.....ohhhhhho...',
+    '....ohhhhhhhho..',
+    '....obbbbbbbbo..',
+    '....obbbbbbbbo..',
+    '....oddddddddo..',
+    '..oooooooooooo..',
+    '.ohhhhhhhhhhhho.',
+    'ohhhhhhhhhhhhhho',
+    'obbbbbbbbbbbbbbo',
+    'obbbbbbbbbbbbbbo',
+    'oddddddddddddddo',
+    '.oooooooooooooo.',
+    '................',
+  ],
+  palette: { o: GOLD_DARK, h: '#f0c96a', b: GOLD, d: '#6b4f14' },
+};
+
+// アストロラーベ＝天体の位置を読む器具。同心の輪と、中を渡す横木。
+const ASTROLABE = {
+  rows: [
+    '................',
+    '.....oooooo.....',
+    '...oo......oo...',
+    '..o..oooooo..o..',
+    '.o..o......o..o.',
+    '.o.o..oooo..o.o.',
+    'o..o.o....o.o..o',
+    'o..o.o....o.o..o',
+    'o..o.o....o.o..o',
+    'o..o..oooo..o..o',
+    '.o.o........o.o.',
+    '.o..o......o..o.',
+    '..o..oooooo..o..',
+    '...oo......oo...',
+    '.....oooooo.....',
+    '................',
+  ],
+  palette: { o: STONE },
+};
+
+// 輝き。レガシーの節に添える四光の星。
+const SPARK = {
+  rows: [
+    '................',
+    '................',
+    '.......gg.......',
+    '.......gg.......',
+    '......gggg......',
+    '..g...gggg...g..',
+    '...gg.gggg.gg...',
+    '....gggggggg....',
+    '....gggggggg....',
+    '...gg.gggg.gg...',
+    '..g...gggg...g..',
+    '......gggg......',
+    '.......gg.......',
+    '.......gg.......',
+    '................',
+    '................',
+  ],
+  palette: { g: GOLD },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -509,6 +650,12 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  astrolabe: ASTROLABE,
+  spark: SPARK,
+  ingot: INGOT,
+  flask: FLASK,
+  sheet: SHEET,
+  'sheet-done': SHEET_DONE,
 };
 
 const RENDERED = Object.fromEntries(
@@ -542,8 +689,8 @@ export const KIND_ICON = {
   idea: 'stone',
   food: 'provision',
   gear: 'helm',
-  spell: 'sigil',
+  spell: 'ingot',
   log: 'footsteps',
-  mission: 'parchment',
+  mission: 'flask',
   recurrence: 'hourglass',
 };
