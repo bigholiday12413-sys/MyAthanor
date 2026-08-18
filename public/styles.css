@@ -298,71 +298,34 @@ body::after {
 
 /* ---------- view ---------- */
 
-/* 中身は段組みに流し込む。1段＝1画面なので、各画面のマークアップには手を入れずに
-   ページが割れる。送りは scrollLeft で行う（overflow:hidden でも JS からは動く）。 */
+/* 画面は縦に流す。1画面ぶんずつ横へ送る作りを持っていたが、やめた。
+   組んである画面ほど枠が境で割れず、段の末尾に白が残って、同じ中身が
+   3ページにも4ページにもなる。どのページに何が居るのかも覚えていられない。
+   順に下へ辿れるほうが、探す手数が少なくて済む。 */
 .view {
   flex: 1;
   min-height: 0;
   padding: var(--pad);
   overflow: hidden;
-  column-gap: calc(var(--pad) * 2);
-  column-fill: auto;
 }
 
-/* 盤の画面。段にも割らず流しもせず、残りの高さを全部盤に渡す。 */
+/* 盤の画面。流さず、残りの高さを全部盤に渡す。
+   盤は枠の中で自分で繰るので、外側まで動くと二重になる。 */
 .view.is-board {
   display: flex;
   flex-direction: column;
-  column-width: auto !important;
-  columns: auto;
   overflow: hidden;
 }
 
-/* 2ページぶんまでは段に割らず、そのまま縦へ流す。
-   1画面に少し足りないだけで送らせるより、指で流したほうが早い。 */
 .view.is-scroll {
-  column-width: auto !important;
-  columns: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   /* 縦に流すことを明示する。書かないと、この指づかいを誰が取るのかの判断が
-     ブラウザ任せになり、外側（めくり）に持っていかれることがある。
-     つまむ拡大は残す。取り上げると字を大きくして読む手が塞がる。 */
+     ブラウザ任せになる。つまむ拡大は残す。取り上げると字を大きくして読む手が塞がる。 */
   touch-action: pan-y pinch-zoom;
   /* 末尾が「書き留める」の下に隠れないよう、そのぶん空けておく。 */
   padding-bottom: calc(var(--pad) + 62px);
-}
-
-/* 枠のあるものはページの境で割らない。断ち切られると別物に見えてしまう。
-   ただし大釜のように1画面近い高さになりうる容器まで割らないと、
-   入りきらないぶんが丸ごと次ページへ送られて、前のページが白く空く。
-   そういう容器は割れるようにしておき、枠は割れた先にも引き直す。 */
-.card,
-.panel,
-.map-legend,
-.tubes,
-.tg,
-.vault-row,
-.material,
-.budget-row,
-.occurrence-row,
-.stat-line,
-.filters,
-.filter-bar {
-  break-inside: avoid;
-}
-
-.cauldron,
-.floor,
-.list {
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-/* 見出しだけが前のページに取り残されないようにする。 */
-.section-title {
-  break-after: avoid;
 }
 
 .section-title {
@@ -865,6 +828,12 @@ body::after {
 .filter {
   flex: 1;
   min-height: 44px;
+  /* 印を添える札があるので、字と横に並べる。
+     text-align では、塊で描かれる絵が独りだけ次の行へ落ちる。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   padding: 8px 4px;
   font-family: var(--serif);
   font-size: 12px;
@@ -895,12 +864,23 @@ body::after {
 }
 
 .field label {
-  display: block;
+  /* 印を添える見出しがあるので、字と横に並べる。
+     block のままだと、塊で描かれる絵が独りだけ次の行へ落ちる。 */
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 5px;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--dim);
+}
+
+/* 見出しに添える印。字と同じくらいの背丈にする。 */
+.field label .px {
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 
 
@@ -2117,18 +2097,18 @@ a.room-title {
 
 .flask .flask-cycle {
   position: absolute;
-  top: -1px;
+  top: -2px;
   right: 0;
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 /* 札の上の循環の印。題のうしろに小さく添える。 */
 .cycle-mark {
   flex: none;
-  width: 13px;
-  height: 13px;
-  margin-left: 4px;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
 }
 
 /* 本体だけ。重ねる印には効かせない。 */
@@ -2140,21 +2120,18 @@ a.room-title {
 
 /* 棚番。フラスコと同じ段を、同じ棚板の上で歩く。
    幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。
-   位置と向きと柄で animation が3枚要るので、入れ子にして1枚ずつ持たせる。
-   道筋は本数で変わるため、@keyframes の名前と長さは app.js が入れる。 */
+   位置と向きと柄で動きが3枚要るので、入れ子にして1枚ずつ持たせる。
+   道筋は本数で変わるため、動きそのものは app.js が element.animate() で付ける。 */
 .keeper {
   position: absolute;
   left: 0;
   bottom: 0;
   display: block;
   width: calc((100% - (var(--n, 1) - 1) * 4px) / var(--n, 1));
-  animation-iteration-count: infinite;
 }
 
-/* 折り返したら体ごと裏返して、進む向きに顔を向ける。 */
 .keeper-face {
   display: block;
-  animation-iteration-count: infinite;
 }
 
 /* 柄を重ねる箱。中身が全部浮いているので、縦横比で背を確保する。 */
@@ -2167,33 +2144,22 @@ a.room-title {
   aspect-ratio: 16 / 20;
 }
 
-/* 3枚を同じ場所に重ね、表に出す1枚だけを不透明にする。 */
+/* 3枚を同じ場所に重ね、表に出す1枚だけを不透明にする。
+   動きは JS が付ける。動かないとき（動きを控える設定）は1枚目が出たままになる。 */
 .keeper-frame {
   position: absolute;
   inset: 0;
   display: block;
   opacity: 0;
-  animation-iteration-count: infinite;
 }
 
-/* 動かないときは1枚しか置かないので、それを出しておく。 */
-.keeper.is-still .keeper-frame { opacity: 1; }
+.keeper-frame:first-child { opacity: 1; }
 
 /* フラスコと同じ大きさで立たせる。並んだときに背丈が揃う。 */
 .keeper-px {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-/* 動きを減らす設定なら、いちばん左に立たせたままにする。 */
-@media (prefers-reduced-motion: reduce) {
-  .keeper,
-  .keeper-face,
-  .keeper-frame { animation: none; }
-
-  .keeper .keeper-frame { opacity: 0; }
-  .keeper .keeper-frame:first-child { opacity: 1; }
 }
 
 /* 棚板。フラスコが乗っている板を1本の線で出す。 */
@@ -2259,47 +2225,6 @@ a.room-title {
 
 /* ---------- ページ送り ---------- */
 
-.pager {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  padding: 0 var(--pad);
-  background: var(--chrome);
-  border-top: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--edge);
-}
-
-.pager[hidden] {
-  display: none;
-}
-
-/* 横払いでも送れるが、送れると分かる前に狙うのはこの矢印なので、
-   ここだけは指の幅（44px）を切らせない。 */
-.pager-arrow {
-  width: 52px;
-  height: 44px;
-  padding: 0;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--green-dark);
-}
-
-.pager-arrow:disabled {
-  color: #b0b0a2;
-  border-color: var(--line-soft);
-  background: #f1f0e8;
-}
-
-.pager-count {
-  min-width: 58px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--dim);
-  text-align: center;
-}
-
 /* ---------- その他 ---------- */
 
 .link {
@@ -2310,12 +2235,6 @@ a.room-title {
   color: var(--green-dark);
   text-decoration: none;
   border-bottom: 1px dotted var(--green-dark);
-}
-
-/* ページ送りが出ているぶんだけ、下に浮かせているものを持ち上げる。 */
-body.is-paged .fab,
-body.is-paged .toast {
-  bottom: calc(102px + env(safe-area-inset-bottom));
 }
 
 .toast {
@@ -2729,7 +2648,8 @@ textarea {
 
 .tg-top button {
   flex: none;
-  padding: 6px 10px;
+  min-height: 44px;
+  padding: 6px 12px;
   font-size: 11px;
   letter-spacing: 0;
 }
@@ -2738,11 +2658,22 @@ textarea {
   display: grid;
   grid-template-columns: 22px repeat(7, 1fr);
   gap: 1px;
-  /* なぞって塗るあいだ画面がスクロールしないようにする。
-     時刻の目盛り側は通常どおり触れるので、そこを持てばスクロールできる。 */
-  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* 塗るあいだだけ指を取る。表は画面の半分以上を覆うので、いつでも取っていると
+   流す場所が無くなり、掴んだつもりで週が塗り変わってしまう。 */
+.tg.is-paint {
+  touch-action: none;
+}
+
+/* 塗る最中だと分かるようにする。押されたままの札に見せる。 */
+#tg-paint[aria-pressed='true'] {
+  color: #f4f4ec;
+  background: var(--green);
+  border-color: var(--green-deep);
+  box-shadow: inset 2px 2px 0 var(--green-hi), inset -2px -2px 0 var(--green-dark);
 }
 
 .tg-corner {
@@ -2765,7 +2696,6 @@ textarea {
   color: var(--dim);
   text-align: right;
   padding-right: 3px;
-  touch-action: auto;
 }
 
 .tg-hour.is-mark {

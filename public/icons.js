@@ -757,31 +757,20 @@ const TIMEGRID = {
 
 // 循環。2本の弧が輪になって追いかけ合う印。繰り返すプロセスに添える。
 // 線は2ドット。1ドットだと13px まで縮めたとき輪が消えて点線に見える。
+/* 循環の印。これだけドット絵にしない。
+
+   16x16 の枡では、輪と2本の鏃を同時に置くと、どちらも潰れて団子になる。
+   札に添える大きさ（11〜13px）だと、なおさら矢印だと読めない。
+   ここは「循環だ」と一目で分かることが要るので、滑らかな線で描いて
+   白く塗り、墨で縁取る。紙の上でも管の上でも、白い札として浮く。 */
 const CYCLE = {
-  rows: [
-    '................',
-    '.....gggggg.....',
-    '...gggggggggg...',
-    '..ggg......ggg..',
-    '..gg........ggg.',
-    '.gg..........ggg',
-    '.gg...........gg',
-    '.gg.............',
-    '.............gg.',
-    'gg...........gg.',
-    'ggg..........gg.',
-    '.ggg........gg..',
-    '..ggg......ggg..',
-    '...gggggggggg...',
-    '.....gggggg.....',
-    '................',
-  ],
-  palette: { g: GREEN_DARK },
+  body:
+    '<path d="M 1.99 10.19 A 6.4 6.4 0 0 1 9.76 1.85 L 10.21 0.31 L 11.49 4.86 ' +
+    'L 8.39 6.65 L 8.83 5.12 A 3.0 3.0 0 0 0 5.18 9.03 Z ' +
+    'M 14.01 5.81 A 6.4 6.4 0 0 1 6.24 14.15 L 5.79 15.69 L 4.51 11.14 ' +
+    'L 7.61 9.35 L 7.17 10.88 A 3.0 3.0 0 0 0 10.82 6.97 Z" ' +
+    `fill="#ffffff" stroke="${INK}" stroke-width="0.8" stroke-linejoin="round" />`,
 };
-
-
-
-
 
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
@@ -816,15 +805,19 @@ const SOURCES = {
   'sheet-done': SHEET_DONE,
 };
 
+// 滑らかに描くものは、そのまま持っている中身を使う。
 const RENDERED = Object.fromEntries(
-  Object.entries(SOURCES).map(([name, source]) => [name, toRects(source)]),
+  Object.entries(SOURCES).map(([name, source]) => [
+    name,
+    source.body ?? toRects(source),
+  ]),
 );
 
 // 地図など、外側の SVG に埋め込みたいときは矩形だけ取り出す。
 export function iconBody(name, overrides = null) {
   const source = SOURCES[name];
   if (!source) return '';
-  return overrides
+  return overrides && source.rows
     ? toRects({ rows: source.rows, palette: { ...source.palette, ...overrides } })
     : RENDERED[name];
 }
@@ -833,11 +826,13 @@ export function iconBody(name, overrides = null) {
 export function icon(name, className = '', overrides = null) {
   const source = SOURCES[name];
   if (!source) return '';
-  const body = overrides
+  const body = overrides && source.rows
     ? toRects({ rows: source.rows, palette: { ...source.palette, ...overrides } })
     : RENDERED[name];
+  // 枡で描いたものだけ枡に合わせる。滑らかに描くものに掛けると角が立つ。
+  const crisp = source.body ? '' : 'shape-rendering="crispEdges" ';
   return (
-    `<svg class="px ${className}" viewBox="0 0 16 16" shape-rendering="crispEdges" ` +
+    `<svg class="px ${className}" viewBox="0 0 16 16" ${crisp}` +
     `aria-hidden="true" focusable="false">${body}</svg>`
   );
 }

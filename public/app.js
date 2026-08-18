@@ -494,9 +494,6 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
-// 棚を描き直すたびに増やす。@keyframes の名前を毎回変えて、前のものと混ぜない。
-let shelfSeq = 0;
-
 // 1歩にかける秒数。急ぐものではないので、ゆっくり歩かせる。
 const KEEPER_STEP = 3;
 // 端まで行ったら、いなくなっている時間。奥へ引っ込んでいるつもり。
@@ -513,51 +510,86 @@ function keeperMark(name) {
 
 /* 棚番の動き。右へ歩き、端で消え、しばらくして戻ってくる、を繰り返す。
 
-   歩幅も止まる場所もフラスコの数で変わるので、@keyframes をその場で組む。
-   各keyframe に step-end を付けて、次の点まで値を保たせる。
-   こうすると中割りが起きず、ドット絵が半端な位置に来ない。
+   歩幅も止まる場所もフラスコの数で変わるので、道筋はその場で組む。
+   組んだものは @keyframes ではなく element.animate() に渡す。
+   刷ったCSSを差し込む形だと、規則が入るのと要素に名前が付くのとの前後で
+   動き出さないブラウザがあり、確かめようがない不確かさが残る。
+   JS から直に渡せばその前後関係が消えるうえ、動きを控える設定も
+   その場で見て決められる（CSS 側だと、要素に直接書いた指定に負ける）。
 
+   各点に step-end を付けて、次の点まで値を保たせる。
+   中割りが起きるとドット絵が半端な位置に来る。
    動かすのは transform と opacity だけなので、合成だけで済む。 */
-function keeperWalk(n, uid) {
+function keeperWalk(n) {
   /* 出来事を時間順に並べる。
      右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。 */
-  const events = [];
+  const stops = [];
   let t = 0;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) events.push({ t, pos: i, on: 1, face: 1 });
-  events.push({ t, pos: n - 1, on: 0, face: 1 });
+  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) stops.push({ t, pos: i, on: 1, face: 1 });
+  stops.push({ t, pos: n - 1, on: 0, face: 1 });
   t += KEEPER_AWAY;
   for (let i = 0; i < n; i += 1, t += KEEPER_STEP) {
-    events.push({ t, pos: n - 1 - i, on: 1, face: -1 });
+    stops.push({ t, pos: n - 1 - i, on: 1, face: -1 });
   }
-  events.push({ t, pos: 0, on: 0, face: -1 });
-  const total = t + KEEPER_AWAY;
+  stops.push({ t, pos: 0, on: 0, face: -1 });
+  const seconds = t + KEEPER_AWAY;
 
-  /* 最後の点から 100% までは、そのままの姿勢で消えている。
-     終端の keyframe が無いと元の値へ戻そうとするので、明示して置く。 */
-  const last = events[events.length - 1];
-  const stops = [...events, { ...last, t: total }];
-  const at = (time) => `${((time / total) * 100).toFixed(3)}%`;
-  const rule = (time, body) => `${at(time)} { ${body} animation-timing-function: step-end; }`;
+  /* 最後の点から終いまでは、そのままの姿勢で消えている。
+     終端が無いと元の値へ戻そうとするので、明示して置く。 */
+  stops.push({ ...stops[stops.length - 1], t: seconds });
+  return { seconds, stops };
+}
 
-  const walk = stops
-    .map((e) => rule(e.t, `transform: translateX(calc((100% + 4px) * ${e.pos})); opacity: ${e.on};`))
-    .join('\n');
-  const face = stops.map((e) => rule(e.t, `transform: scaleX(${e.face});`)).join('\n');
-  /* 柄は1歩ごとに送る。歩いている間だけ入れ替わればよいので、
-     何番目の出来事かをそのまま柄の番号にする。 */
-  const frames = KEEPER_FRAMES.map((_, k) =>
-    stops
-      .map((e, index) => rule(e.t, `opacity: ${index % KEEPER_FRAMES.length === k ? 1 : 0};`))
-      .join('\n'));
+function wireKeeper() {
+  const keeper = viewEl.querySelector('.keeper');
+  if (!keeper) return;
+  const dresses = [...keeper.querySelectorAll('.keeper-frame')];
+  // 動きを控える設定なら、いちばん左に立たせたままにする。
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-  return {
-    seconds: total,
-    css: `
-      @keyframes kw${uid} { ${walk} }
-      @keyframes kf${uid} { ${face} }
-      ${frames.map((body, k) => `@keyframes kp${uid}_${k} { ${body} }`).join('\n')}
-    `,
-  };
+  const n = Number(keeper.dataset.n);
+  const cycle = (offsets, opts) =>
+    dresses.forEach((dress, k) =>
+      dress.animate(
+        offsets.map(({ offset, index }) => ({
+          offset,
+          opacity: index % dresses.length === k ? 1 : 0,
+          easing: 'step-end',
+        })),
+        opts,
+      ));
+
+  /* フラスコが1本だけなら歩く先が無い。それでも布だけは動かす。
+     じっと固まっていると、居るのではなく描き損ねたように見える。 */
+  if (n < 2) {
+    const each = 1 / dresses.length;
+    return cycle(
+      [...dresses.map((_, index) => ({ offset: index * each, index })), { offset: 1, index: 0 }],
+      { duration: KEEPER_STEP * dresses.length * 1000, iterations: Infinity },
+    );
+  }
+
+  const { seconds, stops } = keeperWalk(n);
+  const opts = { duration: seconds * 1000, iterations: Infinity };
+  const at = (stop) => stop.t / seconds;
+
+  keeper.animate(
+    stops.map((stop) => ({
+      offset: at(stop),
+      // 持ち幅がフラスコ1つぶんなので、100%＋隙間 が隣までの距離になる。
+      transform: `translateX(calc((100% + 4px) * ${stop.pos}))`,
+      opacity: stop.on,
+      easing: 'step-end',
+    })),
+    opts,
+  );
+  // 折り返しでは体ごと裏返して、進む向きに顔を向ける。
+  keeper.querySelector('.keeper-face').animate(
+    stops.map((stop) => ({ offset: at(stop), transform: `scaleX(${stop.face})`, easing: 'step-end' })),
+    opts,
+  );
+  // 柄は1歩ごとに送る。何番目の出来事かをそのまま柄の番号にする。
+  cycle(stops.map((stop, index) => ({ offset: at(stop), index })), opts);
 }
 
 /* 丸底フラスコ。他の絵と同じくドット絵で描く。
@@ -655,28 +687,13 @@ function shelf(missions, weekEnd) {
   const n = shown.length;
   if (!n) return '';
 
-  /* 棚番。フラスコと同じ段をうろつく。持ち幅をフラスコ1つぶんに合わせてあるので、
-     100%＋隙間 がそのまま隣までの距離になる。
-     歩く柄は3枚を重ねて置き、表に出す1枚を差し替えて切り替える。
-     動かすのは transform と opacity だけなので、本数が増えても値段は変わらない。 */
-  const uid = (shelfSeq += 1);
-  const walk = n > 1 ? keeperWalk(n, uid) : null;
-  const dress = (k) =>
-    `<span class="keeper-frame"${
-      walk
-        ? ` style="animation-name:kp${uid}_${k};animation-duration:${walk.seconds}s"`
-        : ''
-    }>${keeperMark(KEEPER_FRAMES[k])}</span>`;
+  /* 棚番。フラスコと同じ段をうろつく。歩く柄は3枚を重ねて置き、
+     表に出す1枚を差し替えて切り替える。動きは wireKeeper() が付ける。 */
   const keeper = `
-    ${walk ? `<style>${walk.css}</style>` : ''}
-    <span class="keeper${walk ? '' : ' is-still'}" style="--n:${n}${
-      walk ? `;animation-name:kw${uid};animation-duration:${walk.seconds}s` : ''
-    }">
-      <span class="keeper-face"${
-        walk ? ` style="animation-name:kf${uid};animation-duration:${walk.seconds}s"` : ''
-      }>
+    <span class="keeper" style="--n:${n}" data-n="${n}">
+      <span class="keeper-face">
         <span class="keeper-frames">
-          ${walk ? KEEPER_FRAMES.map((_, k) => dress(k)).join('') : dress(0)}
+          ${KEEPER_FRAMES.map((name) => `<span class="keeper-frame">${keeperMark(name)}</span>`).join('')}
         </span>
       </span>
     </span>
@@ -784,6 +801,8 @@ async function renderHome() {
     }
 
   `;
+
+  wireKeeper();
 }
 
 /* ---------- ストリーム ---------- */
@@ -798,7 +817,7 @@ async function renderStream() {
   const items = await api(`/stream?type=${streamFilter}`);
 
   const body =
-    `<div class="list flow">${
+    `<div class="list">${
           items.length
             ? items.map(streamCard).join('')
             : '<div class="empty">まだ記録がありません</div>'
@@ -1541,7 +1560,7 @@ async function renderMissions() {
         </div>`;
       })()
     }
-    <div class="list flow" id="mission-list">
+    <div class="list" id="mission-list">
       ${
         missions.length
           ? missions.map((m) => missionCard(m)).join('')
@@ -1656,6 +1675,8 @@ async function renderSettings() {
     <div class="panel" id="time-grid-panel">
       <div class="tg-top">
         <span class="tg-total" id="tg-total"></span>
+        ${/* 塗るあいだだけ表が指を取る。ふだんは画面を流せるようにしておく。 */ ''}
+        <button type="button" id="tg-paint" aria-pressed="false">塗る</button>
         <button type="button" class="ghost" id="tg-clear">全部消す</button>
       </div>
       ${timeGridMarkup(grid)}
@@ -2122,8 +2143,19 @@ function wireTimeGrid(root, initial, fixed = 0) {
   // 固定費が無いときは引き算の行を出していないので、更新先も無い。
   const net = root.querySelector('#time-net');
   const surface = root.querySelector('.tg');
+  const paintBtn = root.querySelector('#tg-paint');
   let painting = false;
   let paintTo = '1';
+
+  /* 表は画面の半分以上を覆うので、いつでも指を取っていると流す場所が無くなる。
+     そのうえ掴んだつもりで週が塗り変わってしまう。
+     塗るあいだだけ取るようにして、ふだんは触っても何も起きないようにする。 */
+  let armed = false;
+  paintBtn.addEventListener('click', () => {
+    armed = !armed;
+    paintBtn.setAttribute('aria-pressed', String(armed));
+    surface.classList.toggle('is-paint', armed);
+  });
 
   const refresh = () => {
     const hours = grid.filter((cell) => cell === '1').length;
@@ -2145,14 +2177,20 @@ function wireTimeGrid(root, initial, fixed = 0) {
   };
 
   surface.addEventListener('pointerdown', (event) => {
+    if (!armed) return;
     const cell = event.target.closest('.tg-cell');
     if (!cell) return;
     event.preventDefault();
     painting = true;
     // 最初に触ったマスの逆の状態を、指を離すまで塗り続ける。
     paintTo = cell.classList.contains('is-on') ? '0' : '1';
-    surface.setPointerCapture(event.pointerId);
+    // 触れた1枡は先に塗る。捕捉に失敗しても、押した所だけは必ず変わるように。
     paint(cell);
+    try {
+      surface.setPointerCapture(event.pointerId);
+    } catch {
+      // 捕捉できない指もある。なぞりは効かなくなるが、1枡ずつなら押せる。
+    }
   });
 
   // 指の下にあるマスを座標から拾う。捕捉中は pointermove が surface に来るため。
@@ -2734,157 +2772,37 @@ async function renderDungeon() {
   });
 }
 
-/* ---------- ページ送り ----------
+/* ---------- 画面の丈 ----------
 
-   縦に流さず、1画面ぶんずつ横へ送る。中身は #view の段組みに流し込むので、
-   各画面の描画側には手を入れずに済む。段の送りは scrollLeft でやる。
-   overflow:hidden でも JS からの代入は効くので、指では動かないまま送れる。 */
+   画面は縦に流す。1画面ぶんずつ横へ送る作りを持っていたが、やめた。
+   組んである画面ほど枠が境で割れず、段の末尾に白が残って、
+   同じ中身が3ページにも4ページにもなる。どのページに何が居るのかも
+   覚えていられない。順に下へ辿れるほうが、探す手数が少なくて済む。
 
-const pagerEl = document.getElementById('pager');
-const pageCountEl = document.getElementById('page-count');
-const prevEl = document.getElementById('page-prev');
-const nextEl = document.getElementById('page-next');
+   #view は自分で流れるので、ここでやることは2つだけ。
+   盤の画面かどうかを見分けることと、画面を切り替えたら頭へ戻すこと。 */
 
-let page = 0;
-let pageTotal = 1;
+// 画面を切り替えたときだけ頭に戻す。その場の書き換えでは読んでいた所に留まる。
+let toTop = true;
 
-function pageMetrics() {
-  const style = getComputedStyle(viewEl);
-  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-  const gap = parseFloat(style.columnGap) || 0;
-  const width = Math.max(1, viewEl.clientWidth - padX);
-  return { width, gap, step: width + gap, padX };
-}
-
-function goToPage(next) {
-  const { step } = pageMetrics();
-  page = Math.min(Math.max(next, 0), pageTotal - 1);
-  viewEl.scrollLeft = page * step;
-  pageCountEl.textContent = `${page + 1} / ${pageTotal}`;
-  prevEl.disabled = page === 0;
-  nextEl.disabled = page === pageTotal - 1;
-}
-
-// 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
-let toFirstPage = true;
-
-/* この丈までは、めくらずに縦へ流す。単位は画面。
-   1画面に少し足りないだけで送る操作を強いるほうが、指の手数が増える。
-   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。
-
-   四捨五入で見るので「2画面ぶんぐらいまで」。2.4画面は流し、2.6画面はめくる。 */
-const SCROLL_LIMIT = 2;
-let scrolls = false;
-
-// 中身が変わるたびに、何ページに割れたかを測り直す。
-function refitPages() {
-  /* 盤の画面だけは別扱い。段にも割らず流しもせず、残りの高さを全部使う。
-     盤は1枚で1画面に収まるように縮むので、送る先も流す先も無い。 */
+function refitView() {
+  /* 盤の画面だけは別扱い。流さず、残りの高さを全部盤に渡す。
+     盤は枠の中で自分で繰るので、外側まで動くと二重になる。 */
   const board = viewEl.querySelector('.board');
   viewEl.classList.toggle('is-board', Boolean(board));
-  if (board) {
-    viewEl.classList.remove('is-scroll');
-    viewEl.style.columnWidth = '';
-    pageTotal = 1;
-    page = 0;
-    scrolls = true;
-    pagerEl.hidden = true;
-    pageCountEl.textContent = '';
-    document.body.classList.remove('is-paged');
-    toFirstPage = false;
-    return;
-  }
-
-  /* 送るか流すかは、段に割る前の丈で決める。
-     段の本数で決めていたが、枠を割らない指定のせいで段の末尾に白が残り、
-     2画面ぶんの中身が3段にも4段にもなる。それをそのまま頁数と読んでいたので、
-     流せるはずのものがめくりに回っていた。 */
-  viewEl.style.columnWidth = '';
-  viewEl.classList.add('is-scroll');
-  const screens = viewEl.scrollHeight / Math.max(1, viewEl.clientHeight);
-  const wasScrolling = scrolls;
-  /* 列の画面（ストリーム・プロセス）は丈にかかわらず流す。
-     めくりが効くのは、1ページが1つのまとまりになっている画面だけ。
-     ただ順に並んでいるだけのものをページで切ると、目当ての札がどのページに
-     居るのか分からず、探すのに何度もめくることになる。 */
-  scrolls = Boolean(viewEl.querySelector('.flow')) || Math.round(screens) <= SCROLL_LIMIT;
-
-  if (scrolls) {
-    const split = !wasScrolling || pageTotal !== 1;
-    pageTotal = 1;
-    page = 0;
-    pagerEl.hidden = true;
-    // 数字も消す。隠すだけだと、次に開いた画面の数と混ざって読めてしまう。
-    pageCountEl.textContent = '';
-    document.body.classList.remove('is-paged');
-    viewEl.scrollLeft = 0;
-    if (toFirstPage || split) viewEl.scrollTop = 0;
-    toFirstPage = false;
-    return;
-  }
-
-  // めくるほうに回ったら、段に割ってから何段になったかを数える。
-  viewEl.classList.remove('is-scroll');
-  const { width, gap, step, padX } = pageMetrics();
-  viewEl.style.columnWidth = `${width}px`;
-  const flowed = Math.max(0, viewEl.scrollWidth - padX);
-  const total = Math.max(1, Math.round((flowed + gap) / step));
-  const split = wasScrolling || total !== pageTotal;
-
-  pageTotal = total;
-  pagerEl.hidden = pageTotal < 2;
-  document.body.classList.toggle('is-paged', pageTotal > 1);
-  goToPage(toFirstPage || split ? 0 : page);
-  toFirstPage = false;
+  viewEl.classList.toggle('is-scroll', !board);
+  if (toTop) viewEl.scrollTop = 0;
+  toTop = false;
 }
 
 let refitTimer = null;
-let settleTimer = null;
 function scheduleRefit() {
   cancelAnimationFrame(refitTimer);
-  refitTimer = requestAnimationFrame(refitPages);
-  // 図版や書体が遅れて寸法を決めることがある。落ち着いた頃にもう一度だけ測る。
-  clearTimeout(settleTimer);
-  settleTimer = setTimeout(refitPages, 250);
+  refitTimer = requestAnimationFrame(refitView);
 }
 
-prevEl.addEventListener('click', () => goToPage(page - 1));
-nextEl.addEventListener('click', () => goToPage(page + 1));
-
-// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て測り直す。
+// 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て付け直す。
 new MutationObserver(scheduleRefit).observe(viewEl, { childList: true, subtree: true });
-window.addEventListener('resize', scheduleRefit);
-
-/* 指で横に払ってもページを送る。
-   地図・時間の表・文字入力の中では、そちらの操作を邪魔しないよう手を出さない。 */
-const KEEPS_TOUCH = '.board, .tg, input, textarea, select, .filters';
-let swipe = null;
-
-viewEl.addEventListener('pointerdown', (event) => {
-  if (scrolls || event.target.closest(KEEPS_TOUCH)) return;
-  swipe = { x: event.clientX, y: event.clientY };
-});
-
-viewEl.addEventListener('pointerup', (event) => {
-  if (!swipe) return;
-  const dx = event.clientX - swipe.x;
-  const dy = event.clientY - swipe.y;
-  swipe = null;
-  // 横に払ったときだけ。縦の動きが勝っていれば、ただの押し損ねとみなす。
-  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-  goToPage(page + (dx < 0 ? 1 : -1));
-});
-
-viewEl.addEventListener('pointercancel', () => {
-  swipe = null;
-});
-
-// 物理キーボードがあるときは矢印でも送る。文字を打っている最中は邪魔しない。
-window.addEventListener('keydown', (event) => {
-  if (scrolls || event.target.closest('input, textarea, select')) return;
-  if (event.key === 'ArrowRight') goToPage(page + 1);
-  if (event.key === 'ArrowLeft') goToPage(page - 1);
-});
 
 /* 書き留めるボタンはシェルに置く。思いつくのはどの画面を見ている時でも同じなので、
    ストリームまで移動してから、では間に合わない。 */
@@ -2904,7 +2822,7 @@ window.addEventListener('keydown', (event) => {
 
 async function route() {
   const hash = location.hash.replace(/^#/, '') || '/home';
-  toFirstPage = true;
+  toTop = true;
   try {
     let match;
     if (hash === '/home') return await renderHome();
