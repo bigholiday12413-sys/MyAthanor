@@ -79,10 +79,10 @@ const AMBIENT_K = 273;
 const MAX_K = 373;
 
 const HEAT_LEVELS = [
-  { min: 350, key: 'boiling', label: '沸騰', flame: '#ff8a3c', core: '#ffe4b8' },
-  { min: 320, key: 'hot', label: '熱い', flame: '#e0aa3c', core: '#ffe8a8' },
-  { min: 295, key: 'warm', label: 'ぬるい', flame: '#b9925a', core: '#e6d0a0' },
-  { min: 276, key: 'cooling', label: '冷めかけ', flame: '#8a7550', core: '#b3a075' },
+  { min: 350, key: 'boiling', label: '沸騰', flame: '#d95d13', core: '#f0a860' },
+  { min: 320, key: 'hot', label: '熱い', flame: '#b07f14', core: '#e0bf6a' },
+  { min: 295, key: 'warm', label: 'ぬるい', flame: '#96703c', core: '#c4a678' },
+  { min: 276, key: 'cooling', label: '冷めかけ', flame: '#7d7458', core: '#a89d7c' },
 ];
 const FROZEN = { key: 'frozen', label: '凍結' };
 
@@ -2474,24 +2474,25 @@ const GRID = {
   icon: 14,
 };
 
-// 夜に浮かぶ盤。地をいちばん暗くして、節と軌道だけを光らせる。
+// 紙に引いた盤。地を白のままにして、節と軌道を墨と葉の色で置く。
+// 暗い地の光り方は使えないので、滲みは薄い輪を重ねた「にじみ」として残す。
 const SPHERE = {
-  space: '#080502',
-  guide: '#191106', // 軌道の案内線
-  star: '#241a0c',
-  bed: '#20170b', // 軌道の下敷き
-  bedDim: '#150f07',
-  core: '#0b0703', // 節の中身
+  space: '#fbfaf5',
+  guide: '#e2e2d6', // 軌道の案内線
+  fleck: '#e8e7db', // 紙の斑
+  bed: '#e7efe0', // 軌道の下敷き
+  bedDim: '#eeede4',
+  core: '#ffffff', // 節の中身
 };
 
-// 節の色。輪が明るく、中身は同系の暗い色で沈める。
+// 節の色。輪で描き、中は紙のまま抜く。
 const NODE_HUE = {
-  idea: { ring: '#d9553f', glow: '217, 85, 63' },
-  spell: { ring: '#c9a24a', glow: '201, 162, 74' },
-  log: { ring: '#c9b68d', glow: '201, 182, 141' },
-  cauldron: { ring: '#6f9c3c', glow: '111, 156, 60' },
-  dead: { ring: '#5b4a2c', glow: '91, 74, 44' },
-  digging: { ring: '#e6bb56', glow: '230, 187, 86' },
+  idea: { ring: '#b8452f', glow: '184, 69, 47' },
+  spell: { ring: '#a8802a', glow: '168, 128, 42' },
+  log: { ring: '#8a7a55', glow: '138, 122, 85' },
+  cauldron: { ring: '#4e8b3a', glow: '78, 139, 58' },
+  dead: { ring: '#b3b2a4', glow: '179, 178, 164' },
+  digging: { ring: '#a8802a', glow: '168, 128, 42' },
 };
 
 const hasBranch = (room) => room.corridors.length + room.cauldrons.length > 0;
@@ -2618,7 +2619,7 @@ function halo(x, y, r, rgb, steps) {
     .join('');
 }
 
-// 盤に散らす星。描き直すたびに動かないよう、道ごとの種から決める。
+// 紙の斑。描き直すたびに動かないよう、道ごとの種から決める。
 function starfield(size, seed) {
   let state = seed * 9301 + 49297;
   const next = () => {
@@ -2631,7 +2632,7 @@ function starfield(size, seed) {
     const y = Math.round(next() * size);
     const bright = next() > 0.82;
     dots.push(`<rect x="${x}" y="${y}" width="${bright ? 2 : 1}" height="${bright ? 2 : 1}"
-      fill="${SPHERE.star}" />`);
+      fill="${SPHERE.fleck}" />`);
   }
   return dots.join('');
 }
@@ -2654,7 +2655,7 @@ function nodeSwatch(kind) {
   const hue = NODE_HUE[kind];
   return `<svg class="swatch swatch-node" viewBox="0 0 22 22" width="22" height="22"
     aria-hidden="true" focusable="false">
-    ${halo(11, 11, 6, hue.glow, [[2, 0.3], [4, 0.14]])}
+    ${halo(11, 11, 6, hue.glow, [[2, 0.22], [4, 0.1]])}
     <circle cx="11" cy="11" r="6" fill="${SPHERE.core}" stroke="${hue.ring}"
       stroke-width="2" />
   </svg>`;
@@ -2699,7 +2700,7 @@ function roadMap(root) {
       status === 'abandoned' ? SPHERE.bedDim : SPHERE.bed
     }" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />`);
 
-    const line = status === 'abandoned' ? '#3a2c17' : on ? 'var(--gold)' : '#9c7325';
+    const line = status === 'abandoned' ? '#c2c1b4' : on ? 'var(--gold)' : 'var(--green)';
     lines.push(`<path d="${d}" fill="none" stroke="${line}" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round"
       ${status === 'abandoned' ? 'stroke-dasharray="2 5"' : ''}
@@ -2720,7 +2721,7 @@ function roadMap(root) {
     if (node.kind === 'dead') {
       const digging = node.corridor.mission.status === 'active';
       const hue = NODE_HUE[digging ? 'digging' : 'dead'];
-      if (digging) glows.push(halo(x, y, 8, hue.glow, [[3, 0.34], [6, 0.16], [9, 0.07]]));
+      if (digging) glows.push(halo(x, y, 8, hue.glow, [[3, 0.26], [6, 0.12]]));
       bodies.push(`<circle cx="${n2(x)}" cy="${n2(y)}" r="8" fill="${SPHERE.core}"
         stroke="${hue.ring}" stroke-width="2" stroke-dasharray="3 3" />`);
       ink.push(
@@ -2738,8 +2739,8 @@ function roadMap(root) {
 
     glows.push(
       halo(x, y, r, hue.glow, lit.has(node.id) || legacy
-        ? [[3, 0.4], [6, 0.2], [9, 0.1], [13, 0.05]]
-        : [[3, 0.26], [6, 0.11]]),
+        ? [[3, 0.3], [6, 0.15], [9, 0.08]]
+        : [[3, 0.18], [6, 0.08]]),
     );
     // 宝箱の節には金の輪をもう1本回す。
     if (legacy) {

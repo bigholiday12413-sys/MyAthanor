@@ -104,33 +104,40 @@
 }
 
 :root {
-  /* 夜の深さ。面は暗く沈め、パネルだけを灯りの下に置く。 */
-  --bg: #0d0904;
-  --panel-hi: #2c2114;
-  --panel-lo: #191106;
-  --line: #3b2d18;
-  --line-soft: #2c2113;
-  --edge: #080502;
-  --text: #f2e4c2;
-  --dim: #ab9470;
+  /* 地は紙。面を明るく起こし、沈めるのはくぼみだけにする。 */
+  --bg: #f2f1ea;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --chrome: #ffffff;
+  --sunken: #ecebe0;
+  --edge: #c7c6b9;
+  --line: #d9d8cc;
+  --line-soft: #e9e8de;
+  --text: #23281f;
+  --dim: #656b5e;
 
-  /* 金は単色にせず明・地・陰の3段で持つ。金属は階調が無いと箔に見えない。 */
-  --gold-hi: #ffeab4;
-  --gold: #e6bb56;
-  --gold-dark: #9c7325;
-  --gold-deep: #634813;
+  /* 葉。差し色はここ。明・地・陰の3段と、面を撫でるための淡い1段を持つ。 */
+  --green-hi: #9ecb7e;
+  --green: #4a8236;
+  --green-dark: #35682a;
+  --green-deep: #1f4318;
+  --green-soft: #e7efe0;
 
-  --green: #6f9c3c;
-  --green-dark: #4a6c26;
-  --green-deep: #2c4415;
+  /* 実り。宝箱と、温度の熱い側にだけ残す。紙の上では金は文字に使えない。 */
+  --gold-hi: #f0c96a;
+  --gold: #a8802a;
+  --gold-dark: #7d5f18;
+  --gold-deep: #5c4512;
+
   --wood: #8a5a2b;
   --danger: #b8442c;
-  --glass: #cfe0d8;
-  --brass: #c9a24a;
+  --glass: #8fa79c;
+  --brass: #9a7c34;
 
-  --gem: #d9553f;
-  --stone: #8d8f7a;
-  --trail: #c9b68d;
+  --gem: #b8452f;
+  --stone: #7d8175;
+  --trail: #7d6f4a;
+  --steel: #5f6d73;
 
   /* 見出しも本文も Kaisei Opti で拾う。
      後ろに積んだ和文書体は、書体が届くまでのあいだと、字が欠けたときの受け皿。
@@ -147,13 +154,12 @@
     "Hiragino Sans", "Yu Gothic", "BIZ UDGothic", "Noto Sans JP", "IPAGothic", monospace;
   --pad: 18px;
 
-  /* 額装。金の細い罫を1本回すだけ。ぼかしは使わない。 */
-  --frame: inset 0 0 0 1px rgba(230, 187, 86, 0.22);
-  /* 立体は1pxの明暗2本で作る。ぼかした影は輪郭が溶けて締まらない。 */
+  /* 額装。葉の細い罫を1本回すだけ。ぼかしは使わない。 */
+  --frame: inset 0 0 0 1px rgba(78, 139, 58, 0.16);
+  /* 立体は1pxの明暗2本で作る。紙の上なので、明を紙の白、暗をごく薄い墨にする。 */
   --bevel:
-    inset 1px 1px 0 rgba(255, 236, 190, 0.13),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.55);
-  --surface: #241a0d;
+    inset 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset -1px -1px 0 rgba(35, 40, 31, 0.09);
 }
 
 * {
@@ -178,9 +184,9 @@ body {
   line-height: 1.6;
   -webkit-text-size-adjust: 100%;
   background-color: var(--bg);
-  /* 上からの燭台の灯りと、革の目 */
+  /* 紙の目。横に薄い筋を1本置くだけ。革の粗い目のままだと紙に見えない。 */
   background-image:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 2px, transparent 2px 4px);
+    repeating-linear-gradient(0deg, rgba(35, 40, 31, 0.022) 0 2px, transparent 2px 4px);
   background-attachment: fixed;
 }
 
@@ -191,7 +197,8 @@ body::after {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  opacity: 0.055;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -224,9 +231,9 @@ body::after {
   padding: 11px var(--pad);
   padding-top: max(11px, env(safe-area-inset-top));
   min-height: 54px;
-  background: #1b1308;
+  background: var(--chrome);
   border-bottom: 2px solid var(--edge);
-  box-shadow: inset 0 -3px 0 -1px var(--gold-deep);
+  box-shadow: inset 0 -1px 0 var(--edge);
 }
 
 .topbar h1 {
@@ -236,7 +243,7 @@ body::after {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--gold);
+  color: var(--green-dark);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -260,15 +267,15 @@ body::after {
   color: var(--text);
   text-decoration: none;
   cursor: pointer;
-  background: #33260f;
+  background: var(--raised);
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.2);
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.2);
 }
 
 .icon-btn:active {
-  background: #241a0b;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.2);
+  background: #eef0ea;
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.2);
 }
 
 
@@ -326,7 +333,7 @@ body::after {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.14em;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .section-title::before {
@@ -335,7 +342,7 @@ body::after {
   width: 7px;
   height: 7px;
   transform: rotate(45deg);
-  background: var(--gold);
+  background: var(--green);
 }
 
 /* 罫は1本ではなく、金の線とその下の影の2本で引く。 */
@@ -368,7 +375,7 @@ body::after {
   position: absolute;
   width: 10px;
   height: 10px;
-  border: 1px solid rgba(230, 187, 86, 0.3);
+  border: 1px solid rgba(78, 139, 58, 0.3);
   pointer-events: none;
 }
 
@@ -393,8 +400,8 @@ body::after {
   line-height: 1.8;
   color: var(--dim);
   text-align: center;
-  background: #1b1409;
-  border: 1px dashed rgba(230, 187, 86, 0.28);
+  background: var(--surface);
+  border: 1px dashed rgba(78, 139, 58, 0.28);
   border-radius: 2px;
 }
 
@@ -456,12 +463,12 @@ body::after {
   width: 44px;
   height: 7px;
   background: var(--brass);
-  border: 1px solid #4a3510;
+  border: 1px solid #b7bdaf;
   border-bottom: none;
   border-radius: 0;
   box-shadow:
-    inset 0 1px 0 #f0dda6,
-    inset 0 -1px 0 #7d6122;
+    inset 0 1px 0 #ffffff,
+    inset 0 -1px 0 #c7c6b9;
 }
 
 .tube-body {
@@ -471,8 +478,8 @@ body::after {
   width: 38px;
   height: 176px;
   overflow: hidden;
-  background: #12180f;
-  border: 2px solid #9fb3aa;
+  background: #fbfcfa;
+  border: 2px solid var(--glass);
   border-top: none;
   border-radius: 0 0 18px 18px;
 }
@@ -504,7 +511,7 @@ body::after {
   background: repeating-linear-gradient(
     0deg,
     transparent 0 21px,
-    rgba(236, 217, 168, 0.16) 21px 22px
+    rgba(78, 139, 58, 0.16) 21px 22px
   );
 }
 
@@ -515,7 +522,7 @@ body::after {
   left: 5px;
   width: 5px;
   pointer-events: none;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(35, 40, 31, 0.1);
 }
 
 .tube.is-over .tube-body,
@@ -563,7 +570,7 @@ body::after {
   width: 8px;
   height: 8px;
   flex: none;
-  border: 1px solid rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(35, 40, 31, 0.35);
 }
 
 .swatch.consumed {
@@ -575,7 +582,7 @@ body::after {
 }
 
 .swatch.free {
-  background: rgba(14, 22, 16, 0.8);
+  background: #ffffff;
   border-color: var(--glass);
 }
 
@@ -621,11 +628,11 @@ body::after {
   border: 1px solid var(--edge);
   border-left: 3px solid var(--line);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.13);
 }
 
 .card:active {
-  background: #2f2211;
+  background: #f3f4ee;
 }
 
 .card.kind-idea {
@@ -641,7 +648,7 @@ body::after {
 }
 
 .card.status-active {
-  border-left-color: var(--gold);
+  border-left-color: var(--green);
 }
 
 .card.status-done {
@@ -649,7 +656,7 @@ body::after {
 }
 
 .card.status-abandoned {
-  border-left-color: #5b4a2c;
+  border-left-color: #bfc2b6;
 }
 
 .card.is-paused {
@@ -658,7 +665,7 @@ body::after {
 
 .nav-card {
   display: block;
-  border-left-color: var(--gold);
+  border-left-color: var(--green);
 }
 
 .card-top {
@@ -694,21 +701,21 @@ body::after {
 
 .badge.idea {
   color: var(--gem);
-  border-color: #6b2b20;
+  border-color: #dcb5ac;
 }
 
 .badge.log {
   color: var(--trail);
-  border-color: #566268;
+  border-color: #c4ccd0;
 }
 
 .badge.recurrence {
-  color: #d0a06a;
-  border-color: #6b4a24;
+  color: #8a6a2a;
+  border-color: #d3c5a4;
 }
 
 .badge.active {
-  color: var(--gold);
+  color: var(--green-dark);
   border-color: var(--gold-dark);
 }
 
@@ -718,11 +725,11 @@ body::after {
 }
 
 .badge.abandoned {
-  color: #8a7a5c;
+  color: var(--dim);
 }
 
 .badge.now {
-  color: var(--gold);
+  color: var(--gold-dark);
   border-color: var(--gold-dark);
 }
 
@@ -752,7 +759,7 @@ body::after {
 }
 
 .card-meta .hot {
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 /* ---------- フィルタ ---------- */
@@ -772,20 +779,20 @@ body::after {
   letter-spacing: 0.06em;
   color: var(--dim);
   cursor: pointer;
-  background: #33260f;
+  background: var(--raised);
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.14);
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.14);
   text-align: center;
 }
 
 .filter[aria-pressed='true'] {
-  color: #2b1d05;
-  background: var(--gold);
-  border-color: var(--gold-deep);
+  color: #ffffff;
+  background: var(--green);
+  border-color: var(--green-deep);
   box-shadow:
-    inset 1px 1px 0 var(--gold-hi),
-    inset -1px -1px 0 #a5762a;
+    inset 1px 1px 0 var(--green-hi),
+    inset -1px -1px 0 var(--green-dark);
 }
 
 /* ---------- フォーム ---------- */
@@ -820,13 +827,13 @@ textarea {
   font-family: inherit;
   font-size: 16px; /* iOS のズーム防止 */
   color: var(--text);
-  background: #0e0904;
+  background: #ffffff;
   border: 1px solid var(--edge);
   border-radius: 2px;
   /* 沈んで見せるのも1pxで。上・左を暗く、下・右を明るく。 */
   box-shadow:
     inset 1px 1px 0 rgba(0, 0, 0, 0.7),
-    inset -1px -1px 0 rgba(255, 236, 190, 0.07);
+    inset -1px -1px 0 rgba(35, 40, 31, 0.06);
 }
 
 input[type='number'],
@@ -838,8 +845,8 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--gold);
-  box-shadow: inset 0 0 0 1px var(--gold-deep);
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 1px var(--green);
 }
 
 .row {
@@ -860,60 +867,57 @@ button {
   letter-spacing: 0.08em;
   color: var(--text);
   cursor: pointer;
-  background: #33260f;
+  background: var(--raised);
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: var(--bevel), inset 0 0 0 1px rgba(230, 187, 86, 0.18);
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(78, 139, 58, 0.18);
 }
 
 button:active {
-  background: #241a0b;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.18);
+  background: #eef0ea;
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.18);
 }
 
 /* 主要動作は金。平らに塗り、上下1pxの明暗だけで起こす。 */
 button.primary {
-  color: #2b1d05;
-  background: var(--gold);
-  border-color: var(--gold-deep);
+  color: #ffffff;
+  background: var(--green);
+  border-color: var(--green-deep);
   box-shadow:
-    inset 1px 1px 0 var(--gold-hi),
-    inset -1px -1px 0 #a5762a;
+    inset 1px 1px 0 var(--green-hi),
+    inset -1px -1px 0 var(--green-dark);
 }
 
 button.primary:active {
-  background: #cfa544;
-  box-shadow: inset 1px 1px 0 #a5762a;
+  background: #43772f;
+  box-shadow: inset 1px 1px 0 var(--green-dark);
 }
 
 /* カードの上で繰り返し出る動作。金は確定動作のために取っておき、
    ここは薬草色に金の細線だけを回す。 */
 button.act {
-  color: #eef7dd;
-  background: #4d7a26;
-  border-color: #1d3210;
-  box-shadow:
-    inset 1px 1px 0 #7cae44,
-    inset -1px -1px 0 #2b4a13,
-    inset 0 0 0 1px rgba(230, 187, 86, 0.001);
+  color: var(--green-dark);
+  background: #ffffff;
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.28);
 }
 
 button.act:active {
-  background: #395c1a;
-  box-shadow: inset 1px 1px 0 #2b4a13;
+  background: var(--green-soft);
+  box-shadow: inset 1px 1px 0 rgba(35, 40, 31, 0.1);
 }
 
 button.ghost {
-  background: #161007;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.16);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.16);
 }
 
 button.ghost:active {
-  background: rgba(230, 187, 86, 0.09);
+  background: rgba(78, 139, 58, 0.09);
 }
 
 button.danger {
-  color: #e08a72;
+  color: var(--danger);
   box-shadow: inset 0 0 0 1px rgba(184, 68, 44, 0.4);
 }
 
@@ -1079,10 +1083,10 @@ button:disabled {
   letter-spacing: 0;
   color: var(--text);
   white-space: nowrap;
-  background: #2b1f0c;
+  background: var(--surface);
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.14);
 }
 
 .chip b {
@@ -1093,13 +1097,13 @@ button:disabled {
 }
 
 .chip.is-on {
-  color: #33230a;
-  background: var(--gold);
-  border-color: var(--gold-deep);
+  color: #ffffff;
+  background: var(--green);
+  border-color: var(--green-deep);
 }
 
 .chip.is-on b {
-  color: #6b4d12;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 /* カード上のタグは押せないので平たく置く。 */
@@ -1174,15 +1178,15 @@ button:disabled {
 }
 
 .temp-boiling {
-  color: #ff8a3c;
+  color: #d95d13;
 }
 
 .temp-hot {
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 .temp-warm {
-  color: #c9a06a;
+  color: #96703c;
 }
 
 .temp-cooling {
@@ -1190,7 +1194,7 @@ button:disabled {
 }
 
 .temp-frozen {
-  color: #9fc4d8;
+  color: #517f99;
 }
 
 .temp-head {
@@ -1242,7 +1246,7 @@ input[type='range']::-webkit-slider-thumb {
   height: 22px;
   margin-top: -8px;
   background: var(--text);
-  border: 1px solid #241a0c;
+  border: 1px solid var(--edge);
   border-radius: 2px;
   -webkit-appearance: none;
   appearance: none;
@@ -1260,7 +1264,7 @@ input[type='range']::-moz-range-thumb {
   width: 14px;
   height: 22px;
   background: var(--text);
-  border: 1px solid #241a0c;
+  border: 1px solid var(--edge);
   border-radius: 2px;
 }
 
@@ -1286,7 +1290,7 @@ input[type='range']::-moz-range-thumb {
 }
 
 .region-stat .hot {
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 /* 盤は画面より大きくなるので、区画の中だけで動かす。
@@ -1297,7 +1301,7 @@ input[type='range']::-moz-range-thumb {
   max-height: min(360px, 42dvh);
   margin: 2px 0 0;
   padding: 0;
-  background: #080502;
+  background: #fbfaf5;
   border-top: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
 }
@@ -1366,10 +1370,10 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
-  background: #120c05;
+  background: var(--surface);
   border: 1px solid var(--edge);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.12);
 }
 
 .map-legend span {
@@ -1403,11 +1407,11 @@ input[type='range']::-moz-range-thumb {
   border: 1px solid var(--edge);
   border-left: 3px solid var(--green-dark);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.13);
 }
 
 .cauldron.is-complete {
-  border-left-color: var(--gold);
+  border-left-color: var(--green);
 }
 
 .cauldron-head {
@@ -1440,7 +1444,7 @@ input[type='range']::-moz-range-thumb {
   height: 8px;
   margin: 9px 0 7px;
   overflow: hidden;
-  background: #150f06;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 4px;
 }
@@ -1476,13 +1480,13 @@ input[type='range']::-moz-range-thumb {
   font-size: 14px;
   line-height: 1;
   color: var(--dim);
-  background: #150f06;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 3px;
 }
 
 .material.is-done .material-check {
-  color: #1c2810;
+  color: #ffffff;
   background: var(--green);
   border-color: var(--green-dark);
 }
@@ -1548,7 +1552,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .floor-stat,
@@ -1566,7 +1570,7 @@ input[type='range']::-moz-range-thumb {
 }
 
 .floor-totals .hot {
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 .dungeon-node {
@@ -1597,7 +1601,7 @@ input[type='range']::-moz-range-thumb {
   border: 1px solid var(--edge);
   border-left: 3px solid var(--line);
   border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.1);
 }
 
 .room-idea {
@@ -1679,9 +1683,9 @@ a.room-title {
 }
 
 .legacy-btn.is-on {
-  color: var(--gold);
+  color: var(--gold-dark);
   border-color: var(--gold-dark);
-  background: rgba(224, 170, 60, 0.1);
+  background: #fdf7e8;
 }
 
 .card.is-legacy {
@@ -1707,12 +1711,12 @@ a.room-title {
   width: 54px;
   height: 54px;
   padding: 0;
-  background: var(--gold);
-  border: 2px solid var(--gold-deep);
+  background: var(--green);
+  border: 2px solid var(--green-deep);
   border-radius: 3px;
   box-shadow:
-    inset 2px 2px 0 var(--gold-hi),
-    inset -2px -2px 0 #a5762a;
+    inset 2px 2px 0 var(--green-hi),
+    inset -2px -2px 0 var(--green-dark);
 }
 
 .fab .px {
@@ -1721,8 +1725,8 @@ a.room-title {
 }
 
 .fab:active {
-  background: #cfa544;
-  box-shadow: inset 2px 2px 0 #a5762a;
+  background: #3f7530;
+  box-shadow: inset 2px 2px 0 var(--green-deep);
 }
 
 /* ---------- モーダル ---------- */
@@ -1734,7 +1738,7 @@ a.room-title {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(8, 5, 2, 0.76);
+  background: rgba(35, 40, 31, 0.34);
 }
 
 .modal {
@@ -1748,7 +1752,7 @@ a.room-title {
   border: 2px solid var(--edge);
   border-bottom: none;
   border-radius: 2px 2px 0 0;
-  box-shadow: inset 0 2px 0 -1px var(--gold-deep);
+  box-shadow: inset 0 1px 0 var(--edge);
 }
 
 .modal h2 {
@@ -1756,7 +1760,7 @@ a.room-title {
   font-family: var(--serif);
   font-size: 15px;
   letter-spacing: 0.1em;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 /* 書き留めたものの控え。閉じるまで積み上がる。 */
@@ -1781,7 +1785,7 @@ a.room-title {
 
 .caught-head b {
   font-weight: 400;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .caught-row {
@@ -1861,7 +1865,7 @@ a.room-title {
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 400;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .seg-toggle button {
@@ -1878,7 +1882,7 @@ a.room-title {
 }
 
 .seg-toggle button[aria-pressed='true'] {
-  color: #1c2810;
+  color: #ffffff;
   background: var(--green);
   border-color: var(--green-dark);
 }
@@ -1891,9 +1895,9 @@ a.room-title {
   z-index: 30;
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
-  background: #1b1308;
+  background: var(--chrome);
   border-top: 2px solid var(--edge);
-  box-shadow: inset 0 3px 0 -1px var(--gold-deep);
+  box-shadow: inset 0 1px 0 var(--edge);
 }
 
 .tab {
@@ -1928,7 +1932,7 @@ a.room-title {
 }
 
 .tab.is-active {
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 /* 選んでいるタブの上に金の線を1本渡す。 */
@@ -1939,7 +1943,7 @@ a.room-title {
   left: 22%;
   right: 22%;
   height: 3px;
-  background: var(--gold);
+  background: var(--green);
 }
 
 .tab.is-active .tab-mark {
@@ -1955,9 +1959,9 @@ a.room-title {
   justify-content: center;
   gap: 18px;
   padding: 5px var(--pad);
-  background: #1b1308;
+  background: var(--chrome);
   border-top: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--gold-deep);
+  box-shadow: inset 0 1px 0 var(--edge);
 }
 
 .pager[hidden] {
@@ -1969,13 +1973,13 @@ a.room-title {
   padding: 4px 0;
   font-size: 12px;
   line-height: 1;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .pager-arrow:disabled {
-  color: var(--line);
+  color: #b0b0a2;
   border-color: var(--line-soft);
-  background: #191106;
+  background: #f1f0e8;
 }
 
 .pager-count {
@@ -1991,9 +1995,9 @@ a.room-title {
 .link {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--gold);
+  color: var(--green-dark);
   text-decoration: none;
-  border-bottom: 1px dotted var(--gold-dark);
+  border-bottom: 1px dotted var(--green-dark);
 }
 
 /* ページ送りが出ているぶんだけ、下に浮かせているものを持ち上げる。 */
@@ -2011,17 +2015,17 @@ body.is-paged .toast {
   padding: 9px 14px;
   font-family: var(--serif);
   font-size: 13px;
-  color: var(--text);
-  background: #33260f;
-  border: 1px solid var(--edge);
+  color: #f4f4ec;
+  background: #2f3a2a;
+  border: 1px solid #1f2a1c;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(158, 203, 126, 0.3);
   transform: translateX(-50%);
 }
 
 .toast.is-error {
-  color: #e5806c;
-  border-color: var(--danger);
+  color: #ffb3a1;
+  border-color: #6a2f22;
 }
 
 .stat-line {
@@ -2060,13 +2064,13 @@ body.is-paged .toast {
 /* ---------- ミッションの期日 ---------- */
 
 .badge.due-over {
-  color: #e5806c;
-  border-color: #6a2f22;
+  color: var(--danger);
+  border-color: #dcb5ac;
 }
 
 .badge.due-today,
 .badge.due-soon {
-  color: var(--gold);
+  color: var(--gold-dark);
   border-color: var(--gold-dark);
 }
 
@@ -2124,12 +2128,12 @@ body.is-paged .toast {
 }
 
 .region-stat .over {
-  color: #e5806c;
+  color: var(--danger);
 }
 
 .panel.warn {
   margin-top: 10px;
-  border-color: #6a2f22;
+  border-color: #dcb5ac;
 }
 
 /* ---------- 任意の入力は畳んでおく ---------- */
@@ -2183,7 +2187,7 @@ body.is-paged .toast {
 
 .optional-panel > summary::before {
   content: '＋ ';
-  color: var(--gold);
+  color: var(--green);
 }
 
 .optional-panel[open] > summary::before {
@@ -2208,7 +2212,7 @@ body.is-paged .toast {
 }
 
 .card.kind-gear {
-  border-left-color: #9aa5ab;
+  border-left-color: var(--steel);
 }
 
 .badge.food {
@@ -2217,8 +2221,8 @@ body.is-paged .toast {
 }
 
 .badge.gear {
-  color: #9aa5ab;
-  border-color: #5c666b;
+  color: var(--steel);
+  border-color: #c4ccd0;
 }
 
 .spell-excerpt {
@@ -2292,9 +2296,9 @@ textarea {
 .spend-bar {
   height: 8px;
   margin-top: 5px;
-  background: #150f06;
+  background: var(--sunken);
   border: 1px solid var(--edge);
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.08);
 }
 
 .spend-bar i {
@@ -2325,7 +2329,7 @@ textarea {
 .vault-line-value {
   font-family: var(--mono);
   font-size: 15px;
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 .vault-head {
@@ -2342,7 +2346,7 @@ textarea {
   font-family: var(--mono);
   font-size: 30px;
   letter-spacing: 0.02em;
-  color: var(--gold);
+  color: var(--gold-dark);
 }
 
 .vault-note {
@@ -2386,7 +2390,7 @@ textarea {
 }
 
 .vault-surplus.neg {
-  color: #e08a72;
+  color: var(--danger);
 }
 
 /* ---------- 週の可処分タイムの表 ---------- */
@@ -2402,7 +2406,7 @@ textarea {
 .tg-total {
   font-family: var(--mono);
   font-size: 18px;
-  color: var(--gold);
+  color: var(--green-dark);
 }
 
 .tg-top button {
@@ -2452,19 +2456,19 @@ textarea {
 
 .tg-cell {
   height: 14px;
-  background: #150f06;
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.09);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.09);
 }
 
 /* 6時間ごとに罫を入れて、朝・昼・夜の見当がつくようにする。 */
 .tg-cell[data-cell$='0'],
 .tg-cell[data-cell$='6'] {
-  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(78, 139, 58, 0.09);
 }
 
 .tg-cell.is-on {
   background: var(--green);
-  box-shadow: inset 1px 1px 0 #7cae44, inset -1px -1px 0 #2b4a13;
+  box-shadow: inset 1px 1px 0 var(--green-hi), inset -1px -1px 0 var(--green-dark);
 }
 
 /* ---------- アップデートバッジ ---------- */
@@ -2480,9 +2484,9 @@ textarea {
   padding: 16px 18px;
   max-width: 90vw;
   background: var(--surface);
-  border: 2px solid var(--gold-dark);
+  border: 2px solid var(--green);
   border-radius: 3px;
-  box-shadow: inset 0 2px 0 -1px var(--gold-deep), 0 8px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--frame);
   transform: translateX(-50%);
   font-family: var(--serif);
   font-size: 13px;

@@ -2,17 +2,17 @@
    16x16 のグリッドを文字で持ち、横に連続する同色をまとめて <rect> にする。
    拡大しても滲まないよう shape-rendering="crispEdges" で描く。 */
 
-const INK = '#241a0c'; // 輪郭に使う焦茶
-const GOLD = '#e0aa3c';
-const GOLD_DARK = '#a97c22';
-const GREEN = '#7ab648';
-const GREEN_DARK = '#4e7c2c';
+const INK = '#23281f'; // 輪郭に使う墨
+const GOLD = '#a8802a';
+const GOLD_DARK = '#7d5f18';
+const GREEN = '#4e8b3a';
+const GREEN_DARK = '#2f5e26';
 const WOOD = '#8a5a2b';
 const WOOD_DARK = '#5d3a18';
-const CREAM = '#ecd9a8';
-const STONE = '#8d8f7a';
-const TRAIL = '#c9b68d'; // 踏んだ跡
-const GLASS = '#b9c9c2';
+const CREAM = '#c9b78a'; // 明るい面。紙の上なので、白に近づけすぎない
+const STONE = '#7d8175';
+const TRAIL = '#8a7a55'; // 踏んだ跡
+const GLASS = '#8fa79c';
 
 // アイデア＝賢者の石。上面を磨いた赤い宝石として切り、下半分にファセットを入れる。
 const PHILOSOPHERS_STONE = {
@@ -65,7 +65,7 @@ const FOOTSTEPS = {
     '...pppp.........',
     '...ppp..........',
   ],
-  palette: { p: TRAIL },
+  palette: { p: '#7d6f4c' },
 };
 
 // ミッション＝羊皮紙の巻物。
@@ -134,7 +134,7 @@ const KEY = {
     '................',
     '................',
   ],
-  palette: { g: GOLD },
+  palette: { g: GOLD_DARK },
 };
 
 // ホームタブ＝紋章の盾。
@@ -317,7 +317,7 @@ const SIGIL = {
     '.......gg.......',
     '................',
   ],
-  palette: { g: GOLD, c: CREAM },
+  palette: { g: GOLD_DARK, c: '#c9a24a' },
 };
 
 // 金庫＝積み上がった金貨。宝箱（レガシー）とは別物なので硬貨の段で表す。
@@ -363,7 +363,7 @@ const FLAME = {
     '......ffff......',
     '................',
   ],
-  palette: { f: '#e0aa3c', c: '#ffe8a8' },
+  palette: { f: '#b07f14', c: '#e0bf6a' },
 };
 
 // 冷めきったアイデア＝霜の結晶。
@@ -386,7 +386,7 @@ const FROST = {
     '.......cc.......',
     '................',
   ],
-  palette: { c: '#9fc4d8' },
+  palette: { c: '#5f93ad' },
 };
 
 const CHEVRON = {
@@ -408,7 +408,7 @@ const CHEVRON = {
     '................',
     '................',
   ],
-  palette: { g: CREAM },
+  palette: { g: '#6f7568' },
 };
 
 // 横方向の連続をまとめて矩形にする。
