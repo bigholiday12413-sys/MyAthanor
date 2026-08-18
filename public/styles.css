@@ -2078,24 +2078,34 @@ a.room-title {
    幅をフラスコ1つぶんに合わせてあるので、100%＋隙間 がそのまま隣までの距離。 */
 .shelf-walk {
   position: relative;
-  height: 18px;
+  height: 22px;
   margin-bottom: 2px;
 }
 
 .keeper {
   position: absolute;
   left: 0;
-  top: 0;
+  bottom: 0;
   display: block;
   width: calc((100% - (var(--n, 1) - 1) * 4px) / var(--n, 1));
   animation-name: keeper-walk;
   animation-iteration-count: infinite;
+  /* 端まで行ったら折り返す。 */
+  animation-direction: alternate;
 }
 
-.keeper .px {
+/* 折り返したら体ごと裏返して、進む向きに顔を向ける。 */
+.keeper-face {
+  display: block;
+  animation-name: keeper-face;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.keeper-px {
   display: block;
   width: 16px;
-  height: 16px;
+  height: 20px;
   margin: 0 auto;
 }
 
@@ -2104,9 +2114,15 @@ a.room-title {
   to { transform: translateX(calc((100% + 4px) * var(--n))); }
 }
 
+@keyframes keeper-face {
+  0%, 49.99% { transform: scaleX(1); }
+  50%, 100% { transform: scaleX(-1); }
+}
+
 /* 動きを減らす設定なら、いちばん左に立たせたままにする。 */
 @media (prefers-reduced-motion: reduce) {
-  .keeper { animation: none; }
+  .keeper,
+  .keeper-face { animation: none; }
 }
 
 /* 棚板。フラスコが乗っている板を1本の線で出す。 */

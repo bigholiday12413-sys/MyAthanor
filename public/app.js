@@ -449,6 +449,13 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
+/* 棚番の絵だけ縦に長い（帽子のぶん）。共通の icon() は 16x16 を前提に
+   viewBox を書くので、ここだけ自前で組む。 */
+function keeperMark() {
+  return `<svg class="px keeper-px" viewBox="0 0 16 20" shape-rendering="crispEdges"
+    aria-hidden="true" focusable="false">${iconBody('keeper')}</svg>`;
+}
+
 /* 丸底フラスコ。他の絵と同じくドット絵で描く。
    中身の高さだけが変わるので、型を1つ持って行ごとに塗り分ける。 */
 const FLASK_ROWS = [
@@ -559,19 +566,24 @@ function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
   const n = shown.length;
   if (!n && !back && !recurring) return '';
 
-  /* 棚番。1秒ごとに隣のフラスコへ移る。
-     動かすのは transform だけなので合成で済み、節がいくつあっても値段は変わらない。
+  /* 棚番。1秒ごとに隣のフラスコへ移り、端まで行ったら向きを変えて戻る。
+     動かすのは transform だけなので合成で済み、本数が増えても値段は変わらない。
      steps(n) で n 区間に割ると、位置は 0 から n-1 番目まで飛び飛びに出る。
-     持ち幅がちょうど1つぶんなので、100% + 隙間 = 隣までの距離になる。 */
+     持ち幅がちょうど1つぶんなので、100% + 隙間 = 隣までの距離になる。
+     往復は alternate。折り返しは体ごと裏返して、進む向きに顔を向ける。 */
   const keeper =
     n > 1
       ? `<div class="shelf-walk">
            <span class="keeper" style="--n:${n};
                  animation-duration:${n}s; animation-timing-function:steps(${n}, end)">
-             ${icon('keeper')}
+             <span class="keeper-face" style="animation-duration:${n * 2}s">
+               ${keeperMark()}
+             </span>
            </span>
          </div>`
-      : `<div class="shelf-walk"><span class="keeper is-still">${icon('keeper')}</span></div>`;
+      : `<div class="shelf-walk">
+           <span class="keeper is-still"><span class="keeper-face">${keeperMark()}</span></span>
+         </div>`;
 
   /* 定期イベントは棚に並べない。勝手に起きるもので、こちらが仕込むものではない。
      右上から吊るしておいて、来る回のぶんだけ札に出す。 */
