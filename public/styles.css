@@ -828,6 +828,12 @@ body::after {
 .filter {
   flex: 1;
   min-height: 44px;
+  /* 印を添える札があるので、字と横に並べる。
+     text-align では、塊で描かれる絵が独りだけ次の行へ落ちる。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   padding: 8px 4px;
   font-family: var(--serif);
   font-size: 12px;
@@ -858,12 +864,23 @@ body::after {
 }
 
 .field label {
-  display: block;
+  /* 印を添える見出しがあるので、字と横に並べる。
+     block のままだと、塊で描かれる絵が独りだけ次の行へ落ちる。 */
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 5px;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--dim);
+}
+
+/* 見出しに添える印。字と同じくらいの背丈にする。 */
+.field label .px {
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 
 
@@ -2080,18 +2097,18 @@ a.room-title {
 
 .flask .flask-cycle {
   position: absolute;
-  top: -1px;
+  top: -2px;
   right: 0;
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 /* 札の上の循環の印。題のうしろに小さく添える。 */
 .cycle-mark {
   flex: none;
-  width: 13px;
-  height: 13px;
-  margin-left: 4px;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
 }
 
 /* 本体だけ。重ねる印には効かせない。 */
