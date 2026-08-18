@@ -1311,6 +1311,28 @@ export function setLegacy(kind, id, value) {
 
 const DUNGEON_MAX_DEPTH = 12;
 
+// 期間の端。日付だけを受け取り、その日の始まり／終わりの ISO に直す。
+function dayStartIso(key) {
+  const date = parseDateKey(key);
+  if (!date) throw badRequest('invalid date');
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function dayEndIso(key) {
+  const date = parseDateKey(key);
+  if (!date) throw badRequest('invalid date');
+  date.setHours(23, 59, 59, 999);
+  return date.toISOString();
+}
+
+function monthsAgoIso(months) {
+  const date = new Date();
+  date.setMonth(date.getMonth() - months);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
 function corridorFrom(mission, depth) {
   const generated =
     mission.status === 'done' && depth < DUNGEON_MAX_DEPTH
@@ -1388,6 +1410,8 @@ function accumulate(room) {
     planned_time: 0,
     planned_money: 0,
     depth: 1,
+    // その道でいちばん新しい出来事。盤に載せるかどうかはこれで決める。
+    last_at: room.at,
   };
 
   for (const corridor of eachCorridor(room)) {
@@ -1402,6 +1426,7 @@ function accumulate(room) {
       continue;
     }
     const sub = accumulate(corridor.room);
+    if (String(sub.last_at) > String(totals.last_at)) totals.last_at = sub.last_at;
     totals.rooms += sub.rooms;
     totals.corridors += sub.corridors;
     totals.cauldrons += sub.cauldrons;
@@ -1415,9 +1440,17 @@ function accumulate(room) {
   return totals;
 }
 
-// 探索の入口＝アイデア全部と、ミッション由来ではないログ。
-// 区画には割らない。ひとつの盤に全部載せて、関わりは派生したミッションだけが決める。
-export function getDungeon() {
+/* 探索の入口＝アイデア全部と、ミッション由来ではないログ。
+   区画には割らない。ひとつの盤に全部載せて、関わりは派生したミッションだけが決める。
+
+   期間を切って載せる道を選ぶ。既定は直近1か月で、それより古い道は盤から降ろす。
+   全部を載せ続けると、何年ぶんかの記録がいずれ盤を埋めて読めなくなるため。
+   道が古いかどうかは、その道でいちばん新しい出来事で決める。
+   入口が古くても、そこから最近も掘っているなら現役として残す。 */
+export function getDungeon({ since = null, until = null } = {}) {
+  const from = since === null ? monthsAgoIso(1) : dayStartIso(since);
+  const to = until === null ? null : dayEndIso(until);
+
   const roads = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
     ...db
@@ -1426,6 +1459,12 @@ export function getDungeon() {
       .map((row) => dungeonRoom('log', row, 0)),
   ]
     .map((room) => ({ ...room, totals: accumulate(room) }))
+    .filter((room) => {
+      const last = String(room.totals.last_at);
+      if (from && last < from) return false;
+      if (to && last > to) return false;
+      return true;
+    })
     // 深い道から。同じ深さなら新しい順。盤の並びをここで決めておく。
     .sort((a, b) =>
       b.totals.depth !== a.totals.depth
@@ -1460,7 +1499,7 @@ export function getDungeon() {
     },
   );
 
-  return { totals, roads };
+  return { totals, roads, period: { since: from, until: to } };
 }
 
 /* ---------- summary（ホームのタンク） ---------- */

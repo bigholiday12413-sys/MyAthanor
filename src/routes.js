@@ -205,8 +205,13 @@ api.put('/legacies/:kind/:id', handle((req, res) => {
   res.json(store.setLegacy(req.params.kind, id(req), value));
 }));
 
-/* ダンジョン：区画に割らない1枚の盤。 */
-api.get('/dungeon', handle((_req, res) => res.json(store.getDungeon())));
+/* ダンジョン：区画に割らない1枚の盤。
+   since / until（YYYY-MM-DD）で載せる期間を切る。既定は直近1か月。 */
+api.get('/dungeon', handle((req, res) =>
+  res.json(store.getDungeon({
+    since: req.query.since ?? null,
+    until: req.query.until ?? null,
+  }))));
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));

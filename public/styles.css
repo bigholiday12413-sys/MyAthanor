@@ -1246,6 +1246,7 @@ input[type='range']::-moz-range-thumb {
 /* 盤は1枚きり。区画には割らない。
    何と何が関わっているかは、派生したミッションだけが決める。 */
 .board-stat {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1262,6 +1263,20 @@ input[type='range']::-moz-range-thumb {
 
 .board-stat .spacer {
   flex: 1;
+}
+
+/* 古びたダンジョン。畳んである間は1行しか取らない。 */
+.dig {
+  flex: none;
+  margin: 0 0 6px;
+}
+
+.dig-form {
+  padding-bottom: 6px;
+}
+
+.dig-form .row {
+  gap: 8px;
 }
 
 /* 盤は残りぜんぶを使う。縦にも横にも合わせて縮めるので、1画面に収まる。 */

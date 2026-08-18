@@ -2605,15 +2605,41 @@ function boardMap(roads) {
   `;
 }
 
+/* 盤に載せる期間。null は既定（直近1か月）。
+   期間を指定したものが「古びたダンジョン」で、当時の盤をそのまま掘り起こす。 */
+let dungeonRange = null;
+
 async function renderDungeon() {
   setActiveTab('dungeon');
-  setTopbar({ title: 'ダンジョン' });
+  setTopbar({ title: dungeonRange ? '古びたダンジョン' : 'ダンジョン' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const board = await api('/dungeon');
-  const { totals, roads } = board;
+  const query = dungeonRange
+    ? `?since=${dungeonRange.since}${dungeonRange.until ? `&until=${dungeonRange.until}` : ''}`
+    : '';
+  const { totals, roads } = await api(`/dungeon${query}`);
+
+  const digger = `
+    <details class="optional dig" ${dungeonRange ? 'open' : ''}>
+      <summary>${dungeonRange ? '掘り起こした期間' : '古びたダンジョン'}</summary>
+      <form class="dig-form" id="dig-form">
+        <div class="row">
+          <div class="field">
+            <input id="dig-from" type="date" value="${esc(dungeonRange?.since ?? '')}" />
+          </div>
+          <div class="field">
+            <input id="dig-to" type="date" value="${esc(dungeonRange?.until ?? '')}" />
+          </div>
+        </div>
+        <div class="btn-row">
+          ${dungeonRange ? '<button type="button" class="ghost" id="dig-now">いまへ戻す</button>' : ''}
+          <button type="submit" class="primary">掘り起こす</button>
+        </div>
+      </form>
+    </details>`;
 
   viewEl.innerHTML = `
+    ${digger}
     ${
       roads.length
         ? `<div class="board-stat">
@@ -2628,9 +2654,23 @@ async function renderDungeon() {
              )}</span>
            </div>
            ${boardMap(roads)}`
-        : '<div class="empty">まだ盤がありません</div>'
+        : '<div class="empty">この期間の盤はありません</div>'
     }
   `;
+
+  document.getElementById('dig-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const since = document.getElementById('dig-from').value;
+    const until = document.getElementById('dig-to').value;
+    if (!since) return toast('いつからを入れてください', true);
+    dungeonRange = { since, until: until || null };
+    renderDungeon();
+  });
+
+  document.getElementById('dig-now')?.addEventListener('click', () => {
+    dungeonRange = null;
+    renderDungeon();
+  });
 }
 
 /* ---------- ページ送り ----------
