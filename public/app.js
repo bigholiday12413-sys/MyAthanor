@@ -2,6 +2,11 @@
 
 import { icon, iconBody, KIND_ICON } from './icons.js';
 
+/* いったん伏せてあるもの。表と API と保存済みの値はそのまま残してあるので、
+   true に戻せば元通り出る。伏せている間も、大釜に入っているミッションは
+   ふつうのミッションとして扱う（隠したせいで触れなくなるのが一番まずい）。 */
+const SHOW = { temperature: false, cauldron: false };
+
 const viewEl = document.getElementById('view');
 const topbarEl = document.getElementById('topbar');
 const tabsEl = document.getElementById('tabs');
@@ -165,7 +170,10 @@ function dueState(mission) {
 
 function dueRange(mission) {
   if (!mission.start_date && !mission.due_date) {
-    return mission.effective_due_date ? `大釜 → ${fmtShortDay(mission.effective_due_date)}` : '';
+    if (!mission.effective_due_date) return '';
+    return SHOW.cauldron
+      ? `大釜 → ${fmtShortDay(mission.effective_due_date)}`
+      : `→ ${fmtShortDay(mission.effective_due_date)}`;
   }
   const from = mission.start_date ? fmtShortDay(mission.start_date) : '';
   const to = mission.due_date ? fmtShortDay(mission.due_date) : '';
@@ -233,7 +241,7 @@ function missionCard(mission, { showSource = true } = {}) {
           : ''
       }
       ${
-        mission.cauldron
+        SHOW.cauldron && mission.cauldron
           ? `<div class="card-meta"><span>${icon('cauldron')}大釜「${esc(
               mission.cauldron.title,
             )}」の素材</span></div>`
@@ -562,7 +570,7 @@ function streamCard(item) {
     <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
         <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
-        ${item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
+        ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>ミッション由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
         <span class="spacer"></span>
@@ -1037,7 +1045,10 @@ async function renderEntry(kind, entryId) {
   const [entry, allTags] = await Promise.all([api(path), api('/tags')]);
   const at = kind === 'idea' ? entry.created_at : entry.occurred_at;
   // 大釜に入っているミッションは大釜のほうに出すので、こちらからは外す。
-  const loose = entry.missions.filter((mission) => !mission.cauldron_id);
+  // 大釜を伏せている間は外さない。外すとどこからも出てこなくなる。
+  const loose = SHOW.cauldron
+    ? entry.missions.filter((mission) => !mission.cauldron_id)
+    : entry.missions;
 
   viewEl.innerHTML = `
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
@@ -1094,7 +1105,9 @@ async function renderEntry(kind, entryId) {
       </div>
     </form>
 
-    <div class="section-title">大釜</div>
+    ${
+      SHOW.cauldron
+        ? `<div class="section-title">大釜</div>
     <div id="entry-cauldrons">
       ${entry.cauldrons.map(cauldronPanel).join('')}
       <details class="panel optional-panel">
@@ -1119,18 +1132,20 @@ async function renderEntry(kind, entryId) {
           <div class="btn-row"><button type="submit" class="primary">用意する</button></div>
         </form>
       </details>
-    </div>
+    </div>`
+        : ''
+    }
 
-    <div class="section-title">単独のミッション</div>
+    <div class="section-title">${SHOW.cauldron ? '単独のミッション' : 'ミッション'}</div>
     <div class="list" id="entry-missions">
       ${
         loose.length
           ? loose.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">大釜に入っていないミッションはありません</div>'
+          : '<div class="empty">ミッションはありません</div>'
       }
     </div>
 
-    ${kind === 'idea' ? temperaturePanel(entry) : ''}
+    ${SHOW.temperature && kind === 'idea' ? temperaturePanel(entry) : ''}
 
     <div class="section-title">タグ</div>
     <form class="panel" id="tag-form">
@@ -1245,32 +1260,33 @@ async function renderEntry(kind, entryId) {
     );
   });
 
-  if (kind === 'idea') wireTemperature(entry, entryId);
+  if (SHOW.temperature && kind === 'idea') wireTemperature(entry, entryId);
 
-  const cauldronArea = document.getElementById('entry-cauldrons');
-  wireCauldrons(cauldronArea, entryId, kind);
-  document.getElementById('cauldron-new').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = document.getElementById('c-title');
-    const title = input.value.trim();
-    if (!title) return input.focus();
-    try {
-      await api('/cauldrons', {
-        method: 'POST',
-        body: {
-          title,
-          source_type: kind,
-          source_id: entryId,
-          start_date: document.getElementById('c-from').value || null,
-          due_date: document.getElementById('c-to').value || null,
-        },
-      });
-      toast('大釜を用意しました');
-      await renderEntry(kind, entryId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
+  if (SHOW.cauldron) {
+    wireCauldrons(document.getElementById('entry-cauldrons'), entryId, kind);
+    document.getElementById('cauldron-new').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = document.getElementById('c-title');
+      const title = input.value.trim();
+      if (!title) return input.focus();
+      try {
+        await api('/cauldrons', {
+          method: 'POST',
+          body: {
+            title,
+            source_type: kind,
+            source_id: entryId,
+            start_date: document.getElementById('c-from').value || null,
+            due_date: document.getElementById('c-to').value || null,
+          },
+        });
+        toast('大釜を用意しました');
+        await renderEntry(kind, entryId);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
 
   document.getElementById('mission-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1475,7 +1491,9 @@ async function renderSettings() {
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
     </form>
 
-    <div class="section-title">アイデアの冷却</div>
+    ${
+      SHOW.temperature
+        ? `<div class="section-title">アイデアの冷却</div>
     <form class="panel" id="cooling-form">
       <div class="field">
         <label for="half-life">冷却の半減期（日）</label>
@@ -1484,7 +1502,9 @@ async function renderSettings() {
       </div>
       <div class="hint">0 で冷めません。</div>
       <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>
+    </form>`
+        : ''
+    }
 
     <div class="section-title">定期イベント</div>
     <a class="card nav-card" href="#/recurrences">
@@ -1526,22 +1546,24 @@ async function renderSettings() {
 
   wireTimeGrid(document.getElementById('time-grid-panel'), grid);
 
-  document.getElementById('cooling-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api('/settings', {
-        method: 'PUT',
-        body: {
-          cooling_half_life_days: Math.round(
-            Number(document.getElementById('half-life').value || 0),
-          ),
-        },
-      });
-      toast('冷却の設定を保存しました');
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
+  if (SHOW.temperature) {
+    document.getElementById('cooling-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await api('/settings', {
+          method: 'PUT',
+          body: {
+            cooling_half_life_days: Math.round(
+              Number(document.getElementById('half-life').value || 0),
+            ),
+          },
+        });
+        toast('冷却の設定を保存しました');
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
 
   for (const form of viewEl.querySelectorAll('.budget-form')) {
     const kind = form.dataset.kind;
@@ -2538,9 +2560,15 @@ function layoutRoad(root) {
   };
 
   function place(room, depth) {
+    // 大釜を伏せている間は、素材を束ねずに親の軌道として並べる。
+    // 節ごと落とすと、その先に続く道まで盤から消えてしまう。
+    const bundles = SHOW.cauldron ? room.cauldrons : [];
+    const spliced = SHOW.cauldron
+      ? room.corridors
+      : [...room.corridors, ...room.cauldrons.flatMap((bundle) => bundle.corridors)];
     const children = [
-      ...room.corridors.map((corridor) => placeCorridor(corridor, depth + 1)),
-      ...room.cauldrons.map((bundle) => placeCauldron(bundle, depth + 1)),
+      ...spliced.map((corridor) => placeCorridor(corridor, depth + 1)),
+      ...bundles.map((bundle) => placeCauldron(bundle, depth + 1)),
     ];
     const node = {
       kind: 'room',
@@ -2850,7 +2878,7 @@ async function renderDungeon() {
       <div class="map-legend">
         <span>${nodeSwatch('idea')}アイデア</span>
         <span>${nodeSwatch('log')}ログ</span>
-        <span>${nodeSwatch('cauldron')}大釜</span>
+        ${SHOW.cauldron ? `<span>${nodeSwatch('cauldron')}大釜</span>` : ''}
         <span>${trackSwatch('done')}通った軌道</span>
         <span>${trackSwatch('lit')}灯りの軌道</span>
         <span>${trackSwatch('abandoned')}崩落</span>
@@ -2875,7 +2903,11 @@ async function renderDungeon() {
                  <span>最深 ${region.totals.depth}</span>`
               : ''
           }
-          ${region.totals.cauldrons ? `<span>大釜 ${region.totals.cauldrons}</span>` : ''}
+          ${
+            SHOW.cauldron && region.totals.cauldrons
+              ? `<span>大釜 ${region.totals.cauldrons}</span>`
+              : ''
+          }
           ${
             region.totals.legacies
               ? `<span class="hot">宝箱 ${region.totals.legacies}</span>`
