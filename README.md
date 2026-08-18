@@ -40,9 +40,15 @@ DB は初回起動時に自動作成される。バックアップは `data/` �
 https://bigholiday12413-sys.github.io/MyAthanor/
 ```
 
-Pages は workflow 側で有効にする（`configure-pages` の `enablement: true`）ので、
-ふだんは設定画面を触らなくてよい。うまく有効にならなかったときだけ
-Settings → Pages → Source を **GitHub Actions** にする。
+**初回だけリポジトリ側の設定が要る。**
+Settings → Pages → Source を **GitHub Actions** にしてから、
+Actions → Pages → Run workflow で一度流す。
+
+これを workflow 側から自動でやることはできない。サイトの作成はリポジトリの
+**管理権限**が要り、workflow の `GITHUB_TOKEN` には無いため
+（`permissions: pages: write` は配信までしか届かない）。
+`configure-pages` に `enablement: true` を渡すと
+`Resource not accessible by integration` で落ちる。
 `main` に入る前に見たいときは、Actions → Pages → Run workflow でブランチを選べば出る。
 
 **出るのは見本版だけで、持ち主のデータは1件も載らない。**
