@@ -2696,9 +2696,11 @@ function goToPage(next) {
 // 画面を切り替えたときだけ先頭に戻す。その場の書き換えでは読んでいた頁に留まる。
 let toFirstPage = true;
 
-/* この枚数までは、めくらずに縦へ流す。
+/* この丈までは、めくらずに縦へ流す。単位は画面。
    1画面に少し足りないだけで送る操作を強いるほうが、指の手数が増える。
-   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。 */
+   これを超えたら、いつまで続くのか分からない縦長になるのでめくりへ切り替える。
+
+   四捨五入で見るので「2画面ぶんぐらいまで」。2.4画面は流し、2.6画面はめくる。 */
 const SCROLL_LIMIT = 2;
 let scrolls = false;
 
@@ -2715,33 +2717,48 @@ function refitPages() {
     page = 0;
     scrolls = true;
     pagerEl.hidden = true;
+    pageCountEl.textContent = '';
     document.body.classList.remove('is-paged');
     toFirstPage = false;
     return;
   }
 
-  // 判定はいつも段組みの状態で測る。流したまま測ると必ず1ページになり、
-  // 一度縦へ倒れたらめくりへ戻れなくなる。
+  /* 送るか流すかは、段に割る前の丈で決める。
+     段の本数で決めていたが、枠を割らない指定のせいで段の末尾に白が残り、
+     2画面ぶんの中身が3段にも4段にもなる。それをそのまま頁数と読んでいたので、
+     流せるはずのものがめくりに回っていた。 */
+  viewEl.style.columnWidth = '';
+  viewEl.classList.add('is-scroll');
+  const screens = viewEl.scrollHeight / Math.max(1, viewEl.clientHeight);
+  const wasScrolling = scrolls;
+  scrolls = Math.round(screens) <= SCROLL_LIMIT;
+
+  if (scrolls) {
+    const split = !wasScrolling || pageTotal !== 1;
+    pageTotal = 1;
+    page = 0;
+    pagerEl.hidden = true;
+    // 数字も消す。隠すだけだと、次に開いた画面の数と混ざって読めてしまう。
+    pageCountEl.textContent = '';
+    document.body.classList.remove('is-paged');
+    viewEl.scrollLeft = 0;
+    if (toFirstPage || split) viewEl.scrollTop = 0;
+    toFirstPage = false;
+    return;
+  }
+
+  // めくるほうに回ったら、段に割ってから何段になったかを数える。
   viewEl.classList.remove('is-scroll');
   const { width, gap, step, padX } = pageMetrics();
   viewEl.style.columnWidth = `${width}px`;
   const flowed = Math.max(0, viewEl.scrollWidth - padX);
   const total = Math.max(1, Math.round((flowed + gap) / step));
-  const split = total !== pageTotal;
+  const split = wasScrolling || total !== pageTotal;
 
   pageTotal = total;
-  scrolls = total <= SCROLL_LIMIT;
-  viewEl.classList.toggle('is-scroll', scrolls);
-  pagerEl.hidden = scrolls || pageTotal < 2;
-  document.body.classList.toggle('is-paged', !scrolls && pageTotal > 1);
-
-  if (scrolls) {
-    viewEl.scrollLeft = 0;
-    if (toFirstPage || split) viewEl.scrollTop = 0;
-    page = 0;
-  } else {
-    goToPage(toFirstPage || split ? 0 : page);
-  }
+  pagerEl.hidden = pageTotal < 2;
+  document.body.classList.toggle('is-paged', pageTotal > 1);
+  goToPage(toFirstPage || split ? 0 : page);
   toFirstPage = false;
 }
 
