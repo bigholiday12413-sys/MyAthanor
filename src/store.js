@@ -12,6 +12,14 @@ import {
 // タイムは分、ウォレットは円。どちらも整数で保持する。
 const nowIso = () => new Date().toISOString();
 
+/* 入力が不正なときの投げ物。status を付けておくと routes.js の handle() が
+   そのまま HTTP に落としてくれるので、ルート側で try/catch を書かずに済む。 */
+function badRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 function int(value, { min = 0 } = {}) {
   const n = Math.round(Number(value ?? 0));
   if (!Number.isFinite(n)) return min;
@@ -832,416 +840,6 @@ export function clearBudget(kind, periodKey) {
   return { kind, ...period, ...resolveBudget(kind, period.key) };
 }
 
-/* ---------- recurrence（定期イベント） ---------- */
-
-// 初回同期で遡る上限。開始日をうんと過去にしても大量生成にならないようにする。
-const BACKFILL_LIMIT_DAYS = 366;
-
-function badRequest(message) {
-  const err = new Error(message);
-  err.status = 400;
-  return err;
-}
-
-function requireDateKey(value, label) {
-  const date = parseDateKey(value);
-  if (!date) throw badRequest(`${label} must be YYYY-MM-DD`);
-  return date;
-}
-
-// 定義の妥当性を確認し、DB に入れる形に正規化する。
-function normalizeRecurrence(input, base = null) {
-  const freq = input.freq ?? base?.freq;
-  if (!['daily', 'weekly', 'monthly'].includes(freq)) {
-    throw badRequest('freq must be daily, weekly or monthly');
-  }
-
-  let weekday = null;
-  if (freq === 'weekly') {
-    const value = input.weekday ?? base?.weekday;
-    weekday = int(value);
-    if (value === undefined || value === null || weekday < 0 || weekday > 6) {
-      throw badRequest('weekday must be 0 (Mon) .. 6 (Sun)');
-    }
-  }
-
-  let monthDay = null;
-  if (freq === 'monthly') {
-    const value = input.month_day ?? base?.month_day;
-    monthDay = int(value);
-    if (value === undefined || value === null || monthDay < 1 || monthDay > 31) {
-      throw badRequest('month_day must be 1..31');
-    }
-  }
-
-  const startKey = input.start_date ?? base?.start_date ?? dateKey(new Date());
-  const start = requireDateKey(startKey, 'start_date');
-
-  const endInput = input.end_date === undefined ? base?.end_date ?? null : input.end_date;
-  const endKey = endInput === null || endInput === '' ? null : endInput;
-  if (endKey !== null) {
-    const end = requireDateKey(endKey, 'end_date');
-    if (end < start) throw badRequest('end_date must not be before start_date');
-  }
-
-  return {
-    title: requireTitle(input.title ?? base?.title),
-    freq,
-    weekday,
-    month_day: monthDay,
-    time_spent: int(input.time_spent ?? base?.time_spent ?? 0),
-    money_spent: int(input.money_spent ?? base?.money_spent ?? 0),
-    start_date: dateKey(start),
-    end_date: endKey,
-    active: (input.active ?? base?.active ?? 1) ? 1 : 0,
-  };
-}
-
-// [from, to]（両端含む・ローカル日付）に含まれる開催日を列挙する。
-function scheduleDates(recurrence, from, to) {
-  const start = parseDateKey(recurrence.start_date);
-  const end = recurrence.end_date ? parseDateKey(recurrence.end_date) : null;
-  if (!start) return [];
-
-  const first = from > start ? from : start;
-  const last = end && end < to ? end : to;
-  if (first > last) return [];
-
-  const dates = [];
-  const guard = 2000;
-
-  if (recurrence.freq === 'daily') {
-    for (let d = first; d <= last && dates.length < guard; d = addDays(d, 1)) {
-      dates.push(dateKey(d));
-    }
-    return dates;
-  }
-
-  if (recurrence.freq === 'weekly') {
-    const shift = (recurrence.weekday - weekdayIndex(first) + 7) % 7;
-    for (let d = addDays(first, shift); d <= last && dates.length < guard; d = addDays(d, 7)) {
-      dates.push(dateKey(d));
-    }
-    return dates;
-  }
-
-  // monthly: 無い日付（2月31日など）はその月の末日に寄せる
-  let cursor = new Date(first.getFullYear(), first.getMonth(), 1);
-  while (cursor <= last && dates.length < guard) {
-    const day = Math.min(
-      recurrence.month_day,
-      daysInMonth(cursor.getFullYear(), cursor.getMonth()),
-    );
-    const date = new Date(cursor.getFullYear(), cursor.getMonth(), day);
-    if (date >= first && date <= last) dates.push(dateKey(date));
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-  }
-  return dates;
-}
-
-function isScheduled(recurrence, key) {
-  const date = parseDateKey(key);
-  if (!date) return false;
-  return scheduleDates(recurrence, date, date).length === 1;
-}
-
-function getOccurrenceRow(recurrenceId, key) {
-  return db
-    .prepare(`SELECT * FROM occurrence WHERE recurrence_id = ? AND date = ?`)
-    .get(recurrenceId, key);
-}
-
-// 定義の値に、その回の上書きを重ねた実効値。
-function effectiveValues(recurrence, occurrence) {
-  return {
-    title: occurrence?.title ?? recurrence.title,
-    time_spent: occurrence?.time_spent ?? recurrence.time_spent,
-    money_spent: occurrence?.money_spent ?? recurrence.money_spent,
-  };
-}
-
-function writeLogForOccurrence(recurrence, key, occurrence) {
-  const values = effectiveValues(recurrence, occurrence);
-  const occurredAt = parseDateKey(key).toISOString();
-  const { lastInsertRowid } = db
-    .prepare(`
-      INSERT INTO log (title, occurred_at, time_spent, money_spent, source_recurrence_id)
-      VALUES (?, ?, ?, ?, ?)
-    `)
-    .run(values.title, occurredAt, values.time_spent, values.money_spent, recurrence.id);
-
-  db.prepare(`
-    INSERT INTO occurrence (recurrence_id, date, status, log_id) VALUES (?, ?, 'scheduled', ?)
-    ON CONFLICT (recurrence_id, date) DO UPDATE SET log_id = excluded.log_id
-  `).run(recurrence.id, key, Number(lastInsertRowid));
-
-  return Number(lastInsertRowid);
-}
-
-// 開催日が来た回をログにする。スキップ済み・ログ化済みは触らない。
-export function syncRecurrences(now = new Date()) {
-  const active = db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all();
-  if (active.length === 0) return 0;
-
-  const todayKey = dateKey(now);
-  const today = parseDateKey(todayKey);
-  const floor = addDays(today, -BACKFILL_LIMIT_DAYS);
-
-  return transaction(() => {
-    let created = 0;
-    for (const recurrence of active) {
-      const resume = recurrence.materialized_through
-        ? addDays(parseDateKey(recurrence.materialized_through), 1)
-        : parseDateKey(recurrence.start_date);
-      const from = resume > floor ? resume : floor;
-      if (from > today) continue;
-
-      for (const key of scheduleDates(recurrence, from, today)) {
-        const occurrence = getOccurrenceRow(recurrence.id, key);
-        if (occurrence?.status === 'skipped' || occurrence?.log_id) continue;
-        writeLogForOccurrence(recurrence, key, occurrence);
-        created += 1;
-      }
-      db.prepare(`UPDATE recurrence SET materialized_through = ? WHERE id = ?`)
-        .run(todayKey, recurrence.id);
-    }
-    return created;
-  });
-}
-
-function decorateRecurrence(recurrence, now = new Date()) {
-  const today = parseDateKey(dateKey(now));
-  const horizon = addDays(today, 400);
-  const next = scheduleDates(recurrence, addDays(today, 1), horizon).find(
-    (key) => getOccurrenceRow(recurrence.id, key)?.status !== 'skipped',
-  );
-  return { ...recurrence, active: Boolean(recurrence.active), next_date: next ?? null };
-}
-
-export function listRecurrences() {
-  return db
-    .prepare(`SELECT * FROM recurrence ORDER BY active DESC, id DESC`)
-    .all()
-    .map((row) => decorateRecurrence(row));
-}
-
-export function getRecurrence(id) {
-  const row = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!row) throw notFound('recurrence');
-  return decorateRecurrence(row);
-}
-
-export function createRecurrence(input) {
-  const values = normalizeRecurrence(input ?? {});
-  const { lastInsertRowid } = db
-    .prepare(`
-      INSERT INTO recurrence
-        (title, freq, weekday, month_day, time_spent, money_spent,
-         start_date, end_date, active, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    .run(
-      values.title,
-      values.freq,
-      values.weekday,
-      values.month_day,
-      values.time_spent,
-      values.money_spent,
-      values.start_date,
-      values.end_date,
-      values.active,
-      new Date().toISOString(),
-    );
-  syncRecurrences();
-  return getRecurrence(Number(lastInsertRowid));
-}
-
-export function updateRecurrence(id, input) {
-  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!current) throw notFound('recurrence');
-  const values = normalizeRecurrence(input ?? {}, current);
-
-  db.prepare(`
-    UPDATE recurrence
-       SET title = ?, freq = ?, weekday = ?, month_day = ?, time_spent = ?,
-           money_spent = ?, start_date = ?, end_date = ?, active = ?
-     WHERE id = ?
-  `).run(
-    values.title,
-    values.freq,
-    values.weekday,
-    values.month_day,
-    values.time_spent,
-    values.money_spent,
-    values.start_date,
-    values.end_date,
-    values.active,
-    id,
-  );
-  syncRecurrences();
-  return getRecurrence(id);
-}
-
-// 定義を消しても、生成済みのログは記録として残す。
-export function deleteRecurrence(id) {
-  const current = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(id);
-  if (!current) throw notFound('recurrence');
-  return transaction(() => {
-    db.prepare(`DELETE FROM occurrence WHERE recurrence_id = ?`).run(id);
-    db.prepare(`DELETE FROM recurrence WHERE id = ?`).run(id);
-    return { id, deleted: true };
-  });
-}
-
-// 直近の回を、過去 back 回・先 ahead 回ぶん並べる。
-export function listOccurrences(recurrenceId, { back = 4, ahead = 4 } = {}) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-
-  const backCount = Math.min(Math.max(int(back), 0), 60);
-  const aheadCount = Math.min(Math.max(int(ahead), 0), 60);
-  const todayKey = dateKey(new Date());
-  const today = parseDateKey(todayKey);
-
-  // 頻度に応じて十分広い範囲を取ってから、今日の前後で切り出す。
-  const span = { daily: 1, weekly: 7, monthly: 31 }[recurrence.freq];
-  const all = scheduleDates(
-    recurrence,
-    addDays(today, -span * (backCount + 2)),
-    addDays(today, span * (aheadCount + 2)),
-  );
-  const past = all.filter((key) => key <= todayKey).slice(-backCount);
-  const future = all.filter((key) => key > todayKey).slice(0, aheadCount);
-
-  return [...past, ...future]
-    .reverse()
-    .map((key) => {
-      const occurrence = getOccurrenceRow(recurrenceId, key);
-      const values = effectiveValues(recurrence, occurrence);
-      return {
-        recurrence_id: recurrenceId,
-        date: key,
-        status: occurrence?.status ?? 'scheduled',
-        ...values,
-        log_id: occurrence?.log_id ?? null,
-        is_overridden: Boolean(
-          occurrence &&
-            (occurrence.title !== null ||
-              occurrence.time_spent !== null ||
-              occurrence.money_spent !== null),
-        ),
-        is_past: key <= todayKey,
-      };
-    });
-}
-
-// その回だけ値を変える／スキップする。ログ化済みならログにも反映する。
-export function updateOccurrence(recurrenceId, key, input) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
-
-  const status = input.status ?? undefined;
-  if (status !== undefined && !['scheduled', 'skipped'].includes(status)) {
-    throw badRequest('status must be scheduled or skipped');
-  }
-
-  return transaction(() => {
-    const current = getOccurrenceRow(recurrenceId, key);
-    const next = {
-      status: status ?? current?.status ?? 'scheduled',
-      title:
-        input.title === undefined
-          ? current?.title ?? null
-          : input.title === null || input.title === ''
-            ? null
-            : requireTitle(input.title),
-      time_spent:
-        input.time_spent === undefined
-          ? current?.time_spent ?? null
-          : input.time_spent === null
-            ? null
-            : int(input.time_spent),
-      money_spent:
-        input.money_spent === undefined
-          ? current?.money_spent ?? null
-          : input.money_spent === null
-            ? null
-            : int(input.money_spent),
-    };
-
-    db.prepare(`
-      INSERT INTO occurrence (recurrence_id, date, status, title, time_spent, money_spent, log_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (recurrence_id, date) DO UPDATE
-        SET status = excluded.status, title = excluded.title,
-            time_spent = excluded.time_spent, money_spent = excluded.money_spent
-    `).run(
-      recurrenceId,
-      key,
-      next.status,
-      next.title,
-      next.time_spent,
-      next.money_spent,
-      current?.log_id ?? null,
-    );
-
-    const logId = current?.log_id ?? null;
-    const values = effectiveValues(recurrence, next);
-
-    if (next.status === 'skipped') {
-      // 行かなかった回。生成済みのログは取り消す。
-      if (logId) {
-        db.prepare(`DELETE FROM log WHERE id = ?`).run(logId);
-        db.prepare(`UPDATE occurrence SET log_id = NULL WHERE recurrence_id = ? AND date = ?`)
-          .run(recurrenceId, key);
-      }
-    } else if (logId) {
-      db.prepare(`UPDATE log SET title = ?, time_spent = ?, money_spent = ? WHERE id = ?`)
-        .run(values.title, values.time_spent, values.money_spent, logId);
-    } else if (key <= dateKey(new Date())) {
-      // スキップを取り消した過去の回は、その場でログに戻す。
-      writeLogForOccurrence(recurrence, key, getOccurrenceRow(recurrenceId, key));
-    }
-
-    return listOccurrences(recurrenceId).find((row) => row.date === key) ?? null;
-  });
-}
-
-// その回の個別変更を取り消し、定義どおりに戻す。
-export function resetOccurrence(recurrenceId, key) {
-  const recurrence = db.prepare(`SELECT * FROM recurrence WHERE id = ?`).get(recurrenceId);
-  if (!recurrence) throw notFound('recurrence');
-  if (!isScheduled(recurrence, key)) throw badRequest('date is not a scheduled occurrence');
-
-  return updateOccurrence(recurrenceId, key, {
-    status: 'scheduled',
-    title: null,
-    time_spent: null,
-    money_spent: null,
-  });
-}
-
-// 期間内のこれから起きる回（明日以降）の合計。今日ぶんは既にログなので数えない。
-function plannedRecurring(period, now) {
-  const today = parseDateKey(dateKey(now));
-  const from = addDays(today, 1);
-  const to = new Date(new Date(period.end).getTime() - 1);
-  const totals = { time: 0, money: 0 };
-  if (from > to) return totals;
-
-  for (const recurrence of db.prepare(`SELECT * FROM recurrence WHERE active = 1`).all()) {
-    for (const key of scheduleDates(recurrence, from, to)) {
-      const occurrence = getOccurrenceRow(recurrence.id, key);
-      if (occurrence?.status === 'skipped') continue;
-      const values = effectiveValues(recurrence, occurrence);
-      totals.time += values.time_spent;
-      totals.money += values.money_spent;
-    }
-  }
-  return totals;
-}
-
 /* ---------- 大釜（ミッションのTODOリスト） ---------- */
 
 function cauldronRow(id) {
@@ -1685,18 +1283,13 @@ export function getSummary(now = new Date()) {
   const plannedWeek = plannedMissions(week);
   const plannedMoney = plannedMissions(moneyWeek);
 
-  // 定期イベントのこれから起きる回も消費予定に含める。
-  const recurringWeek = plannedRecurring(week, now);
-  const recurringMoney = plannedRecurring(moneyWeek, now);
-
-  const build = (budget, consumed, fromMissions, fromRecurring, period) => {
-    const plannedValue = fromMissions + fromRecurring;
+  const build = (budget, consumed, fromMissions, period) => {
+    const plannedValue = fromMissions;
     return {
       budget,
       consumed,
       planned: plannedValue,
       planned_missions: fromMissions,
-      planned_recurring: fromRecurring,
       // 進行中ミッションを全て完了した場合の残量
       remaining: budget - consumed - plannedValue,
       remaining_now: budget - consumed,
@@ -1708,19 +1301,13 @@ export function getSummary(now = new Date()) {
   return {
     time: {
       unit: 'minutes',
-      ...build(timeBudget.amount, spent(week).time, plannedWeek.time, recurringWeek.time, week),
+      ...build(timeBudget.amount, spent(week).time, plannedWeek.time, week),
       budget_source: timeBudget.source,
       due_mission_count: plannedWeek.count,
     },
     money: {
       unit: 'jpy',
-      ...build(
-        moneyBudget.amount,
-        spent(moneyWeek).money,
-        plannedMoney.money,
-        recurringMoney.money,
-        moneyWeek,
-      ),
+      ...build(moneyBudget.amount, spent(moneyWeek).money, plannedMoney.money, moneyWeek),
       budget_source: moneyBudget.source,
       due_mission_count: plannedMoney.count,
     },
@@ -1732,8 +1319,5 @@ export function getSummary(now = new Date()) {
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,
-    recurrence_count: db
-      .prepare(`SELECT COUNT(*) AS total FROM recurrence WHERE active = 1`)
-      .get().total,
   };
 }

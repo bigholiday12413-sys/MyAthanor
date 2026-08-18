@@ -29,19 +29,6 @@ export function seed(db, transaction) {
       48000,
     );
 
-    /* タグ */
-    const tagIds = {};
-    for (const name of ['庭', '書物', '道具']) {
-      tagIds[name] = idOf(`INSERT INTO tag (name, created_at) VALUES (?, ?)`, name, iso(60));
-    }
-    const tie = (kind, entryId, name) =>
-      run(
-        `INSERT INTO entry_tag (kind, entry_id, tag_id) VALUES (?, ?, ?)`,
-        kind,
-        entryId,
-        tagIds[name],
-      );
-
     const idea = (title, days, temperature) =>
       idOf(
         `INSERT INTO idea (title, created_at, temperature, temperature_at) VALUES (?, ?, ?, ?)`,
@@ -108,12 +95,10 @@ export function seed(db, transaction) {
 
     /* 庭：いちばん深い道。入口から掘削中まで灯りが通る */
     const garden = idea('月見の庭をつくる', 40, 344);
-    tie('idea', garden, '庭');
 
     const soil = doneMission('土を入れ替える', 'idea', garden, 240, 4800, 32);
     const stone = doneMission('石を並べる', 'log', soil.log, 480, 9800, 21);
     run(`UPDATE log SET is_legacy = 1 WHERE id = ?`, stone.log);
-    tie('log', stone.log, '庭');
 
     activeMission('灯籠を据える', 'log', stone.log, 180, 12000, ymd(4));
 
@@ -145,14 +130,12 @@ export function seed(db, transaction) {
 
     /* 書物 */
     const book = idea('写本を仕上げる', 26, 312);
-    tie('idea', book, '書物');
     const paper = doneMission('料紙を漉く', 'idea', book, 360, 6400, 11);
     run(`UPDATE mission SET is_legacy = 1 WHERE id = ?`, paper.id);
     activeMission('罫を引く', 'log', paper.log, 90, 1200, ymd(2));
 
     /* 冷めかけのアイデアと、スペル */
     const kiln = idea('小さな窯をつくる', 120, 366);
-    tie('idea', kiln, '道具');
 
     const spell = idOf(
       `INSERT INTO idea (title, created_at, is_spell, body, temperature, temperature_at)
@@ -163,11 +146,9 @@ export function seed(db, transaction) {
         + '道具は買うときではなく、直すときに自分のものになる。',
       iso(18),
     );
-    tie('idea', spell, '道具');
 
     /* 単独のログ */
-    const scrap = log('古書店で拾った断簡', 5, 60, 3400);
-    tie('log', scrap, '書物');
+    log('古書店で拾った断簡', 5, 60, 3400);
     log('鑿を研いだ', 2, 45, 0);
 
     /* 先月ぶんの消費。金庫の積み上がりを見せるため */
@@ -189,21 +170,19 @@ export function seed(db, transaction) {
     ]) {
       bought(title, days, money, 'food');
     }
-    const shears = bought('剪定鋏', 6, 4200, 'gear');
-    tie('log', shears, '道具');
-    const kettle = bought('鉄瓶', 13, 5600, 'gear');
-    tie('log', kettle, '道具');
+    bought('剪定鋏', 6, 4200, 'gear');
+    bought('鉄瓶', 13, 5600, 'gear');
     bought('作業用の前掛け', 24, 3600, 'gear');
 
-    /* 定期イベント */
+    /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。 */
     run(
-      `INSERT INTO recurrence
-         (title, freq, weekday, time_spent, money_spent, start_date, active, created_at)
-       VALUES (?, 'weekly', 5, ?, ?, ?, 1, ?)`,
+      `INSERT INTO mission
+         (title, source_type, source_id, status, estimated_time, estimated_money,
+          created_at, repeat_days)
+       VALUES (?, 'idea', ?, 'active', ?, 0, ?, 3)`,
       '庭の水やり',
+      garden,
       45,
-      0,
-      ymd(-28),
       iso(28),
     );
   });

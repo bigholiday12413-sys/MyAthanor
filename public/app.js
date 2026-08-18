@@ -160,8 +160,7 @@ function shelfHorizon(now = new Date()) {
 const daysUntil = (key) =>
   Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
 
-// 期日はバッジに収めたいので曜日を落とした短い表記を使う
-// （定期イベントの fmtDay は曜日つきで別物）。
+// 期日はバッジに収めたいので曜日を落とした短い表記を使う。
 const fmtShortDay = (key) => {
   const date = new Date(`${key}T00:00:00`);
   return Number.isNaN(date.getTime()) ? key : `${date.getMonth() + 1}/${date.getDate()}`;
@@ -466,14 +465,70 @@ function walletBars(rows) {
    上の試験管と同じガラスの一家にしてあるので、同じ工房の棚に見える。 */
 const SHELF_MAX = 6;
 
+// 棚を描き直すたびに増やす。@keyframes の名前を毎回変えて、前のものと混ぜない。
+let shelfSeq = 0;
+
 // 1歩にかける秒数。急ぐものではないので、ゆっくり歩かせる。
 const KEEPER_STEP = 3;
+// 端まで行ったら、いなくなっている時間。奥へ引っ込んでいるつもり。
+const KEEPER_AWAY = 10;
+// 歩く柄。1歩ごとに次の柄へ移る。
+const KEEPER_FRAMES = ['keeper', 'keeper-b', 'keeper-c'];
 
 /* 棚番の絵だけ縦に長い（帽子のぶん）。共通の icon() は 16x16 を前提に
    viewBox を書くので、ここだけ自前で組む。 */
-function keeperMark() {
+function keeperMark(name) {
   return `<svg class="px keeper-px" viewBox="0 0 16 20" shape-rendering="crispEdges"
-    aria-hidden="true" focusable="false">${iconBody('keeper')}</svg>`;
+    aria-hidden="true" focusable="false">${iconBody(name)}</svg>`;
+}
+
+/* 棚番の動き。右へ歩き、端で消え、しばらくして戻ってくる、を繰り返す。
+
+   歩幅も止まる場所もフラスコの数で変わるので、@keyframes をその場で組む。
+   各keyframe に step-end を付けて、次の点まで値を保たせる。
+   こうすると中割りが起きず、ドット絵が半端な位置に来ない。
+
+   動かすのは transform と opacity だけなので、合成だけで済む。 */
+function keeperWalk(n, uid) {
+  /* 出来事を時間順に並べる。
+     右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。 */
+  const events = [];
+  let t = 0;
+  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) events.push({ t, pos: i, on: 1, face: 1 });
+  events.push({ t, pos: n - 1, on: 0, face: 1 });
+  t += KEEPER_AWAY;
+  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) {
+    events.push({ t, pos: n - 1 - i, on: 1, face: -1 });
+  }
+  events.push({ t, pos: 0, on: 0, face: -1 });
+  const total = t + KEEPER_AWAY;
+
+  /* 最後の点から 100% までは、そのままの姿勢で消えている。
+     終端の keyframe が無いと元の値へ戻そうとするので、明示して置く。 */
+  const last = events[events.length - 1];
+  const stops = [...events, { ...last, t: total }];
+  const at = (time) => `${((time / total) * 100).toFixed(3)}%`;
+  const rule = (time, body) => `${at(time)} { ${body} animation-timing-function: step-end; }`;
+
+  const walk = stops
+    .map((e) => rule(e.t, `transform: translateX(calc((100% + 4px) * ${e.pos})); opacity: ${e.on};`))
+    .join('\n');
+  const face = stops.map((e) => rule(e.t, `transform: scaleX(${e.face});`)).join('\n');
+  /* 柄は1歩ごとに送る。歩いている間だけ入れ替わればよいので、
+     何番目の出来事かをそのまま柄の番号にする。 */
+  const frames = KEEPER_FRAMES.map((_, k) =>
+    stops
+      .map((e, index) => rule(e.t, `opacity: ${index % KEEPER_FRAMES.length === k ? 1 : 0};`))
+      .join('\n'));
+
+  return {
+    seconds: total,
+    css: `
+      @keyframes kw${uid} { ${walk} }
+      @keyframes kf${uid} { ${face} }
+      ${frames.map((body, k) => `@keyframes kp${uid}_${k} { ${body} }`).join('\n')}
+    `,
+  };
 }
 
 /* 丸底フラスコ。他の絵と同じくドット絵で描く。
@@ -566,43 +621,44 @@ function flask(mission, weekEnd) {
   `;
 }
 
-function shelf(missions, weekEnd, { recurring = 0 } = {}) {
+function shelf(missions, weekEnd) {
   const shown = missions.slice(0, SHELF_MAX);
   const n = shown.length;
-  if (!n && !recurring) return '';
+  if (!n) return '';
 
-  /* 棚番。フラスコと同じ段をうろつく。1歩に STEP 秒かけ、端まで行ったら
-     向きを変えて戻る。
-     動かすのは transform だけなので合成で済み、本数が増えても値段は変わらない。
-     steps(n) で n 区間に割ると、位置は 0 から n-1 番目まで飛び飛びに出る。
-     持ち幅がちょうど1つぶんなので、100% + 隙間 = 隣までの距離になる。
-     往復は alternate。折り返しは体ごと裏返して、進む向きに顔を向ける。 */
-  const keeper =
-    n > 1
-      ? `<span class="keeper" style="--n:${n};
-             animation-duration:${n * KEEPER_STEP}s;
-             animation-timing-function:steps(${n}, end)">
-           <span class="keeper-face" style="animation-duration:${n * KEEPER_STEP * 2}s">
-             ${keeperMark()}
-           </span>
-         </span>`
-      : `<span class="keeper is-still"><span class="keeper-face">${keeperMark()}</span></span>`;
-
-  /* 定期イベントは棚に並べない。勝手に起きるもので、こちらが仕込むものではない。
-     右上から吊るしておいて、来る回のぶんだけ札に出す。 */
-  const hung = recurring
-    ? `<a class="hanging" href="#/recurrences" aria-label="定期イベント">
-         <i class="hanging-cord"></i>${icon('hourglass')}
-       </a>`
-    : '';
+  /* 棚番。フラスコと同じ段をうろつく。持ち幅をフラスコ1つぶんに合わせてあるので、
+     100%＋隙間 がそのまま隣までの距離になる。
+     歩く柄は3枚を重ねて置き、表に出す1枚を差し替えて切り替える。
+     動かすのは transform と opacity だけなので、本数が増えても値段は変わらない。 */
+  const uid = (shelfSeq += 1);
+  const walk = n > 1 ? keeperWalk(n, uid) : null;
+  const dress = (k) =>
+    `<span class="keeper-frame"${
+      walk
+        ? ` style="animation-name:kp${uid}_${k};animation-duration:${walk.seconds}s"`
+        : ''
+    }>${keeperMark(KEEPER_FRAMES[k])}</span>`;
+  const keeper = `
+    ${walk ? `<style>${walk.css}</style>` : ''}
+    <span class="keeper${walk ? '' : ' is-still'}" style="--n:${n}${
+      walk ? `;animation-name:kw${uid};animation-duration:${walk.seconds}s` : ''
+    }">
+      <span class="keeper-face"${
+        walk ? ` style="animation-name:kf${uid};animation-duration:${walk.seconds}s"` : ''
+      }>
+        <span class="keeper-frames">
+          ${walk ? KEEPER_FRAMES.map((_, k) => dress(k)).join('') : dress(0)}
+        </span>
+      </span>
+    </span>
+  `;
 
   return `
     <div class="shelf">
-      ${hung}
       <div class="shelf-stage">
         <div class="shelf-row">
           ${shown.map((m) => flask(m, weekEnd)).join('')}
-          ${n ? keeper : ''}
+          ${keeper}
         </div>
       </div>
       <div class="shelf-board"></div>
@@ -680,10 +736,8 @@ async function renderHome() {
     ${
       // 調合棚。今週のぶんは棚の上、それ以外は奥に控えている。
       // 数を並べて書かない。棚に何本あるかがそのまま今週の数になる。
-      // 棚に出すのは今週ぶんだけ。先のものまで並べると、いま見るべきものが埋もれる。
-      shelf(due, weekEnd, {
-        recurring: summary.time.planned_recurring || summary.money.planned_recurring,
-      })
+      // 棚に出すのは今日から7日ぶんだけ。先のものまで並べると、いま見るべきものが埋もれる。
+      shelf(due, weekEnd)
     }
 
     ${
@@ -1271,9 +1325,9 @@ async function renderEntry(kind, entryId) {
       }
       ${
         entry.source_recurrence
-          ? `<div class="stat-line"><span>由来</span><span class="v"><a class="link" href="#/recurrence/${
-              entry.source_recurrence.id
-            }">定期イベント「${esc(entry.source_recurrence.title)}」</a></span></div>`
+          ? `<div class="stat-line"><span>由来</span><span class="v">${esc(
+              entry.source_recurrence.title,
+            )}</span></div>`
           : ''
       }
       <div class="btn-row">
@@ -1592,11 +1646,6 @@ async function renderSettings() {
         : ''
     }
 
-    <div class="section-title">定期イベント</div>
-    <a class="card nav-card" href="#/recurrences">
-      <div class="card-title">${icon('hourglass')}<span>定期的に起こる出来事の登録</span></div>
-    </a>
-
     <div class="section-title">金庫</div>
     <a class="card nav-card" href="#/vault">
       <div class="card-title">${icon('coins')}<span>金庫の初期残高と積立</span></div>
@@ -1692,346 +1741,6 @@ async function renderSettings() {
       }
     });
   }
-}
-
-/* ---------- 定期イベント ---------- */
-
-const FREQ_LABEL = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
-
-function scheduleText(recurrence) {
-  if (recurrence.freq === 'daily') return '毎日';
-  if (recurrence.freq === 'weekly') return `毎週 ${WEEKDAYS[recurrence.weekday]}曜`;
-  return `毎月 ${recurrence.month_day}日`;
-}
-
-function fmtDay(key) {
-  const date = new Date(`${key}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return key;
-  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAYS[(date.getDay() + 6) % 7]})`;
-}
-
-// 定義の入力欄。新規登録と編集で同じものを使う。
-function recurrenceFields(recurrence = null) {
-  const freq = recurrence?.freq ?? 'weekly';
-  const today = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const todayKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-
-  return `
-    <div class="field">
-      <input id="r-title" autocomplete="off"
-             value="${esc(recurrence?.title ?? '')}" />
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="r-freq">繰り返し</label>
-        <select id="r-freq">
-          ${Object.entries(FREQ_LABEL)
-            .map(
-              ([value, label]) =>
-                `<option value="${value}" ${freq === value ? 'selected' : ''}>${label}</option>`,
-            )
-            .join('')}
-        </select>
-      </div>
-      <div class="field" id="r-weekday-field" ${freq === 'weekly' ? '' : 'hidden'}>
-        <label for="r-weekday">曜日</label>
-        <select id="r-weekday">
-          ${WEEKDAYS.map(
-            (label, index) =>
-              `<option value="${index}" ${
-                (recurrence?.weekday ?? 2) === index ? 'selected' : ''
-              }>${label}</option>`,
-          ).join('')}
-        </select>
-      </div>
-      <div class="field" id="r-monthday-field" ${freq === 'monthly' ? '' : 'hidden'}>
-        <label for="r-monthday">日</label>
-        <select id="r-monthday">
-          ${Array.from({ length: 31 }, (_, i) => i + 1)
-            .map(
-              (day) =>
-                `<option value="${day}" ${
-                  (recurrence?.month_day ?? 1) === day ? 'selected' : ''
-                }>${day}</option>`,
-            )
-            .join('')}
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="r-time">消費タイム（時間）</label>
-        <input id="r-time" type="number" step="0.25" min="0"
-               value="${minutesToHours(recurrence?.time_spent ?? 0)}" />
-      </div>
-      <div class="field">
-        <label for="r-money">消費ウォレット（円）</label>
-        <input id="r-money" type="number" step="100" min="0"
-               value="${recurrence?.money_spent ?? 0}" />
-      </div>
-    </div>
-    <details class="optional" ${recurrence?.end_date ? 'open' : ''}>
-      <summary>期間</summary>
-      <div class="row">
-        <div class="field">
-          <label for="r-start">開始日</label>
-          <input id="r-start" type="date" value="${esc(recurrence?.start_date ?? todayKey)}" />
-        </div>
-        <div class="field">
-          <label for="r-end">終了日</label>
-          <input id="r-end" type="date" value="${esc(recurrence?.end_date ?? '')}" />
-        </div>
-      </div>
-    </details>
-  `;
-}
-
-// 繰り返しの種類に応じて曜日／日の欄を出し分ける。
-function wireFreqToggle(scope) {
-  const freq = scope.querySelector('#r-freq');
-  const apply = () => {
-    scope.querySelector('#r-weekday-field').hidden = freq.value !== 'weekly';
-    scope.querySelector('#r-monthday-field').hidden = freq.value !== 'monthly';
-  };
-  freq.addEventListener('change', apply);
-  apply();
-}
-
-function readRecurrenceFields(scope) {
-  const freq = scope.querySelector('#r-freq').value;
-  const end = scope.querySelector('#r-end').value;
-  return {
-    title: scope.querySelector('#r-title').value.trim(),
-    freq,
-    weekday: freq === 'weekly' ? Number(scope.querySelector('#r-weekday').value) : null,
-    month_day: freq === 'monthly' ? Number(scope.querySelector('#r-monthday').value) : null,
-    time_spent: hoursToMinutes(scope.querySelector('#r-time').value),
-    money_spent: Math.round(Number(scope.querySelector('#r-money').value || 0)),
-    start_date: scope.querySelector('#r-start').value,
-    end_date: end === '' ? null : end,
-  };
-}
-
-async function renderRecurrences() {
-  setActiveTab('home');
-  setTopbar({ title: '定期イベント', back: '#/settings' });
-  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
-
-  const recurrences = await api('/recurrences');
-
-  viewEl.innerHTML = `
-    <div class="section-title">登録済み</div>
-    <div class="list">
-      ${
-        recurrences.length
-          ? recurrences
-              .map(
-                (r) => `
-        <a class="card kind-recurrence ${r.active ? '' : 'is-paused'}" href="#/recurrence/${r.id}">
-          <div class="card-top">
-            <span class="badge recurrence">${esc(scheduleText(r))}</span>
-            ${r.active ? '' : '<span class="badge abandoned">停止中</span>'}
-            <span class="spacer"></span>
-            <span>${r.next_date ? `次回 ${esc(fmtDay(r.next_date))}` : '予定なし'}</span>
-          </div>
-          <div class="card-title">${icon('hourglass')}<span>${esc(r.title)}</span></div>
-          <div class="card-meta">
-            <span>タイム ${esc(fmtTime(r.time_spent))}</span>
-            <span>ウォレット ${esc(fmtMoney(r.money_spent))}</span>
-          </div>
-        </a>`,
-              )
-              .join('')
-          : '<div class="empty">定期イベントはまだありません</div>'
-      }
-    </div>
-
-    <div class="section-title">新しく登録</div>
-    <form class="panel" id="recurrence-new">
-      ${recurrenceFields()}
-      <div class="btn-row"><button type="submit" class="primary">登録</button></div>
-    </form>
-  `;
-
-  const form = document.getElementById('recurrence-new');
-  wireFreqToggle(form);
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      const created = await api('/recurrences', {
-        method: 'POST',
-        body: readRecurrenceFields(form),
-      });
-      toast('定期イベントを登録しました');
-      location.hash = `#/recurrence/${created.id}`;
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
-function occurrenceRow(occurrence) {
-  const badges = [];
-  if (occurrence.status === 'skipped') badges.push('<span class="badge abandoned">スキップ</span>');
-  else if (occurrence.log_id) badges.push('<span class="badge log">記録済</span>');
-  else badges.push('<span class="badge active">予定</span>');
-  if (occurrence.is_overridden) badges.push('<span class="badge now">個別</span>');
-
-  const skipped = occurrence.status === 'skipped';
-  return `
-    <div class="occurrence-row ${skipped ? 'is-skipped' : ''}">
-      <div class="occurrence-head">
-        <div class="occurrence-date">${esc(fmtDay(occurrence.date))} ${badges.join('')}</div>
-        <div class="occurrence-actions">
-          ${
-            occurrence.is_overridden
-              ? `<button type="button" class="ghost" data-reset="${esc(occurrence.date)}">既定へ</button>`
-              : ''
-          }
-          <button type="button" class="ghost ${skipped ? '' : 'danger'}"
-                  data-toggle="${esc(occurrence.date)}"
-                  data-status="${skipped ? 'scheduled' : 'skipped'}">
-            ${skipped ? '戻す' : 'スキップ'}
-          </button>
-        </div>
-      </div>
-      <div class="occurrence-inputs">
-        <label>タイム(h)
-          <input type="number" step="0.25" min="0" data-field="time_spent"
-                 data-date="${esc(occurrence.date)}"
-                 data-original="${minutesToHours(occurrence.time_spent)}"
-                 value="${minutesToHours(occurrence.time_spent)}" ${skipped ? 'disabled' : ''} />
-        </label>
-        <label>ウォレット(円)
-          <input type="number" step="100" min="0" data-field="money_spent"
-                 data-date="${esc(occurrence.date)}"
-                 data-original="${occurrence.money_spent}"
-                 value="${occurrence.money_spent}" ${skipped ? 'disabled' : ''} />
-        </label>
-      </div>
-    </div>
-  `;
-}
-
-async function renderRecurrence(recurrenceId) {
-  setActiveTab('home');
-  setTopbar({ title: '定期イベント', back: '#/recurrences' });
-  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
-
-  const recurrence = await api(`/recurrences/${recurrenceId}?back=6&ahead=6`);
-
-  viewEl.innerHTML = `
-    <div class="section-title">定義</div>
-    <form class="panel" id="recurrence-form">
-      ${recurrenceFields(recurrence)}
-      <div class="btn-row">
-        <button type="submit" class="primary">保存</button>
-        <button type="button" class="ghost" id="toggle-active">
-          ${recurrence.active ? '停止する' : '再開する'}
-        </button>
-      </div>
-      <div class="btn-row">
-        <button type="button" class="ghost danger" id="delete-recurrence">この定期イベントを削除</button>
-      </div>
-    </form>
-
-    <div class="section-title">直近の回</div>
-    <form class="panel" id="occurrence-list">
-      ${recurrence.occurrences.map(occurrenceRow).join('')}
-      <div class="btn-row"><button type="submit" class="primary">変更を保存</button></div>
-    </form>
-  `;
-
-  const form = document.getElementById('recurrence-form');
-  wireFreqToggle(form);
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api(`/recurrences/${recurrenceId}`, {
-        method: 'PATCH',
-        body: readRecurrenceFields(form),
-      });
-      toast('保存しました');
-      await renderRecurrence(recurrenceId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  document.getElementById('toggle-active').addEventListener('click', async () => {
-    try {
-      await api(`/recurrences/${recurrenceId}`, {
-        method: 'PATCH',
-        body: { active: recurrence.active ? 0 : 1 },
-      });
-      toast(recurrence.active ? '停止しました' : '再開しました');
-      await renderRecurrence(recurrenceId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  document.getElementById('delete-recurrence').addEventListener('click', async () => {
-    if (!confirm('この定期イベントを削除しますか？（生成済みのログは残ります）')) return;
-    try {
-      await api(`/recurrences/${recurrenceId}`, { method: 'DELETE' });
-      toast('削除しました');
-      location.hash = '#/recurrences';
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  const list = document.getElementById('occurrence-list');
-
-  list.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const byDate = new Map();
-    for (const input of list.querySelectorAll('input[data-date]')) {
-      if (input.disabled || input.value === input.dataset.original) continue;
-      const body = byDate.get(input.dataset.date) ?? {};
-      body[input.dataset.field] =
-        input.dataset.field === 'time_spent'
-          ? hoursToMinutes(input.value)
-          : Math.round(Number(input.value || 0));
-      byDate.set(input.dataset.date, body);
-    }
-    if (byDate.size === 0) return toast('変更はありません');
-    try {
-      for (const [date, body] of byDate) {
-        await api(`/recurrences/${recurrenceId}/occurrences/${date}`, { method: 'PATCH', body });
-      }
-      toast(`${byDate.size}回ぶんを保存しました`);
-      await renderRecurrence(recurrenceId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  list.addEventListener('click', async (event) => {
-    const toggle = event.target.closest('button[data-toggle]');
-    const reset = event.target.closest('button[data-reset]');
-    if (!toggle && !reset) return;
-    try {
-      if (toggle) {
-        await api(`/recurrences/${recurrenceId}/occurrences/${toggle.dataset.toggle}`, {
-          method: 'PATCH',
-          body: { status: toggle.dataset.status },
-        });
-        toast(toggle.dataset.status === 'skipped' ? 'スキップしました' : '予定に戻しました');
-      } else {
-        await api(`/recurrences/${recurrenceId}/occurrences/${reset.dataset.reset}`, {
-          method: 'DELETE',
-        });
-        toast('定義どおりに戻しました');
-      }
-      await renderRecurrence(recurrenceId);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
 }
 
 /* ---------- インゴット ---------- */
@@ -3042,15 +2751,11 @@ async function route() {
     if (hash === '/missions') return await renderMissions();
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
-    if (hash === '/recurrences') return await renderRecurrences();
     if (hash === '/vault') return await renderVault();
     if (hash === '/used') return await renderUsed();
     if (hash === '/spells') return await renderSpells();
     if ((match = hash.match(/^\/spell\/(\d+)$/))) {
       return await renderSpell(Number(match[1]));
-    }
-    if ((match = hash.match(/^\/recurrence\/(\d+)$/))) {
-      return await renderRecurrence(Number(match[1]));
     }
     if ((match = hash.match(/^\/(idea|log)\/(\d+)$/))) {
       return await renderEntry(match[1], Number(match[2]));
