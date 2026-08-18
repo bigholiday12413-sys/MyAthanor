@@ -348,7 +348,8 @@ body::after {
 .budget-row,
 .occurrence-row,
 .stat-line,
-.filters {
+.filters,
+.filter-bar {
   break-inside: avoid;
 }
 
@@ -840,6 +841,25 @@ body::after {
   display: flex;
   gap: 6px;
   margin-bottom: 8px;
+}
+
+/* 列の画面では絞り込みを上に貼り付ける。長い列で絞り込みを変えるたびに
+   いちばん上まで戻らせるのは、ただの手間。
+   枠の内余白ぶんも塗って、札が縁の下を通り抜けるように見せる。 */
+.view.is-scroll .filter-bar {
+  position: sticky;
+  top: calc(var(--pad) * -1);
+  z-index: 5;
+  padding-top: var(--pad);
+  padding-bottom: 8px;
+  margin-top: calc(var(--pad) * -1);
+  background: var(--bg);
+}
+
+/* 下の余白は帯が持つ。子の外余白のままだと塗りが届かず、
+   そこだけ札が透けて見える。 */
+.view.is-scroll .filter-bar > .filters:last-child {
+  margin-bottom: 0;
 }
 
 .filter {
