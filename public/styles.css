@@ -2094,25 +2094,17 @@ a.room-title {
 
 .sheet {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 4px 0 3px;
+  justify-content: center;
+  padding: 3px 0;
   background: var(--surface);
   border: 1px solid var(--line-soft);
   border-radius: 2px;
 }
 
 .sheet-px {
-  width: 26px;
-  height: 26px;
-}
-
-.sheet-day {
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1;
-  color: var(--dim);
+  width: 30px;
+  height: 30px;
 }
 
 /* まだ来ていない日は紙を伏せておく。 */
@@ -2125,10 +2117,6 @@ a.room-title {
   border-color: var(--green);
 }
 
-.sheet.is-today .sheet-day {
-  color: var(--green-dark);
-  font-weight: 700;
-}
 
 /* ---------- ページ送り ---------- */
 

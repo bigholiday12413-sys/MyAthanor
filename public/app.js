@@ -315,15 +315,17 @@ const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
 
 /* 週の紙。月曜から7枚並べ、済んだ日から順に印が入る。
    タイムもウォレットも週で見るようになったので、いま週のどこに居るのかを
-   数字より先に置く。今日の紙にはまだ印を入れない。終わっていないので。 */
+   数字より先に置く。今日の紙にはまだ印を入れない。終わっていないので。
+   曜日の文字は出さない。左から月曜と決まっていて、印の数で何日目かが読める。
+   読み上げには要るので、名前だけ aria-label に残す。 */
 function weekSheets(now = new Date()) {
   const today = (now.getDay() + 6) % 7;
-  return `<div class="week-sheets" aria-label="今週">${WEEKDAYS.map((day, index) => {
+  return `<div class="week-sheets">${WEEKDAYS.map((day, index) => {
     const done = index < today;
     const isToday = index === today;
-    return `<div class="sheet ${done ? 'is-done' : ''} ${isToday ? 'is-today' : ''}">
+    return `<div class="sheet ${done ? 'is-done' : ''} ${isToday ? 'is-today' : ''}"
+      aria-label="${day}${isToday ? '（今日）' : done ? '（済）' : ''}">
       ${icon(done ? 'sheet-done' : 'sheet', 'sheet-px', isToday ? { o: '#4a8236' } : null)}
-      <span class="sheet-day">${day}</span>
     </div>`;
   }).join('')}</div>`;
 }
