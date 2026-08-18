@@ -2028,25 +2028,6 @@ a.room-title {
   flex-direction: column;
 }
 
-/* 奥の棚。小さく・薄くして、後ろに引っ込んで見せる。
-   右上は吊るしもののぶんを空けておく。 */
-.shelf-back {
-  display: flex;
-  justify-content: flex-end;
-  gap: 1px;
-  min-height: 20px;
-  margin-bottom: 2px;
-  padding-right: 26px;
-  opacity: 0.8;
-  text-decoration: none;
-}
-
-.shelf-back svg {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
 /* 定期イベントは棚に並べず、右上から吊るす。
    勝手に起きるもので、こちらが仕込むものではないため。 */
 .hanging {
@@ -2071,7 +2052,9 @@ a.room-title {
   height: 18px;
 }
 
+/* 循環から生えたフラスコには印を重ねる。 */
 .flask {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -2081,7 +2064,24 @@ a.room-title {
   text-decoration: none;
 }
 
-.flask svg {
+.flask .flask-cycle {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  width: 11px;
+  height: 11px;
+}
+
+/* 札の上の循環の印。題のうしろに小さく添える。 */
+.cycle-mark {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-left: 4px;
+}
+
+/* 本体だけ。重ねる印には効かせない。 */
+.flask > svg {
   width: 100%;
   max-width: 44px;
   height: auto;

@@ -140,17 +140,21 @@ const todayKey = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
-// 月曜始まりの週の終わり（日曜）。棚に並べる範囲を決めるのに使う。
 const dateKeyOf = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
     date.getDate(),
   ).padStart(2, '0')}`;
 
-function summaryWeekEnd(now = new Date()) {
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  return new Date(monday.getTime() + 7 * 86_400_000);
+/* 棚に並べる範囲。暦の週ではなく、今日から先の7日。
+   月曜に見たときと日曜に見たときで見える先の長さが変わると、
+   棚が週の後半でどんどん短くなってしまう。 */
+const SHELF_DAYS = 7;
+
+function shelfHorizon(now = new Date()) {
+  const end = new Date(now);
+  end.setHours(0, 0, 0, 0);
+  end.setDate(end.getDate() + SHELF_DAYS);
+  return end;
 }
 
 const daysUntil = (key) =>
@@ -222,7 +226,10 @@ function missionCard(mission, { showSource = true } = {}) {
   const done = mission.status === 'done';
   const due = dueState(mission);
   const actions =
-    mission.status === 'active'
+    // 種は完了しない。回り続けるものなので、止めるだけ。
+    mission.status === 'active' && mission.repeat_days
+      ? `<button data-act="abandon" data-id="${mission.id}" class="ghost danger">止める</button>`
+      : mission.status === 'active'
       ? `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>
          <button data-act="abandon" data-id="${mission.id}" class="ghost danger">断念</button>`
       : mission.status === 'abandoned'
@@ -244,14 +251,20 @@ function missionCard(mission, { showSource = true } = {}) {
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
-      <div class="card-title">${icon(KIND_ICON.mission)}<span>${esc(mission.title)}</span></div>
+      <div class="card-title">${icon(KIND_ICON.mission)}<span>${esc(mission.title)}</span>${
+        // 種そのものと、種から生えたものに循環の印を添える。
+        mission.repeat_days || mission.repeat_of ? icon('cycle', 'cycle-mark') : ''
+      }</div>
       ${
         mission.estimated_time || mission.estimated_money
           ? `<div class="card-meta">
                <span>${done ? '実消費' : '見積'} ${esc(fmtTime(mission.estimated_time))}</span>
                <span>${esc(fmtMoney(mission.estimated_money))}</span>
+               ${mission.repeat_days ? `<span>${mission.repeat_days}日ごと</span>` : ''}
              </div>`
-          : ''
+          : mission.repeat_days
+            ? `<div class="card-meta"><span>${mission.repeat_days}日ごと</span></div>`
+            : ''
       }
       ${
         SHOW.cauldron && mission.cauldron
@@ -274,7 +287,10 @@ function missionCard(mission, { showSource = true } = {}) {
         // 1画面に1枚しか乗らなくなる。開いたときだけ下へ折り返す。
         mission.status === 'active' || actions
           ? `<div class="btn-row card-foot">
-               ${mission.status === 'active' ? missionDates(mission) : ''}
+               ${
+                 // 種は日付を持たない。生えたほうが日付を持つ。
+                 mission.status === 'active' && !mission.repeat_days ? missionDates(mission) : ''
+               }
                ${actions}
              </div>`
           : ''
@@ -542,33 +558,18 @@ function flask(mission, weekEnd) {
     <a class="flask is-${key}" href="${href}" aria-label="${esc(mission.title)}">
       <svg viewBox="0 0 16 16" shape-rendering="crispEdges"
            aria-hidden="true" focusable="false">${body}</svg>
+      ${
+        // 循環から生えたものは、そうと分かるように印を添える。
+        mission.repeat_of ? icon('cycle', 'flask-cycle') : ''
+      }
     </a>
   `;
 }
 
-/* 奥に控えているぶん。今週に期限が無いプロセスは、棚の奥にまだ残っている、
-   という見せ方にする。数を書く代わりに、影のフラスコを並べて丈で出す。 */
-const BACK_MAX = 5;
-
-function backFlasks(count) {
-  if (count <= 0) return '';
-  const shown = Math.min(count, BACK_MAX);
-  const body = toRects({
-    rows: flaskRows(0.45, false),
-    palette: { o: '#c7c6b9', c: '#c2b287', l: '#dfded2', h: '#eceadf' },
-  });
-  return `<a class="shelf-back" href="#/missions" aria-label="奥に ${count} 本">
-    ${Array.from({ length: shown }, () =>
-      `<svg viewBox="0 0 16 16" shape-rendering="crispEdges"
-            aria-hidden="true" focusable="false">${body}</svg>`).join('')}
-  </a>`;
-}
-
-function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
+function shelf(missions, weekEnd, { recurring = 0 } = {}) {
   const shown = missions.slice(0, SHELF_MAX);
-  const rest = missions.length - shown.length;
   const n = shown.length;
-  if (!n && !back && !recurring) return '';
+  if (!n && !recurring) return '';
 
   /* 棚番。フラスコと同じ段をうろつく。1歩に STEP 秒かけ、端まで行ったら
      向きを変えて戻る。
@@ -599,7 +600,6 @@ function shelf(missions, weekEnd, { back = 0, recurring = 0 } = {}) {
     <div class="shelf">
       ${hung}
       <div class="shelf-stage">
-        ${backFlasks(back + Math.max(0, rest))}
         <div class="shelf-row">
           ${shown.map((m) => flask(m, weekEnd)).join('')}
           ${n ? keeper : ''}
@@ -647,8 +647,8 @@ async function renderHome() {
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  // 今週の終わり。ここまでに期限が来るプロセスだけを棚に並べる。
-  const weekEnd = dateKeyOf(new Date(new Date(summaryWeekEnd()).getTime() - 1));
+  // 今日から7日先まで。ここまでに期限が来るプロセスを棚に並べる。
+  const weekEnd = dateKeyOf(shelfHorizon());
   const [summary, vault, due] = await Promise.all([
     api('/summary'),
     api('/vault'),
@@ -680,8 +680,8 @@ async function renderHome() {
     ${
       // 調合棚。今週のぶんは棚の上、それ以外は奥に控えている。
       // 数を並べて書かない。棚に何本あるかがそのまま今週の数になる。
+      // 棚に出すのは今週ぶんだけ。先のものまで並べると、いま見るべきものが埋もれる。
       shelf(due, weekEnd, {
-        back: Math.max(0, summary.active_mission_count - due.length),
         recurring: summary.time.planned_recurring || summary.money.planned_recurring,
       })
     }
@@ -1211,6 +1211,10 @@ async function renderEntry(kind, entryId) {
             <input id="m-to" type="date" />
           </div>
         </div>
+        <div class="field">
+          <label for="m-repeat">${icon('cycle')}何日ごと</label>
+          <input id="m-repeat" type="number" step="1" min="0" max="365" value="0" />
+        </div>
       </details>
       <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
@@ -1382,6 +1386,7 @@ async function renderEntry(kind, entryId) {
           source_id: entry.id,
           estimated_time: hoursToMinutes(document.getElementById('m-time').value),
           estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
+          repeat_days: Number(document.getElementById('m-repeat')?.value || 0),
           start_date: document.getElementById('m-from').value || null,
           due_date: document.getElementById('m-to').value || null,
         },
@@ -1400,13 +1405,16 @@ async function renderEntry(kind, entryId) {
 /* ---------- プロセス ---------- */
 
 let missionFilter = 'active';
-let missionSort = 'due';
+// 'once' = 一回きり（種から生えたものを含む）、'seed' = 繰り返しの種
+let missionRepeat = 'once';
 
 async function renderMissions() {
   setActiveTab('missions');
   setTopbar({ title: 'プロセス' });
 
-  const missions = await api(`/missions?status=${missionFilter}&sort=${missionSort}`);
+  const missions = await api(
+    `/missions?status=${missionFilter}&sort=due&repeat=${missionRepeat}`,
+  );
   const totals = missions.reduce(
     (acc, m) => ({
       time: acc.time + m.estimated_time,
@@ -1425,12 +1433,12 @@ async function renderMissions() {
         .join('')}
     </div>
     <div class="filters">
-      <button class="filter" data-sort="due" aria-pressed="${
-        missionSort === 'due'
-      }">期限順</button>
-      <button class="filter" data-sort="recent" aria-pressed="${
-        missionSort === 'recent'
-      }">新しい順</button>
+      <button class="filter" data-repeat="once" aria-pressed="${
+        missionRepeat === 'once'
+      }">一回きり</button>
+      <button class="filter" data-repeat="seed" aria-pressed="${
+        missionRepeat === 'seed'
+      }">${icon('cycle')}繰り返す</button>
     </div>
     ${
       // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
@@ -1439,7 +1447,7 @@ async function renderMissions() {
         return `<div class="panel tight">
           <div class="stat-line">
             <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}${
-              missionSort === 'due' && undated ? `（期限なし ${undated}）` : ''
+              missionRepeat === 'once' && undated ? `（期限なし ${undated}）` : ''
             }</span>
             <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
           </div>
@@ -1461,9 +1469,9 @@ async function renderMissions() {
       renderMissions();
     });
   }
-  for (const button of viewEl.querySelectorAll('.filter[data-sort]')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-repeat]')) {
     button.addEventListener('click', () => {
-      missionSort = button.dataset.sort;
+      missionRepeat = button.dataset.repeat;
       renderMissions();
     });
   }
@@ -2151,6 +2159,10 @@ async function renderSpell(spellId) {
             <input id="m-to" type="date" />
           </div>
         </div>
+        <div class="field">
+          <label for="m-repeat">${icon('cycle')}何日ごと</label>
+          <input id="m-repeat" type="number" step="1" min="0" max="365" value="0" />
+        </div>
       </details>
       <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
@@ -2203,6 +2215,7 @@ async function renderSpell(spellId) {
           source_id: spellId,
           estimated_time: hoursToMinutes(document.getElementById('m-time').value),
           estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
+          repeat_days: Number(document.getElementById('m-repeat')?.value || 0),
           start_date: document.getElementById('m-from').value || null,
           due_date: document.getElementById('m-to').value || null,
         },

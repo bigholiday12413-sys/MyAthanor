@@ -343,6 +343,14 @@ function decorate(mission) {
   };
 }
 
+// 周期は日数。0 と空は「繰り返さない」。
+function repeatDays(value) {
+  if (value === undefined || value === null || value === '' || Number(value) === 0) return null;
+  const days = int(value);
+  if (days < 1 || days > 365) throw badRequest('repeat_days must be 1..365');
+  return days;
+}
+
 export function createMission({
   title,
   source_type,
@@ -352,6 +360,7 @@ export function createMission({
   cauldron_id,
   start_date,
   due_date,
+  repeat_days,
 }) {
   // 大釜に入れる場合は、器と同じ元エントリに揃える。
   let sourceType = source_type;
@@ -372,13 +381,14 @@ export function createMission({
   const startKey = optionalDate(start_date, 'start_date');
   const dueKey = optionalDate(due_date, 'due_date');
   checkDateOrder(startKey, dueKey);
+  const every = repeatDays(repeat_days);
 
   const { lastInsertRowid } = db
     .prepare(`
       INSERT INTO mission
         (title, source_type, source_id, status, estimated_time, estimated_money,
-         created_at, cauldron_id, start_date, due_date)
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+         created_at, cauldron_id, start_date, due_date, repeat_days)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       requireTitle(title),
@@ -390,6 +400,7 @@ export function createMission({
       cauldron_id ?? null,
       startKey,
       dueKey,
+      every,
     );
   refreshCauldron(cauldron_id);
   return getMission(Number(lastInsertRowid));
@@ -402,14 +413,81 @@ export function getMission(id) {
 }
 
 // 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
+/* ---------- 繰り返すプロセス ----------
+
+   周期（日）を持つプロセスが「種」。そこから一回きりのプロセスが生えてくる。
+   種そのものは棚にも一覧にも出さず、繰り返しの側にだけ並ぶ。
+   生えたものは自分で立てたものと同じに扱えて、完了も断念もできる。
+
+   無限には作れないので、今日から HORIZON 日先までを保つ。
+   読むたびに足りないぶんを継ぎ足すので、使っている限り先が尽きない。 */
+
+const REPEAT_HORIZON = 90;
+const REPEAT_MAX = 60; // 一度に生やす上限。周期1日でも走り続けないように
+
+// 種から、まだ生えていない日付ぶんを生やす。
+function growRepeats(now = new Date()) {
+  const seeds = db
+    .prepare(`SELECT * FROM mission WHERE repeat_days IS NOT NULL AND status = 'active'`)
+    .all();
+  if (seeds.length === 0) return;
+
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const horizon = addDays(today, REPEAT_HORIZON);
+
+  transaction(() => {
+    for (const seed of seeds) {
+      const every = Math.max(1, int(seed.repeat_days));
+      // 前回どこまで生やしたか。無ければ開始日（無ければ今日）から。
+      const from = parseDateKey(seed.repeat_through)
+        ?? parseDateKey(seed.start_date)
+        ?? new Date(today);
+      let cursor = parseDateKey(seed.repeat_through) ? addDays(from, every) : from;
+      // 過去に遡って生やさない。止まっていた間のぶんは作らず、今日から拾い直す。
+      while (cursor < today) cursor = addDays(cursor, every);
+
+      let made = 0;
+      while (cursor <= horizon && made < REPEAT_MAX) {
+        const key = dateKey(cursor);
+        const exists = db
+          .prepare(`SELECT 1 FROM mission WHERE repeat_of = ? AND due_date = ?`)
+          .get(seed.id, key);
+        if (!exists) {
+          db.prepare(`
+            INSERT INTO mission
+              (title, source_type, source_id, status, estimated_time, estimated_money,
+               created_at, due_date, repeat_of)
+            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+          `).run(
+            seed.title,
+            seed.source_type,
+            seed.source_id,
+            seed.estimated_time,
+            seed.estimated_money,
+            nowIso(),
+            key,
+            seed.id,
+          );
+          made += 1;
+        }
+        db.prepare(`UPDATE mission SET repeat_through = ? WHERE id = ?`).run(key, seed.id);
+        cursor = addDays(cursor, every);
+      }
+    }
+  });
+}
+
 const MISSION_ORDER = {
   due: `ORDER BY (effective_due_date IS NULL), effective_due_date ASC, m.created_at ASC, m.id ASC`,
   recent: `ORDER BY COALESCE(m.completed_at, m.created_at) DESC, m.id DESC`,
 };
 
-// due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
-// 期限を持たないものは落とす。棚に並べる先が無いため。
-export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
+/* due_by を渡すと、その日までに期限が来るものだけ返す（期限切れも含む）。
+   期限を持たないものは落とす。棚に並べる先が無いため。
+   repeat を渡すと、繰り返しの種だけ／種を除いたぶんだけに分かれる。 */
+export function listMissions({ status, sort = 'recent', due_by = null, repeat = 'once' } = {}) {
+  growRepeats();
   const order = MISSION_ORDER[sort] ?? MISSION_ORDER.recent;
   const where = [];
   const params = [];
@@ -423,8 +501,15 @@ export function listMissions({ status, sort = 'recent', due_by = null } = {}) {
     where.push('effective_due_date IS NOT NULL AND effective_due_date <= ?');
     params.push(key);
   }
+  // 種は周期を持つもの。一回きりの側には出さない。
+  if (repeat === 'seed') where.push('m.repeat_days IS NOT NULL');
+  else if (repeat === 'once') where.push('m.repeat_days IS NULL');
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   return db.prepare(`${MISSION_SELECT} ${clause} ${order}`).all(...params).map(decorate);
+}
+
+export function isRepeatFilter(value) {
+  return value === 'once' || value === 'seed' || value === 'all';
 }
 
 export function isMissionSort(sort) {
@@ -443,7 +528,7 @@ export function listMissionsBySource(source_type, source_id) {
 
 export function updateMission(
   id,
-  { title, estimated_time, estimated_money, start_date, due_date },
+  { title, estimated_time, estimated_money, start_date, due_date, repeat_days },
 ) {
   const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
   if (!row) throw notFound('mission');
@@ -452,10 +537,12 @@ export function updateMission(
     start_date === undefined ? row.start_date : optionalDate(start_date, 'start_date');
   const dueKey = due_date === undefined ? row.due_date : optionalDate(due_date, 'due_date');
   checkDateOrder(startKey, dueKey);
+  const every = repeat_days === undefined ? row.repeat_days : repeatDays(repeat_days);
 
   db.prepare(`
     UPDATE mission
-       SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?
+       SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?,
+           repeat_days = ?
      WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
@@ -463,8 +550,15 @@ export function updateMission(
     estimated_money === undefined ? row.estimated_money : int(estimated_money),
     startKey,
     dueKey,
+    every,
     id,
   );
+  // 周期を止めたら、まだ手を付けていない先のぶんは引き上げる。
+  if (every === null && row.repeat_days !== null) {
+    db.prepare(`
+      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
+    `).run(id, dateKey(new Date()));
+  }
   return getMission(id);
 }
 
@@ -473,6 +567,12 @@ export function completeMission(id) {
   return transaction(() => {
     const mission = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
     if (!mission) throw notFound('mission');
+    // 種は完了しない。回り続けるものなので、終わるのは止めたときだけ。
+    if (mission.repeat_days !== null) {
+      const err = new Error('a repeating process cannot be completed');
+      err.status = 409;
+      throw err;
+    }
     if (mission.status === 'done') {
       const log = db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(id);
       return { mission: decorate(mission), log: log ?? null };
@@ -506,6 +606,12 @@ export function abandonMission(id) {
     throw err;
   }
   db.prepare(`UPDATE mission SET status = 'abandoned', completed_at = NULL WHERE id = ?`).run(id);
+  // 種を止めたら、まだ手を付けていない先のぶんは引き上げる。
+  if (row.repeat_days !== null) {
+    db.prepare(`
+      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
+    `).run(id, dateKey(new Date()));
+  }
   refreshCauldron(row.cauldron_id);
   return getMission(id);
 }
@@ -1517,6 +1623,7 @@ export function getDungeon({ since = null, until = null } = {}) {
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
+  growRepeats(now);
   // どちらも同じ週。刻みが揃ったので、期間はひとつだけ取ればよい。
   const week = periods.time.of(now);
   const moneyWeek = periods.money.of(now);
@@ -1557,8 +1664,10 @@ export function getSummary(now = new Date()) {
     `)
     .get();
 
+  /* 進行中の数。繰り返しは種を1つと数え、そこから生えたものは数えない。
+     先まで生やしてあるぶんを足すと、増えるのは数字だけで中身は同じになる。 */
   const activeCount = db
-    .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
+    .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active' AND repeat_of IS NULL`)
     .get().count;
 
   // 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。

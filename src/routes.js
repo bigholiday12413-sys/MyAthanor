@@ -98,7 +98,13 @@ api.get('/missions', handle((req, res) => {
     err.status = 400;
     throw err;
   }
-  res.json(store.listMissions({ status, sort, due_by: req.query.due_by ?? null }));
+  const repeat = req.query.repeat ?? 'once';
+  if (!store.isRepeatFilter(repeat)) {
+    const err = new Error('repeat must be once, seed or all');
+    err.status = 400;
+    throw err;
+  }
+  res.json(store.listMissions({ status, sort, repeat, due_by: req.query.due_by ?? null }));
 }));
 
 api.post('/missions', handle((req, res) =>

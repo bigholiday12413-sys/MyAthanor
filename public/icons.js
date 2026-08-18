@@ -700,6 +700,32 @@ const TIMEGRID = {
   palette: { o: STONE, g: GREEN },
 };
 
+// 循環。2本の弧が輪になって追いかけ合う印。繰り返すプロセスに添える。
+const CYCLE = {
+  rows: [
+    '................',
+    '.....gggggg.....',
+    '...gg......gg...',
+    '..g..........g..',
+    '.g...........gg.',
+    '.g..........ggg.',
+    '.g.........gggg.',
+    '.g..............',
+    '..............g.',
+    '.gggg.........g.',
+    '.ggg..........g.',
+    '.gg..........g..',
+    '.g...........g..',
+    '..g.........g...',
+    '...gg......gg...',
+    '.....gggggg.....',
+  ],
+  palette: { g: GREEN_DARK },
+};
+
+
+
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -720,6 +746,7 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  cycle: CYCLE,
   timegrid: TIMEGRID,
   keeper: KEEPER,
   astrolabe: ASTROLABE,
