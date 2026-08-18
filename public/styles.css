@@ -1817,6 +1817,53 @@ a.room-title {
   gap: 6px;
 }
 
+/* 4つ並べる時は縦積みの2列にする。横1列だと札が潰れて読めない。 */
+.seg-toggle.seg-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.seg-toggle.seg-3 button {
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.seg-toggle.seg-4 button {
+  justify-content: flex-start;
+  padding-left: 12px;
+}
+
+/* 題と金額を並べる。金額は幅を決め打ちにして、題を伸ばす。 */
+.capture-row {
+  display: flex;
+  gap: 8px;
+}
+
+.capture-row input:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.capture-row input[type='number'] {
+  flex: none;
+  width: 96px;
+  text-align: right;
+}
+
+.capture-row input[hidden] {
+  display: none;
+}
+
+.caught-row b {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gold);
+}
+
 .seg-toggle button {
   display: flex;
   flex: 1;
@@ -2155,6 +2202,25 @@ body.is-paged .toast {
   border-left-color: var(--gold);
 }
 
+/* 消え物は薬草色、残るものは鋼の色。 */
+.card.kind-food {
+  border-left-color: var(--green);
+}
+
+.card.kind-gear {
+  border-left-color: #9aa5ab;
+}
+
+.badge.food {
+  color: var(--green);
+  border-color: var(--green-dark);
+}
+
+.badge.gear {
+  color: #9aa5ab;
+  border-color: #5c666b;
+}
+
 .spell-excerpt {
   margin-top: 6px;
   font-size: 13px;
@@ -2177,6 +2243,63 @@ body.is-paged .toast {
 textarea {
   resize: vertical;
   line-height: 1.6;
+}
+
+/* ---------- 今月の出どころ ---------- */
+
+.spend + .spend {
+  margin-top: 12px;
+}
+
+.spend-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spend-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.spend-name .px {
+  width: 16px;
+  height: 16px;
+}
+
+.spend-count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.spend-money {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* 帯。丸めず、縁を1本入れて他の枠と揃える。 */
+.spend-bar {
+  height: 8px;
+  margin-top: 5px;
+  background: #150f06;
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 0 0 1px rgba(230, 187, 86, 0.08);
+}
+
+.spend-bar i {
+  display: block;
+  height: 100%;
 }
 
 /* ---------- 金庫 ---------- */

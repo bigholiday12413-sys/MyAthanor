@@ -66,7 +66,13 @@ function fmtDate(iso) {
 }
 
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
-const KIND_LABEL = { idea: 'アイデア', log: 'ログ' };
+const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備' };
+
+/* 糧と装備はログの器に入っている。見た目の別だけここで引き直す。 */
+const GOODS = ['food', 'gear'];
+const isGoods = (kind) => GOODS.includes(kind);
+const faceOf = (item) => item.goods ?? item.kind;
+const toYen = (value) => Math.max(0, Math.round(Number(value) || 0));
 
 /* アイデアの温度。273K（＝0℃）を常温とし、そこへ向かって冷めていく。 */
 const AMBIENT_K = 273;
@@ -337,6 +343,35 @@ function tubeCard({ name, period, data, format, plannedLabel = '消費予定' })
   `;
 }
 
+/* 今月のウォレットの内訳。金額の大小がそのまま帯の長さになる。
+   数字だけだと割合が読めず、家計簿として見るときに効かない。 */
+const GOODS_TONE = { food: 'var(--green)', gear: '#9aa5ab', event: 'var(--gold-dark)' };
+const GOODS_NAME = { food: '糧', gear: '装備', event: '出来事' };
+
+function walletBars(rows) {
+  const total = rows.reduce((sum, row) => sum + row.money, 0);
+  if (!total) return '';
+  return rows
+    .filter((row) => row.money)
+    .map(
+      (row) => `
+        <div class="spend">
+          <div class="spend-head">
+            <a class="spend-name" href="#/stream?">${
+              row.goods === 'event' ? '' : icon(KIND_ICON[row.goods])
+            }<span>${GOODS_NAME[row.goods]}</span></a>
+            <span class="spend-count">${row.count}件</span>
+            <span class="spend-money">${esc(fmtMoney(row.money))}</span>
+          </div>
+          <div class="spend-bar">
+            <i style="width:${Math.round((row.money / total) * 100)}%;
+              background:${GOODS_TONE[row.goods]}"></i>
+          </div>
+        </div>`,
+    )
+    .join('');
+}
+
 async function renderHome() {
   setActiveTab('home');
   setTopbar({
@@ -405,6 +440,14 @@ async function renderHome() {
     </div>
 
     ${
+      // 今月のウォレットが何に出ていったか。家計簿として見るのはここ。
+      summary.wallet_by_goods.some((row) => row.money)
+        ? `<div class="section-title">今月の出どころ</div>
+           <div class="panel">${walletBars(summary.wallet_by_goods)}</div>`
+        : ''
+    }
+
+    ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
       summary.undated.time || summary.undated.money
         ? `<div class="panel warn">
@@ -463,7 +506,7 @@ async function renderStream() {
 
   viewEl.innerHTML = `
     <div class="filters">
-      ${['all', 'idea', 'log']
+      ${['all', 'idea', 'log', 'food', 'gear']
         .map(
           (type) => `<button class="filter" data-filter="${type}"
              aria-pressed="${streamFilter === type}">${
@@ -514,17 +557,18 @@ async function renderStream() {
 }
 
 function streamCard(item) {
+  const face = faceOf(item);
   return `
-    <a class="card kind-${esc(item.kind)}" href="#/${esc(item.kind)}/${item.id}">
+    <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(item.kind)}">${esc(KIND_LABEL[item.kind])}</span>
+        <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
         ${item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>ミッション由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
       </div>
-      <div class="card-title">${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span></div>
+      <div class="card-title">${icon(KIND_ICON[face])}<span>${esc(item.title)}</span></div>
       <div class="card-meta">
         ${
           item.kind === 'log' && (item.time_spent || item.money_spent)
@@ -599,16 +643,21 @@ function openCapture() {
     <form class="modal" id="capture">
       <h2>書き留める</h2>
       <div class="field">
-        <div class="seg-toggle" id="kind-toggle">
-          <button type="button" data-kind="idea"
-            aria-pressed="${captureKind === 'idea'}">${icon('stone')}アイデア</button>
-          <button type="button" data-kind="log"
-            aria-pressed="${captureKind === 'log'}">${icon('footsteps')}ログ</button>
+        <div class="seg-toggle seg-4" id="kind-toggle">
+          ${['idea', 'log', 'food', 'gear']
+            .map(
+              (kind) => `<button type="button" data-kind="${kind}"
+                aria-pressed="${captureKind === kind}">${icon(KIND_ICON[kind])}${
+                KIND_LABEL[kind]
+              }</button>`,
+            )
+            .join('')}
         </div>
       </div>
-      <div class="field">
-        <input id="capture-title" autocomplete="off" enterkeyhint="done"
-          placeholder="したいこと／起きたこと" />
+      <div class="field capture-row">
+        <input id="capture-title" autocomplete="off" enterkeyhint="done" />
+        <input id="capture-money" type="number" inputmode="numeric" step="10" min="0"
+          placeholder="円" hidden />
       </div>
       <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
@@ -620,7 +669,22 @@ function openCapture() {
   document.body.appendChild(backdrop);
 
   const input = backdrop.querySelector('#capture-title');
+  const money = backdrop.querySelector('#capture-money');
   const caughtEl = backdrop.querySelector('#caught');
+
+  // 糧と装備は買ったものなので、金額を並べて受ける。
+  const HOLDER = {
+    idea: 'したいこと',
+    log: '起きたこと',
+    food: '食べたもの・消えるもの',
+    gear: '買ったもの・残るもの',
+  };
+  function dressFor(kind) {
+    input.placeholder = HOLDER[kind];
+    money.hidden = !isGoods(kind);
+    if (money.hidden) money.value = '';
+  }
+  dressFor(captureKind);
   input.focus();
 
   // 入れたものがあれば、閉じたときに下の画面へ反映する。
@@ -644,6 +708,7 @@ function openCapture() {
     for (const b of backdrop.querySelectorAll('#kind-toggle button')) {
       b.setAttribute('aria-pressed', String(b.dataset.kind === captureKind));
     }
+    dressFor(captureKind);
     input.focus();
   });
 
@@ -654,8 +719,11 @@ function openCapture() {
       <div class="caught-head">入れたもの <b>${caught.length}</b></div>
       ${caught
         .map(
-          (item) => `<a class="caught-row" href="#/${item.kind}/${item.id}">
+          (item) => `<a class="caught-row" href="#/${
+            isGoods(item.kind) ? 'log' : item.kind
+          }/${item.id}">
             ${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span>
+            ${item.money ? `<b>${esc(fmtMoney(item.money))}</b>` : ''}
           </a>`,
         )
         .join('')}
@@ -671,11 +739,17 @@ function openCapture() {
     input.value = '';
     input.focus();
     const kind = captureKind;
+    // 金額は1行目にだけ載せる。まとめて貼ったぶんに同じ額を配ると嘘になる。
+    const spent = isGoods(kind) ? toYen(money.value) : 0;
+    money.value = '';
 
-    for (const title of lines) {
+    for (const [index, title] of lines.entries()) {
       try {
-        const created = await api('/entries', { method: 'POST', body: { kind, title } });
-        caught.unshift({ kind, id: created.id, title });
+        const created = await api('/entries', {
+          method: 'POST',
+          body: { kind, title, money_spent: index === 0 ? spent : 0 },
+        });
+        caught.unshift({ kind, id: created.id, title, money: index === 0 ? spent : 0 });
       } catch (err) {
         toast(err.message, true);
       }
@@ -974,7 +1048,20 @@ async function renderEntry(kind, entryId) {
       </div>
       ${
         kind === 'log'
-          ? `<div class="row">
+          ? `<div class="field">
+               <div class="seg-toggle seg-3" id="goods-toggle">
+                 ${['log', 'food', 'gear']
+                   .map(
+                     (face) => `<button type="button" data-goods="${
+                       face === 'log' ? '' : face
+                     }" aria-pressed="${(entry.goods ?? 'log') === face}">${icon(
+                       KIND_ICON[face],
+                     )}${KIND_LABEL[face]}</button>`,
+                   )
+                   .join('')}
+               </div>
+             </div>
+             <div class="row">
                <div class="field">
                  <label for="time-spent">消費タイム（時間）</label>
                  <input id="time-spent" type="number" step="0.25" min="0"
@@ -1100,12 +1187,25 @@ async function renderEntry(kind, entryId) {
     </form>
   `;
 
+  const goodsToggle = document.getElementById('goods-toggle');
+  if (goodsToggle) {
+    goodsToggle.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-goods]');
+      if (!button) return;
+      for (const b of goodsToggle.querySelectorAll('button')) {
+        b.setAttribute('aria-pressed', String(b === button));
+      }
+    });
+  }
+
   document.getElementById('entry-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const body = { title: document.getElementById('title').value.trim() };
     if (kind === 'log') {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
+      body.goods = document.querySelector('#goods-toggle [aria-pressed="true"]').dataset.goods
+        || null;
     }
     try {
       await api(path, { method: 'PATCH', body });

@@ -282,10 +282,24 @@ export function deleteSpell(id) {
 
 /* ---------- log ---------- */
 
-export function createLog({ title, occurred_at, time_spent, money_spent, source_mission_id }) {
+/* 買ったものの別。糧は食べれば消え、装備は残る。
+   出来事としてのログは NULL のまま。 */
+export const GOODS = ['food', 'gear'];
+
+export const isGoods = (value) => GOODS.includes(value);
+
+function goodsOf(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (!isGoods(value)) throw badRequest('goods must be "food" or "gear"');
+  return value;
+}
+
+export function createLog({
+  title, occurred_at, time_spent, money_spent, source_mission_id, goods,
+}) {
   const stmt = db.prepare(`
-    INSERT INTO log (title, occurred_at, time_spent, money_spent, source_mission_id)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO log (title, occurred_at, time_spent, money_spent, source_mission_id, goods)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
   const { lastInsertRowid } = stmt.run(
     requireTitle(title),
@@ -293,6 +307,7 @@ export function createLog({ title, occurred_at, time_spent, money_spent, source_
     int(time_spent),
     int(money_spent),
     source_mission_id ?? null,
+    goodsOf(goods),
   );
   return getLog(Number(lastInsertRowid));
 }
@@ -319,17 +334,19 @@ export function getLog(id) {
   };
 }
 
-export function updateLog(id, { title, occurred_at, time_spent, money_spent }) {
+export function updateLog(id, { title, occurred_at, time_spent, money_spent, goods }) {
   const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
   if (!row) throw notFound('log');
 
   db.prepare(`
-    UPDATE log SET title = ?, occurred_at = ?, time_spent = ?, money_spent = ? WHERE id = ?
+    UPDATE log SET title = ?, occurred_at = ?, time_spent = ?, money_spent = ?, goods = ?
+    WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
     occurred_at === undefined ? row.occurred_at : occurred_at,
     time_spent === undefined ? row.time_spent : int(time_spent),
     money_spent === undefined ? row.money_spent : int(money_spent),
+    goods === undefined ? row.goods : goodsOf(goods),
     id,
   );
   return getLog(id);
@@ -344,18 +361,22 @@ export function listStream({ type = 'all', limit = 200, tag = null } = {}) {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
              0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence,
-             i.temperature, i.temperature_at
+             i.temperature, i.temperature_at, NULL AS goods
       FROM idea i WHERE i.is_spell = 0
     `);
   }
-  if (type === 'all' || type === 'log') {
+  // 糧と装備もログの器に入っているので、別で絞り込むだけでよい。
+  if (type === 'all' || type === 'log' || isGoods(type)) {
+    const where = isGoods(type)
+      ? `WHERE l.goods = '${type}'`
+      : type === 'log' ? `WHERE l.goods IS NULL` : '';
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,
              CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission,
              CASE WHEN l.source_recurrence_id IS NULL THEN 0 ELSE 1 END AS from_recurrence,
-             NULL AS temperature, NULL AS temperature_at
-      FROM log l
+             NULL AS temperature, NULL AS temperature_at, l.goods
+      FROM log l ${where}
     `);
   }
   if (parts.length === 0) return [];
@@ -1558,8 +1579,9 @@ function collectTags(room, into = new Map()) {
 export function getDungeon({ onlyLegacy = false } = {}) {
   const roots = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
+    // 糧は食べれば消える。盤に残すと買った回数だけ節が増えて読めなくなる。
     ...db
-      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
+      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL AND goods IS NOT 'food'`)
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
@@ -1668,6 +1690,18 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active'`)
     .get().count;
 
+  // 今月のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
+  const spendByGoods = db
+    .prepare(`
+      SELECT COALESCE(goods, 'event') AS goods,
+             COALESCE(SUM(money_spent), 0) AS money,
+             COUNT(*) AS count
+      FROM log
+      WHERE occurred_at >= ? AND occurred_at < ? AND money_spent <> 0
+      GROUP BY COALESCE(goods, 'event')
+    `)
+    .all(month.start, month.end);
+
   const plannedWeek = plannedMissions(week);
   const plannedMonth = plannedMissions(month);
 
@@ -1710,6 +1744,11 @@ export function getSummary(now = new Date()) {
       budget_source: moneyBudget.source,
       due_mission_count: plannedMonth.count,
     },
+    // 今月のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
+    wallet_by_goods: ['food', 'gear', 'event'].map((goods) => {
+      const row = spendByGoods.find((item) => item.goods === goods);
+      return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };
+    }),
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,

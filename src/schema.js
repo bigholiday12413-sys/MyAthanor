@@ -140,6 +140,9 @@ export const ADDED_COLUMNS = [
   // 大釜の期日。素材が自分の期限を持たなければ、これを引き継ぐ。
   ['cauldron', 'start_date', 'TEXT'],
   ['cauldron', 'due_date', 'TEXT'],
+  // 買ったものの別。'food'＝消え物（糧）、'gear'＝残るもの（装備）。
+  // NULL は出来事としてのログで、ここまでの記録はすべてこれに当たる。
+  ['log', 'goods', 'TEXT'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。

@@ -62,6 +62,17 @@ export function seed(db, transaction) {
         missionId,
       );
 
+    // 買ったもの。糧は食べれば消え、装備は残る。
+    const bought = (title, days, money, goods) =>
+      idOf(
+        `INSERT INTO log (title, occurred_at, time_spent, money_spent, goods)
+         VALUES (?, ?, 0, ?, ?)`,
+        title,
+        iso(days),
+        money,
+        goods,
+      );
+
     const doneMission = (title, source, sourceId, time, money, days) => {
       const id = idOf(
         `INSERT INTO mission
@@ -162,6 +173,27 @@ export function seed(db, transaction) {
     /* 先月ぶんの消費。金庫の積み上がりを見せるため */
     log('石材の下見', 38, 120, 21000);
     log('苗床の土', 45, 90, 12500);
+
+    /* ふだんの買い物。出来事という出来事は無くても、これは記録する */
+    for (const [title, days, money] of [
+      ['八百屋で野菜', 0, 1240],
+      ['米を買う', 1, 4180],
+      ['豆腐と油揚げ', 2, 380],
+      ['珈琲豆', 4, 1680],
+      ['朝の焼き立て', 5, 680],
+      ['蕎麦と天ぷら', 7, 1450],
+      ['卵と牛乳', 9, 720],
+      ['八百屋で野菜', 11, 1080],
+      ['米を買う', 16, 4180],
+      ['乾物をまとめて', 20, 3240],
+    ]) {
+      bought(title, days, money, 'food');
+    }
+    const shears = bought('剪定鋏', 6, 8400, 'gear');
+    tie('log', shears, '道具');
+    const kettle = bought('鉄瓶', 13, 12800, 'gear');
+    tie('log', kettle, '道具');
+    bought('作業用の前掛け', 24, 3600, 'gear');
 
     /* 定期イベント */
     run(

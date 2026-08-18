@@ -431,6 +431,64 @@ function toRects({ rows, palette }) {
   return parts.join('');
 }
 
+// 糧＝消え物。丸パン。上面に切り込みを入れて、焼き上がりの向きを出す。
+const PROVISION = {
+  rows: [
+    '................',
+    '................',
+    '................',
+    '.....oooooo.....',
+    '...oohhhhhhoo...',
+    '..ohhhhhhhhhho..',
+    '..ohhcchhcchho..',
+    '..ohhcchhcchho..',
+    '..obhhhhhhhhho..',
+    '..obbhhhhhhhbo..',
+    '..obbbbbbbbbbo..',
+    '...oobbbbbboo...',
+    '.....oooooo.....',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: {
+    o: '#5d3a18', // 焼き縁
+    h: '#e0b070', // 上面
+    c: '#8a5a2b', // 切り込み
+    b: '#b07a3c', // 底
+  },
+};
+
+// 装備＝残るもの。兜。細い天面から裾へ広げ、面頬の一文字と呼吸孔を入れる。
+// 箱のまま描くと書物のアイコンと見分けが付かないので、輪郭で silhouette を作る。
+const HELM = {
+  rows: [
+    '................',
+    '................',
+    '......oooo......',
+    '.....ollllo.....',
+    '....ollllllo....',
+    '....ommmmmmo....',
+    '....odddddddo...',
+    '....ommmmmmo....',
+    '...ommmmmmmmo...',
+    '...omddmmddmo...',
+    '...osssssssso...',
+    '..osssssssssso..',
+    '..oooooooooooo..',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: {
+    o: '#241a0c', // 縁
+    l: '#cfd6d8', // 天面の照り
+    m: '#9aa5ab', // 鋼
+    d: '#141410', // 面頬の隙間と呼吸孔
+    s: '#6e777c', // 裾の陰
+  },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -443,6 +501,8 @@ const SOURCES = {
   chest: CHEST,
   cauldron: CAULDRON,
   coins: COINS,
+  provision: PROVISION,
+  helm: HELM,
   grimoire: GRIMOIRE,
   sigil: SIGIL,
   flame: FLAME,
@@ -480,6 +540,8 @@ export function icon(name, className = '', overrides = null) {
 // 種別からアイコン名を引く。
 export const KIND_ICON = {
   idea: 'stone',
+  food: 'provision',
+  gear: 'helm',
   spell: 'sigil',
   log: 'footsteps',
   mission: 'parchment',
