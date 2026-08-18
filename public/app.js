@@ -240,7 +240,7 @@ function missionCard(mission, { showSource = true } = {}) {
               ? `<span class="badge">〜${esc(fmtShortDay(mission.effective_due_date))}</span>`
               : ''
         }
-        ${mission.is_legacy ? `<span class="badge now">${icon('chest')}レガシー</span>` : ''}
+        ${mission.is_legacy ? `<span class="badge now">${icon('spark')}レガシー</span>` : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
@@ -2332,7 +2332,7 @@ function legacyButton(kind, id, isLegacy) {
     <button type="button" class="ghost legacy-btn ${isLegacy ? 'is-on' : ''}"
             data-legacy-kind="${kind}" data-legacy-id="${id}"
             data-legacy-value="${isLegacy ? 0 : 1}">
-      ${icon('chest')}<span>${isLegacy ? 'レガシー解除' : 'レガシー'}</span>
+      ${icon('spark')}<span>${isLegacy ? 'レガシー解除' : 'レガシー'}</span>
     </button>
   `;
 }
@@ -2358,9 +2358,10 @@ function wireLegacy(container, onChanged) {
   });
 }
 
-/* ---------- ダンジョン ----------
+/* ---------- アストロラーベ ----------
 
-   たまっていく情報を、1枚の盤として描く。
+   たまっていく情報を、1枚の盤として描く。天体の位置を読む器具に見立てて、
+   物事どうしの関わりを角度と輪で出す。
      節 = アイデア／ログ、軌道 = プロセス、大釜の節 = 素材の束、宝箱 = レガシー。
      入口はいちばん内側の輪に並び、外へ行くほど後の時間で、角度が枝分かれ。
      入口からいちばん奥の掘削中まで、軌道に灯を入れて進む先を示す。
@@ -2637,7 +2638,7 @@ function boardMap(roads) {
     // 宝箱になったプロセスだけ、外へ抜ける手前に印を置く。
     if (node.kind !== 'cauldron' && node.corridor.mission.is_legacy) {
       const [mx, my] = onRing(cx, cy, node.r - GRID.node - 11, node.a);
-      ink.push(mapPixel('chest', mx, my, 11));
+      ink.push(mapPixel('spark', mx, my, 11));
     }
   }
 
@@ -2723,7 +2724,7 @@ function boardMap(roads) {
   return `
     <div class="board">
       <svg class="map" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}"
-           preserveAspectRatio="xMidYMid meet" role="img" aria-label="ダンジョンの盤">
+           preserveAspectRatio="xMidYMid meet" role="img" aria-label="アストロラーベの盤">
         <rect x="${n2(view.x)}" y="${n2(view.y)}" width="${n2(view.w)}"
               height="${n2(view.h)}" fill="${SPHERE.space}" />
         ${starfield(view, uid)}${guides.join('')}
@@ -2734,12 +2735,13 @@ function boardMap(roads) {
 }
 
 /* 盤に載せる期間。null は既定（直近1か月）。
-   期間を指定したものが「古びたダンジョン」で、当時の盤をそのまま掘り起こす。 */
+   期間を指定したものがエフェメリスで、当時の盤をそのまま呼び出す。
+   （エフェメリス＝ある日付の天体の位置をまとめた暦表） */
 let dungeonRange = null;
 
 async function renderDungeon() {
   setActiveTab('dungeon');
-  setTopbar({ title: dungeonRange ? '古びたダンジョン' : 'ダンジョン' });
+  setTopbar({ title: dungeonRange ? 'エフェメリス' : 'アストロラーベ' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const query = dungeonRange
@@ -2749,7 +2751,7 @@ async function renderDungeon() {
 
   const digger = `
     <details class="optional dig" ${dungeonRange ? 'open' : ''}>
-      <summary>${dungeonRange ? '掘り起こした期間' : '古びたダンジョン'}</summary>
+      <summary>${icon('hourglass')}<span>エフェメリス</span></summary>
       <form class="dig-form" id="dig-form">
         <div class="row">
           <div class="field">
@@ -2760,8 +2762,8 @@ async function renderDungeon() {
           </div>
         </div>
         <div class="btn-row">
-          ${dungeonRange ? '<button type="button" class="ghost" id="dig-now">いまへ戻す</button>' : ''}
-          <button type="submit" class="primary">掘り起こす</button>
+          ${dungeonRange ? '<button type="button" class="ghost" id="dig-now">いま</button>' : ''}
+          <button type="submit" class="primary">合わせる</button>
         </div>
       </form>
     </details>`;
@@ -2775,7 +2777,7 @@ async function renderDungeon() {
              ${totals.corridors ? `<span>軌道 ${totals.corridors}</span>` : ''}
              ${totals.depth > 1 ? `<span>最深 ${totals.depth}</span>` : ''}
              ${SHOW.cauldron && totals.cauldrons ? `<span>大釜 ${totals.cauldrons}</span>` : ''}
-             ${totals.legacies ? `<span class="hot">宝箱 ${totals.legacies}</span>` : ''}
+             ${totals.legacies ? `<span class="hot">輝き ${totals.legacies}</span>` : ''}
              <span class="spacer"></span>
              <span>${esc(fmtTime(totals.consumed_time))} · ${esc(
                fmtMoney(totals.consumed_money),

@@ -584,6 +584,52 @@ const INGOT = {
   palette: { o: GOLD_DARK, h: '#f0c96a', b: GOLD, d: '#6b4f14' },
 };
 
+// アストロラーベ＝天体の位置を読む器具。同心の輪と、中を渡す横木。
+const ASTROLABE = {
+  rows: [
+    '................',
+    '.....oooooo.....',
+    '...oo......oo...',
+    '..o..oooooo..o..',
+    '.o..o......o..o.',
+    '.o.o..oooo..o.o.',
+    'o..o.o....o.o..o',
+    'o..o.o....o.o..o',
+    'o..o.o....o.o..o',
+    'o..o..oooo..o..o',
+    '.o.o........o.o.',
+    '.o..o......o..o.',
+    '..o..oooooo..o..',
+    '...oo......oo...',
+    '.....oooooo.....',
+    '................',
+  ],
+  palette: { o: STONE },
+};
+
+// 輝き。レガシーの節に添える四光の星。
+const SPARK = {
+  rows: [
+    '................',
+    '................',
+    '.......gg.......',
+    '.......gg.......',
+    '......gggg......',
+    '..g...gggg...g..',
+    '...gg.gggg.gg...',
+    '....gggggggg....',
+    '....gggggggg....',
+    '...gg.gggg.gg...',
+    '..g...gggg...g..',
+    '......gggg......',
+    '.......gg.......',
+    '.......gg.......',
+    '................',
+    '................',
+  ],
+  palette: { g: GOLD },
+};
+
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
   footsteps: FOOTSTEPS,
@@ -604,6 +650,8 @@ const SOURCES = {
   frost: FROST,
   plus: PLUS,
   chevron: CHEVRON,
+  astrolabe: ASTROLABE,
+  spark: SPARK,
   ingot: INGOT,
   flask: FLASK,
   sheet: SHEET,
