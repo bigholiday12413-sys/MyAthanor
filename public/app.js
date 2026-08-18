@@ -798,22 +798,24 @@ async function renderStream() {
   const items = await api(`/stream?type=${streamFilter}`);
 
   const body =
-    `<div class="list">${
+    `<div class="list flow">${
           items.length
             ? items.map(streamCard).join('')
             : '<div class="empty">まだ記録がありません</div>'
         }</div>`;
 
   viewEl.innerHTML = `
-    <div class="filters">
-      ${STREAM_TYPES
-        .map(
-          (type) => `<button class="filter" data-filter="${type}"
-             aria-pressed="${streamFilter === type}">${
-               type === 'all' ? 'すべて' : KIND_LABEL[type]
-             }</button>`,
-        )
-        .join('')}
+    <div class="filter-bar">
+      <div class="filters">
+        ${STREAM_TYPES
+          .map(
+            (type) => `<button class="filter" data-filter="${type}"
+               aria-pressed="${streamFilter === type}">${
+                 type === 'all' ? 'すべて' : KIND_LABEL[type]
+               }</button>`,
+          )
+          .join('')}
+      </div>
     </div>
     ${body}
   `;
@@ -1507,21 +1509,23 @@ async function renderMissions() {
   );
 
   viewEl.innerHTML = `
-    <div class="filters">
-      ${['active', 'abandoned', 'done']
-        .map(
-          (status) => `<button class="filter" data-filter="${status}"
-             aria-pressed="${missionFilter === status}">${STATUS_LABEL[status]}</button>`,
-        )
-        .join('')}
-    </div>
-    <div class="filters">
-      <button class="filter" data-repeat="once" aria-pressed="${
-        missionRepeat === 'once'
-      }">一回きり</button>
-      <button class="filter" data-repeat="seed" aria-pressed="${
-        missionRepeat === 'seed'
-      }">${icon('cycle')}繰り返す</button>
+    <div class="filter-bar">
+      <div class="filters">
+        ${['active', 'abandoned', 'done']
+          .map(
+            (status) => `<button class="filter" data-filter="${status}"
+               aria-pressed="${missionFilter === status}">${STATUS_LABEL[status]}</button>`,
+          )
+          .join('')}
+      </div>
+      <div class="filters">
+        <button class="filter" data-repeat="once" aria-pressed="${
+          missionRepeat === 'once'
+        }">一回きり</button>
+        <button class="filter" data-repeat="seed" aria-pressed="${
+          missionRepeat === 'seed'
+        }">${icon('cycle')}繰り返す</button>
+      </div>
     </div>
     ${
       // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
@@ -1537,7 +1541,7 @@ async function renderMissions() {
         </div>`;
       })()
     }
-    <div class="list" id="mission-list">
+    <div class="list flow" id="mission-list">
       ${
         missions.length
           ? missions.map((m) => missionCard(m)).join('')
@@ -2799,7 +2803,11 @@ function refitPages() {
   viewEl.classList.add('is-scroll');
   const screens = viewEl.scrollHeight / Math.max(1, viewEl.clientHeight);
   const wasScrolling = scrolls;
-  scrolls = Math.round(screens) <= SCROLL_LIMIT;
+  /* 列の画面（ストリーム・プロセス）は丈にかかわらず流す。
+     めくりが効くのは、1ページが1つのまとまりになっている画面だけ。
+     ただ順に並んでいるだけのものをページで切ると、目当ての札がどのページに
+     居るのか分からず、探すのに何度もめくることになる。 */
+  scrolls = Boolean(viewEl.querySelector('.flow')) || Math.round(screens) <= SCROLL_LIMIT;
 
   if (scrolls) {
     const split = !wasScrolling || pageTotal !== 1;
