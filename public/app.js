@@ -966,7 +966,6 @@ let captureKind = 'idea';
 function openCapture() {
   if (document.querySelector('.modal-backdrop')) return;
 
-  const caught = [];
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
@@ -988,7 +987,6 @@ function openCapture() {
         <input id="capture-title" autocomplete="off" enterkeyhint="done" />
         <input id="capture-money" type="number" inputmode="numeric" step="10" min="0" hidden />
       </div>
-      <div class="caught" id="caught" hidden></div>
       <div class="btn-row">
         <button type="button" class="ghost" data-close>閉じる</button>
         <button type="submit" class="primary">入れる</button>
@@ -999,7 +997,6 @@ function openCapture() {
 
   const input = backdrop.querySelector('#capture-title');
   const money = backdrop.querySelector('#capture-money');
-  const caughtEl = backdrop.querySelector('#caught');
 
   // 糧・装備・祭事は買ったものなので、金額を並べて受ける。
   function dressFor(kind) {
@@ -1009,10 +1006,11 @@ function openCapture() {
   dressFor(captureKind);
   input.focus();
 
-  // 入れたものがあれば、閉じたときに下の画面へ反映する。
+  let put = false;
   const close = () => {
     backdrop.remove();
-    if (caught.length) route();
+    // 入れたものがあれば、下の画面へ反映する。
+    if (put) route();
   };
 
   backdrop.addEventListener('click', (event) => {
@@ -1034,51 +1032,6 @@ function openCapture() {
     input.focus();
   });
 
-  // 入れたものを新しい順に控える。題を押せばその場で詳細へ行ける。
-  function paintCaught() {
-    caughtEl.hidden = caught.length === 0;
-    caughtEl.innerHTML = `
-      <div class="caught-head">入れたもの <b>${caught.length}</b></div>
-      ${caught
-        .map(
-          (item) => `<a class="caught-row" href="#/${
-            isGoods(item.kind) ? 'log' : item.kind
-          }/${item.id}">
-            ${icon(KIND_ICON[item.kind])}<span>${esc(item.title)}</span>
-            ${item.money ? `<b>${esc(fmtMoney(item.money))}</b>` : ''}
-          </a>`,
-        )
-        .join('')}
-    `;
-  }
-
-  // 1行につき1つとして入れる。
-  async function put(raw) {
-    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    if (lines.length === 0) return input.focus();
-
-    // 打ち終えた文字はすぐ引き取る。保存を待たせると次が打てない。
-    input.value = '';
-    input.focus();
-    const kind = captureKind;
-    // 金額は1行目にだけ載せる。まとめて貼ったぶんに同じ額を配ると嘘になる。
-    const spent = isGoods(kind) ? toYen(money.value) : 0;
-    money.value = '';
-
-    for (const [index, title] of lines.entries()) {
-      try {
-        const created = await api('/entries', {
-          method: 'POST',
-          body: { kind, title, money_spent: index === 0 ? spent : 0 },
-        });
-        caught.unshift({ kind, id: created.id, title, money: index === 0 ? spent : 0 });
-      } catch (err) {
-        toast(err.message, true);
-      }
-    }
-    paintCaught();
-  }
-
   // 変換の確定で送ってしまうと、打ちかけの文字が入る。変換中は受け取らない。
   let composing = false;
   input.addEventListener('compositionstart', () => {
@@ -1088,18 +1041,29 @@ function openCapture() {
     composing = false;
   });
 
-  // 1行の入力欄は改行を持てないので、複数行の貼り付けはここで受けて割る。
-  input.addEventListener('paste', (event) => {
-    const text = event.clipboardData?.getData('text') ?? '';
-    if (!/[\r\n]/.test(text)) return;
-    event.preventDefault();
-    put(text);
-  });
-
-  backdrop.querySelector('#capture').addEventListener('submit', (event) => {
+  /* 押したら1件入って閉じる。控えに積んでいく作りだったが、
+     何件も溜めると「入れたつもりで入っていない」が起きるし、
+     溜めたぶんを見返すなら閉じてストリームを見たほうが早い。 */
+  backdrop.querySelector('#capture').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (composing) return;
-    put(input.value);
+    const title = input.value.trim();
+    if (!title) return input.focus();
+    const kind = captureKind;
+    const submit = backdrop.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      await api('/entries', {
+        method: 'POST',
+        body: { kind, title, money_spent: isGoods(kind) ? toYen(money.value) : 0 },
+      });
+      put = true;
+      toast(`${KIND_LABEL[kind]}を入れました`);
+      close();
+    } catch (err) {
+      toast(err.message, true);
+      submit.disabled = false;
+    }
   });
 }
 
@@ -2715,8 +2679,7 @@ function scheduleRefit() {
 // 描画のたびに呼ぶ代わりに、#view の中身が変わったのを見て付け直す。
 new MutationObserver(scheduleRefit).observe(viewEl, { childList: true, subtree: true });
 
-/* 書き留めるボタンはシェルに置く。思いつくのはどの画面を見ている時でも同じなので、
-   ストリームまで移動してから、では間に合わない。 */
+// 書き留めるボタン。出すのはホームだけ（route() で決める）。
 const fabEl = document.getElementById('fab');
 fabEl.innerHTML = icon('plus');
 fabEl.addEventListener('click', openCapture);
@@ -2734,6 +2697,9 @@ window.addEventListener('keydown', (event) => {
 async function route() {
   const hash = location.hash.replace(/^#/, '') || '/home';
   toTop = true;
+  /* 書き留めるボタンはホームにだけ置く。どの画面にも浮かせていたが、
+     読んでいる札や盤の隅を隠すだけで、思いついたら一度ホームへ戻ればよい。 */
+  fabEl.hidden = hash !== '/home';
   try {
     let match;
     if (hash === '/home') return await renderHome();
