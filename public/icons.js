@@ -591,6 +591,12 @@ const FLASK = {
   palette: { o: '#5f6d73', g: '#cfe0d8', c: WOOD, l: GREEN },
 };
 
+// ログの中の「プロセス」＝注ぎ終えた後の丸底フラスコ。形はプロセスの器と同じにして、
+// 中だけ空にする。満ちているか空かで、これからやることか、もう済んだことかを分ける。
+const FLASK_EMPTY = {
+  rows: FLASK.rows,
+  palette: { ...FLASK.palette, l: FLASK.palette.g },
+};
 
 // アストロラーベ＝天体の位置を読む器具。同心の輪と、中を渡す横木。
 const ASTROLABE = {
@@ -808,6 +814,7 @@ const SOURCES = {
   astrolabe: ASTROLABE,
   spark: SPARK,
   flask: FLASK,
+  'flask-empty': FLASK_EMPTY,
   banner: BANNER,
   sheet: SHEET,
   'sheet-done': SHEET_DONE,
@@ -853,4 +860,5 @@ export const KIND_ICON = {
   feast: 'banner',
   log: 'footsteps',
   mission: 'flask',
+  process: 'flask-empty',
 };
