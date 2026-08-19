@@ -1912,20 +1912,20 @@ a.room-title {
   gap: 6px;
 }
 
-/* 4つ並べる時は縦積みの2列にする。横1列だと札が潰れて読めない。 */
-.seg-toggle.seg-4 {
+/* 3つより多いときは縦積みの2列にする。横1列だと札が潰れて読めない。 */
+.seg-toggle.seg-4,
+.seg-toggle.seg-5 {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
 
-.seg-toggle.seg-3 button {
-  padding-left: 6px;
-  padding-right: 6px;
-  font-size: 13px;
-  letter-spacing: 0;
+/* 奇数の最後は1行を占める。片側だけ半端に残るより据わりがよい。 */
+.seg-toggle.seg-5 button:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
-.seg-toggle.seg-4 button {
+.seg-toggle.seg-4 button,
+.seg-toggle.seg-5 button {
   justify-content: flex-start;
   padding-left: 12px;
 }
@@ -2437,12 +2437,6 @@ a.room-title {
   border-bottom: 1px dotted var(--line-soft);
 }
 
-/* ---------- スペル ---------- */
-
-.card.kind-spell {
-  border-left-color: var(--gold);
-}
-
 /* 消え物は薬草色、残るものは鋼の色。 */
 .card.kind-food {
   border-left-color: var(--green);
@@ -2462,19 +2456,14 @@ a.room-title {
   border-color: #c4ccd0;
 }
 
-.spell-excerpt {
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--dim);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* 祭事は実り（金）。物は残らないが、消えたわけでもない。 */
+.card.kind-feast {
+  border-left-color: var(--gold);
 }
 
-.room-spell {
-  border-left-color: var(--gold);
+.badge.feast {
+  color: var(--gold-dark);
+  border-color: var(--gold);
 }
 
 .topbar .icon-btn + .icon-btn {

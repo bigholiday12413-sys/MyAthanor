@@ -72,9 +72,13 @@ function withTemperature(idea, now = new Date()) {
 
 /* ---------- idea ---------- */
 
-export function createIdea({ title, created_at }) {
-  const stmt = db.prepare(`INSERT INTO idea (title, created_at) VALUES (?, ?)`);
-  const { lastInsertRowid } = stmt.run(requireTitle(title), created_at || nowIso());
+export function createIdea({ title, body, created_at }) {
+  const stmt = db.prepare(`INSERT INTO idea (title, body, created_at) VALUES (?, ?, ?)`);
+  const { lastInsertRowid } = stmt.run(
+    requireTitle(title),
+    body ?? null,
+    created_at || nowIso(),
+  );
   return getIdea(Number(lastInsertRowid));
 }
 
@@ -96,11 +100,15 @@ function requireMoment(value, label) {
   return at.toISOString();
 }
 
-export function updateIdea(id, { title, created_at, temperature }) {
+export function updateIdea(id, { title, body, created_at, temperature }) {
   const row = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
   if (!row) throw notFound('idea');
   if (title !== undefined) {
     db.prepare(`UPDATE idea SET title = ? WHERE id = ?`).run(requireTitle(title), id);
+  }
+  if (body !== undefined) {
+    // 空の本文は持たせない。空文字と未記入を区別しても得るものがない。
+    db.prepare(`UPDATE idea SET body = ? WHERE id = ?`).run(String(body).trim() || null, id);
   }
   if (created_at !== undefined) {
     db.prepare(`UPDATE idea SET created_at = ? WHERE id = ?`)
@@ -119,77 +127,8 @@ export function updateIdea(id, { title, created_at, temperature }) {
    どこから来たのか辿れないまま残るだけになる。
    完了して生まれたログは残し、出どころだけ外す（前掲）。 */
 export function deleteIdea(id) {
-  const row = db.prepare(`SELECT * FROM idea WHERE id = ? AND is_spell = 0`).get(id);
+  const row = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
   if (!row) throw notFound('idea');
-  return transaction(() => {
-    for (const mission of db
-      .prepare(`SELECT * FROM mission WHERE source_type = 'idea' AND source_id = ?`)
-      .all(id)) {
-      removeMission(mission);
-    }
-    db.prepare(`DELETE FROM cauldron WHERE source_type = 'idea' AND source_id = ?`).run(id);
-    db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
-    return { id, deleted: true };
-  });
-}
-
-/* ---------- spell（スペルブック） ---------- */
-
-function spellRow(id) {
-  const row = db.prepare(`SELECT * FROM idea WHERE id = ? AND is_spell = 1`).get(id);
-  if (!row) throw notFound('spell');
-  return row;
-}
-
-export function listSpells() {
-  return db
-    .prepare(`
-      SELECT i.*,
-             (SELECT COUNT(*) FROM mission m
-               WHERE m.source_type = 'idea' AND m.source_id = i.id) AS mission_count,
-             (SELECT COUNT(*) FROM mission m
-               WHERE m.source_type = 'idea' AND m.source_id = i.id
-                 AND m.status = 'active') AS active_mission_count
-      FROM idea i WHERE i.is_spell = 1
-      ORDER BY i.created_at DESC, i.id DESC
-    `)
-    .all()
-    .map((row) => ({ ...row }));
-}
-
-export function getSpell(id) {
-  const row = spellRow(id);
-  return {
-    ...row,
-    kind: 'spell',
-    missions: listMissionsBySource('idea', id),
-  };
-}
-
-export function createSpell({ title, body }) {
-  const { lastInsertRowid } = db
-    .prepare(`
-      INSERT INTO idea (title, created_at, is_spell, body) VALUES (?, ?, 1, ?)
-    `)
-    .run(requireTitle(title), nowIso(), body ? String(body) : null);
-  return getSpell(Number(lastInsertRowid));
-}
-
-export function updateSpell(id, { title, body }) {
-  const row = spellRow(id);
-  db.prepare(`UPDATE idea SET title = ?, body = ? WHERE id = ?`).run(
-    title === undefined ? row.title : requireTitle(title),
-    body === undefined ? row.body : body === null || body === '' ? null : String(body),
-    id,
-  );
-  return getSpell(id);
-}
-
-// ミッションを抱えたままのスペルは消させない。道が切れてしまうため。
-/* 消す。ここから出たプロセスも道連れにする。アイデアと同じ扱い。
-   以前はプロセスが残っていると断っていたが、片方だけ消せないのは筋が通らない。 */
-export function deleteSpell(id) {
-  spellRow(id);
   return transaction(() => {
     for (const mission of db
       .prepare(`SELECT * FROM mission WHERE source_type = 'idea' AND source_id = ?`)
@@ -204,15 +143,15 @@ export function deleteSpell(id) {
 
 /* ---------- log ---------- */
 
-/* 買ったものの別。糧は食べれば消え、装備は残る。
-   出来事としてのログは NULL のまま。 */
-export const GOODS = ['food', 'gear'];
+/* 買ったものの別。糧は食べれば消え、装備は残り、祭事はその場限り。
+   物の出入りを伴わないただの出来事は NULL のまま。 */
+export const GOODS = ['food', 'gear', 'feast'];
 
 export const isGoods = (value) => GOODS.includes(value);
 
 function goodsOf(value) {
   if (value === undefined || value === null || value === '') return null;
-  if (!isGoods(value)) throw badRequest('goods must be "food" or "gear"');
+  if (!isGoods(value)) throw badRequest(`goods must be one of ${GOODS.join(', ')}`);
   return value;
 }
 
@@ -300,7 +239,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
              0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence,
              i.temperature, i.temperature_at, NULL AS goods
-      FROM idea i WHERE i.is_spell = 0
+      FROM idea i
     `);
   }
   // 糧と装備もログの器に入っているので、別で絞り込むだけでよい。
@@ -1214,8 +1153,7 @@ function dungeonRoom(type, row, depth) {
   }
 
   return {
-    // 表示は spell と分けるが、ミッションやタグの引き当ては idea のまま。
-    type: type === 'idea' && row.is_spell ? 'spell' : type,
+    type,
     id: row.id,
     title: row.title,
     at: type === 'idea' ? row.created_at : row.occurred_at,
@@ -1397,12 +1335,12 @@ export function getSummary(now = new Date()) {
      管の消費済みの内訳なので、外す条件も管と揃える。 */
   const spendByGoods = db
     .prepare(`
-      SELECT COALESCE(l.goods, 'event') AS goods,
+      SELECT COALESCE(l.goods, 'other') AS goods,
              COALESCE(SUM(l.money_spent), 0) AS money,
              COUNT(*) AS count
       FROM log l ${NOT_FROM_REPEAT}
         AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
-      GROUP BY COALESCE(l.goods, 'event')
+      GROUP BY COALESCE(l.goods, 'other')
     `)
     .all(moneyWeek.start, moneyWeek.end);
 
@@ -1442,7 +1380,7 @@ export function getSummary(now = new Date()) {
       due_mission_count: plannedMoney.count,
     },
     // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
-    wallet_by_goods: ['food', 'gear', 'event'].map((goods) => {
+    wallet_by_goods: [...GOODS, 'other'].map((goods) => {
       const row = spendByGoods.find((item) => item.goods === goods);
       return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };
     }),

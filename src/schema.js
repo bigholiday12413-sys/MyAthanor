@@ -129,9 +129,9 @@ export const ADDED_COLUMNS = [
   // いつから／いつまで。どちらも任意で、YYYY-MM-DD のローカル日付。
   ['mission', 'start_date', 'TEXT'],
   ['mission', 'due_date', 'TEXT'],
-  // スペル：したいことではなく、良いと思った物事・考え方として持っておくアイデア。
-  // ミッションの切り出しやタグをそのまま使いたいので、同じ器に印を付ける形にする。
+  // スペル（インゴット）だった頃の印。いまは使っていないが、列は消さない決まり。
   ['idea', 'is_spell', 'INTEGER NOT NULL DEFAULT 0'],
+  // アイデアの本文。題だけでは足りないときに書き足す。
   ['idea', 'body', 'TEXT'],
   // 金庫：月が終わったときのウォレットの余りが積まれていく。初期残高も持てる。
   ['settings', 'vault_initial', 'INTEGER NOT NULL DEFAULT 0'],
@@ -142,6 +142,8 @@ export const ADDED_COLUMNS = [
   ['cauldron', 'due_date', 'TEXT'],
   // 買ったものの別。'food'＝消え物（糧）、'gear'＝残るもの（装備）。
   // NULL は出来事としてのログで、ここまでの記録はすべてこれに当たる。
+  // 買ったものの別。食べれば消える糧、残る装備、その場限りの祭事。
+  // NULL は物の出入りを伴わないただの出来事。
   ['log', 'goods', 'TEXT'],
   // 繰り返すプロセス。周期（日）を持つものが種で、そこから一回きりのプロセスが
   // 生えてくる。種そのものは棚にも一覧にも出さず、周期だけを持っている。
@@ -162,4 +164,13 @@ export function applySchema(db) {
       .get(table, column);
     if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+  applyRewrites(db);
+}
+
+/* 列を足すだけでは済まない直し。何度走っても同じ結果になる形で書く。
+   起動のたびに通るので、条件に合う行が無ければ実質ただの SELECT で済む。 */
+function applyRewrites(db) {
+  /* インゴットをやめ、アイデアに一本化した。同じ器に入っているので、
+     印を外せばそのままアイデアになる。本文の列は残すので、書いたものは失われない。 */
+  db.exec(`UPDATE idea SET is_spell = 0 WHERE is_spell = 1`);
 }

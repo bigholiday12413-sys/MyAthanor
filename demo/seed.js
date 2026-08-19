@@ -151,9 +151,10 @@ export function seed(db, transaction) {
     /* 冷めかけのアイデアと、スペル */
     const kiln = idea('小さな窯をつくる', 120, 366);
 
-    const spell = idOf(
-      `INSERT INTO idea (title, created_at, is_spell, body, temperature, temperature_at)
-       VALUES (?, ?, 1, ?, 273, ?)`,
+    // 本文を持つアイデア。題だけで足りないものは、ここに書き足す。
+    const keepsake = idOf(
+      `INSERT INTO idea (title, created_at, body, temperature, temperature_at)
+       VALUES (?, ?, ?, 273, ?)`,
       '手入れの要るものだけを持つ',
       iso(18),
       '直せないものは増やさない。手を入れるたびに愛着が乗るものを選ぶ。\n'
@@ -187,6 +188,10 @@ export function seed(db, transaction) {
     bought('剪定鋏', 6, 4200, 'gear');
     bought('鉄瓶', 13, 5600, 'gear');
     bought('作業用の前掛け', 24, 3600, 'gear');
+    // 祭事＝その場限りのもの。物は残らないが、消えたわけでもない。
+    bought('陶器市', 1, 5800, 'feast');
+    bought('薪能', 11, 4500, 'feast');
+    bought('友人の祝い', 21, 8000, 'feast');
 
     /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。
        固定費として可処分から先に引かれるので、タイムだけのものと
