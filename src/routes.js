@@ -178,3 +178,6 @@ api.get('/dungeon', handle((req, res) =>
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));
+
+// その週、何に出ていったか。ウォレットは別ごと、タイムは1件ずつ。
+api.get('/used', handle((req, res) => res.json(store.getUsed(req.query.kind ?? 'money'))));

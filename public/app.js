@@ -516,9 +516,9 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
   `;
 }
 
-/* ユーズド＝今週のウォレットが何に出ていったか。
-   金額の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
-   家計簿として見るときに効かない。行を押すとストリームのその絞り込みへ飛ぶ。 */
+/* ユーズド＝その週、何に出ていったか。
+   量の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
+   家計簿として見るときに効かない。行を押すとその先へ飛べる。 */
 const GOODS_TONE = {
   food: 'var(--green)',
   gear: '#9aa5ab',
@@ -528,30 +528,33 @@ const GOODS_TONE = {
 // other＝別を付けていないぶん。プロセスの完了で生まれたログはここに落ちる。
 const GOODS_NAME = { ...KIND_LABEL, other: 'その他' };
 
-function walletBars(rows) {
-  const total = rows.reduce((sum, row) => sum + row.money, 0);
-  if (!total) return '';
-  return rows
-    .filter((row) => row.money)
-    .map(
-      (row) => `
+function usedBars(used, format) {
+  const money = used.kind === 'money';
+  return used.rows
+    .filter((row) => row.value)
+    .map((row) => {
+      /* ウォレットは別ごとなので、その絞り込みへ飛ぶ。
+         タイムは1件ずつなので、そのログへ飛ぶ。 */
+      const href = money
+        ? `#/stream?type=${row.key === 'other' ? 'log' : row.key}`
+        : `#/log/${row.id}`;
+      const face = money ? row.key : row.goods;
+      const name = money ? GOODS_NAME[row.key] : clip(row.title, 12);
+      return `
         <div class="spend">
           <div class="spend-head">
-            <a class="spend-name" href="#/stream?type=${
-              // 別を付けていないぶんは素のログ。ストリームの絞り込みでは 'log' に当たる。
-              row.goods === 'other' ? 'log' : row.goods
-            }">${
-              row.goods === 'other' ? '' : icon(KIND_ICON[row.goods])
-            }<span>${GOODS_NAME[row.goods]}</span> →</a>
-            <span class="spend-count">${row.count}件</span>
-            <span class="spend-money">${esc(fmtMoney(row.money))}</span>
+            <a class="spend-name" href="${href}">${
+              face && face !== 'other' ? icon(KIND_ICON[face]) : ''
+            }<span>${esc(name)}</span> →</a>
+            ${money ? `<span class="spend-count">${row.count}件</span>` : ''}
+            <span class="spend-money">${esc(format(row.value))}</span>
           </div>
           <div class="spend-bar">
-            <i style="width:${Math.round((row.money / total) * 100)}%;
-              background:${GOODS_TONE[row.goods]}"></i>
+            <i style="width:${Math.round((row.value / used.total) * 100)}%;
+              background:${money ? GOODS_TONE[row.key] : 'var(--green)'}"></i>
           </div>
-        </div>`,
-    )
+        </div>`;
+    })
     .join('');
 }
 
@@ -781,28 +784,46 @@ function shelf(missions, weekEnd) {
   `;
 }
 
-async function renderUsed() {
+// 管の名前。ユーズドはどちらの管の話かを切り替えて見る。
+const TUBE_LABEL = { time: 'タイム', money: 'ウォレット' };
+
+async function renderUsed(kind) {
   setActiveTab('home');
-  setTopbar({ title: 'ユーズド', back: '#/home' });
+  setTopbar({ title: `ユーズド・${TUBE_LABEL[kind]}`, back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const summary = await api('/summary');
-  const rows = summary.wallet_by_goods;
-  const total = rows.reduce((sum, row) => sum + row.money, 0);
+  const used = await api(`/used?kind=${kind}`);
+  const format = kind === 'money' ? fmtMoney : fmtTime;
 
   viewEl.innerHTML = `
+    <div class="filter-bar">
+      <div class="filters">
+        ${['time', 'money']
+          .map(
+            (face) => `<button class="filter" data-used="${face}"
+               aria-pressed="${kind === face}">${TUBE_LABEL[face]}</button>`,
+          )
+          .join('')}
+      </div>
+    </div>
     <div class="panel tight">
       <div class="stat-line">
-        <span>週 ${esc(summary.money.period.label)}</span>
-        <span class="v">${esc(fmtMoney(total))}</span>
+        <span>週 ${esc(used.period.label)}</span>
+        <span class="v">${esc(format(used.total))}</span>
       </div>
     </div>
     ${
-      total
-        ? `<div class="panel">${walletBars(rows)}</div>`
+      used.total
+        ? `<div class="panel">${usedBars(used, format)}</div>`
         : '<div class="empty">今週はまだ出ていません</div>'
     }
   `;
+
+  for (const button of viewEl.querySelectorAll('.filter[data-used]')) {
+    button.addEventListener('click', () => {
+      location.hash = `#/used?kind=${button.dataset.used}`;
+    });
+  }
 }
 
 async function renderHome() {
@@ -831,6 +852,7 @@ async function renderHome() {
         data: summary.time,
         format: fmtTime,
         plannedLabel: '今週予定',
+        href: '#/used?kind=time',
         // タイムは貯まらないので数は出さない。使える幅を決めに行く入口だけ置く。
         store: { icon: 'timegrid', href: '#/settings', label: '週のタイムを決める' },
       })}
@@ -839,7 +861,7 @@ async function renderHome() {
         data: summary.money,
         format: fmtMoney,
         plannedLabel: '今週予定',
-        href: '#/used',
+        href: '#/used?kind=money',
         store: { icon: 'coins', text: fmtMoney(vault.balance), href: '#/vault', label: '金庫' },
       })}
     </div>
@@ -2713,7 +2735,10 @@ async function route() {
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/vault') return await renderVault();
-    if (hash === '/used') return await renderUsed();
+    if (hash === '/used' || hash.startsWith('/used?')) {
+      const kind = new URLSearchParams(hash.split('?')[1] ?? '').get('kind');
+      return await renderUsed(kind === 'time' ? 'time' : 'money');
+    }
     if ((match = hash.match(/^\/(idea|log)\/(\d+)$/))) {
       return await renderEntry(match[1], Number(match[2]));
     }

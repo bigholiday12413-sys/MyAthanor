@@ -1290,6 +1290,47 @@ export function getDungeon({ since = null, until = null } = {}) {
   return { totals, roads, period: { since: from, until: to } };
 }
 
+/* ---------- ユーズド（その週、何に出ていったか） ---------- */
+
+/* ウォレットは別（糧・装備・祭事）でまとめる。買い物は数が多くて似通うので、
+   1件ずつ並べても割合が読めない。
+   タイムは1件ずつ並べる。時間を使ったことは数が少なく、どれも中身が違うので、
+   まとめてしまうと「何に使ったか」が消える。 */
+export function getUsed(kind, now = new Date()) {
+  requireKind(kind);
+  const period = periods[kind].of(now);
+
+  if (kind === 'money') {
+    const found = db
+      .prepare(`
+        SELECT COALESCE(l.goods, 'other') AS key,
+               COALESCE(SUM(l.money_spent), 0) AS value,
+               COUNT(*) AS count
+        FROM log l ${NOT_FROM_REPEAT}
+          AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
+        GROUP BY COALESCE(l.goods, 'other')
+      `)
+      .all(period.start, period.end);
+    const rows = [...GOODS, 'other'].map((key) => {
+      const row = found.find((item) => item.key === key);
+      return { key, value: row?.value ?? 0, count: row?.count ?? 0 };
+    });
+    return { kind, period, total: rows.reduce((sum, row) => sum + row.value, 0), rows };
+  }
+
+  const rows = db
+    .prepare(`
+      SELECT l.id, l.title, l.goods, l.time_spent AS value,
+             CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission
+      FROM log l ${NOT_FROM_REPEAT}
+        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.time_spent > 0
+      ORDER BY l.time_spent DESC, l.id DESC
+    `)
+    .all(period.start, period.end)
+    .map((row) => ({ ...row, from_mission: Boolean(row.from_mission) }));
+  return { kind, period, total: rows.reduce((sum, row) => sum + row.value, 0), rows };
+}
+
 /* ---------- summary（ホームのタンク） ---------- */
 
 export function getSummary(now = new Date()) {
@@ -1346,19 +1387,6 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active' AND repeat_of IS NULL`)
     .get().count;
 
-  /* 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
-     管の消費済みの内訳なので、外す条件も管と揃える。 */
-  const spendByGoods = db
-    .prepare(`
-      SELECT COALESCE(l.goods, 'other') AS goods,
-             COALESCE(SUM(l.money_spent), 0) AS money,
-             COUNT(*) AS count
-      FROM log l ${NOT_FROM_REPEAT}
-        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
-      GROUP BY COALESCE(l.goods, 'other')
-    `)
-    .all(moneyWeek.start, moneyWeek.end);
-
   const plannedWeek = plannedMissions(week);
   const plannedMoney = plannedMissions(moneyWeek);
 
@@ -1394,11 +1422,6 @@ export function getSummary(now = new Date()) {
       fixed: moneyBudget.fixed,
       due_mission_count: plannedMoney.count,
     },
-    // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
-    wallet_by_goods: [...GOODS, 'other'].map((goods) => {
-      const row = spendByGoods.find((item) => item.goods === goods);
-      return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };
-    }),
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,
