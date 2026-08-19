@@ -584,17 +584,25 @@ function keeperMark(name) {
    動かすのは transform と opacity だけなので、合成だけで済む。 */
 function keeperWalk(n) {
   /* 出来事を時間順に並べる。
-     右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。 */
+     右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。
+
+     フラスコが1本のときは歩く先が無いので、その場で柄の数だけ拍を打つ。
+     位置は変えられないが、柄が巡って、消えて戻ってくる。
+     ずっと立ちっぱなしだと、居るのではなく描き損ねたように見える。 */
+  const inPlace = n < 2;
+  const beats = inPlace ? KEEPER_FRAMES.length : n;
   const stops = [];
   let t = 0;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) stops.push({ t, pos: i, on: 1, face: 1 });
-  stops.push({ t, pos: n - 1, on: 0, face: 1 });
-  t += KEEPER_AWAY;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) {
-    stops.push({ t, pos: n - 1 - i, on: 1, face: -1 });
+  for (const face of [1, -1]) {
+    // 戻りは逆から辿る。折り返しでは体ごと裏返して、進む向きに顔を向ける。
+    const at = (i) => (inPlace ? 0 : face > 0 ? i : n - 1 - i);
+    for (let i = 0; i < beats; i += 1, t += KEEPER_STEP) {
+      stops.push({ t, pos: at(i), on: 1, face });
+    }
+    stops.push({ t, pos: at(beats - 1), on: 0, face });
+    t += KEEPER_AWAY;
   }
-  stops.push({ t, pos: 0, on: 0, face: -1 });
-  const seconds = t + KEEPER_AWAY;
+  const seconds = t;
 
   /* 最後の点から終いまでは、そのままの姿勢で消えている。
      終端が無いと元の値へ戻そうとするので、明示して置く。 */
@@ -620,16 +628,6 @@ function wireKeeper() {
         })),
         opts,
       ));
-
-  /* フラスコが1本だけなら歩く先が無い。それでも布だけは動かす。
-     じっと固まっていると、居るのではなく描き損ねたように見える。 */
-  if (n < 2) {
-    const each = 1 / dresses.length;
-    return cycle(
-      [...dresses.map((_, index) => ({ offset: index * each, index })), { offset: 1, index: 0 }],
-      { duration: KEEPER_STEP * dresses.length * 1000, iterations: Infinity },
-    );
-  }
 
   const { seconds, stops } = keeperWalk(n);
   const opts = { duration: seconds * 1000, iterations: Infinity };
