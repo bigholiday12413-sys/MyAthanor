@@ -236,9 +236,14 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
     `);
   }
   /* 糧・装備・祭事もログの器に入っているので、別で絞り込むだけでよい。
-     'log' はログ全部。別を付けていないものだけを見る絞り込みは持たない。 */
-  if (type === 'all' || type === 'log' || isGoods(type)) {
-    const where = isGoods(type) ? `WHERE l.goods = '${type}'` : '';
+     'log' はログ全部。'process' は別を付けていないぶん
+     （プロセスの完了で生まれたログと、素のまま書き留めたログ）。 */
+  if (type === 'all' || type === 'log' || type === 'process' || isGoods(type)) {
+    const where = isGoods(type)
+      ? `WHERE l.goods = '${type}'`
+      : type === 'process'
+        ? `WHERE l.goods IS NULL`
+        : '';
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,

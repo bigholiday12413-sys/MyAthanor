@@ -88,13 +88,19 @@ function fmtDate(iso) {
 
 // 断念という状態は持たない。やらないことにしたものは消す。
 // 過去に断念したものが残っているので、札の名前だけは引ける形で置いておく。
-const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
-const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事' };
+// active は常にこれから先の話なので「予定」と呼ぶ。「進行中」だと、
+// まだ手を付けていないものまで動いているように読めてしまう。
+const STATUS_LABEL = { active: '予定', abandoned: '断念', done: '完了' };
+const KIND_LABEL = {
+  idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事', process: 'プロセス',
+};
 
 /* 糧・装備・祭事はログの器に入っている。見た目の別だけここで引き直す。 */
 const GOODS = ['food', 'gear', 'feast'];
 const isGoods = (kind) => GOODS.includes(kind);
-const faceOf = (item) => item.goods ?? item.kind;
+// 別を付けていないログ（プロセスの完了で生まれたものと、素のまま書き留めたもの）は
+// 「プロセス」の顔で出す。中身が空になったフラスコ＝もう済んだ予定として見せる。
+const faceOf = (item) => item.goods ?? (item.kind === 'log' ? 'process' : item.kind);
 const toYen = (value) => Math.max(0, Math.round(Number(value) || 0));
 
 /* アイデアの温度。273K（＝0℃）を常温とし、そこへ向かって冷めていく。 */
@@ -537,7 +543,7 @@ function usedBars(used, format) {
       /* ウォレットは別ごとなので、その絞り込みへ飛ぶ。
          タイムは1件ずつなので、そのログへ飛ぶ。 */
       const href = money
-        ? `#/missions?face=log&sub=${row.key === 'other' ? 'log' : row.key}`
+        ? `#/missions?sub=${row.key === 'other' ? 'process' : row.key}`
         : `#/log/${row.id}`;
       const face = money ? row.key : row.goods;
       const name = money ? GOODS_NAME[row.key] : clip(row.title, 12);
@@ -697,7 +703,7 @@ const FLASK_TONE = {
   over: { deep: '#8c3322', lit: '#cf5a3f' },
 };
 
-function flaskRows(ratio, spill) {
+function flaskRows(ratio) {
   const [top, bottom] = FLASK_BODY;
   const rows = FLASK_ROWS.map((row) => row.split(''));
   const height = bottom - top + 1;
@@ -714,11 +720,47 @@ function flaskRows(ratio, spill) {
       row[x] = y === surface || (y === surface + 1 && x <= left + 2) ? 'h' : 'l';
     }
   }
-  // 吹きこぼれ。口の脇に粒を散らす。
-  if (spill) {
-    for (const [x, y] of [[4, 1], [11, 2], [3, 3], [12, 4]]) rows[y][x] = 'h';
-  }
   return rows.map((row) => row.join(''));
+}
+
+/* 期限切れの空フラスコ＝吹きこぼれではなく、放っておかれて壊れていく体にする。
+   ヒビは段を追って増やし、増えたものは砕けるまで消えない。
+   砕ける瞬間は、肩・左半身・右半身の3つに割って別々に飛ばす。
+   ヒビの場所は輪郭の内側に手で置く。丸みに沿わせないと、斜め線が
+   ガラスの上に浮いて見える。 */
+const CRACK_STAGES = [
+  [[7, 4], [8, 5]],
+  [[5, 7], [10, 8]],
+  [[9, 11], [6, 12], [8, 13]],
+];
+const CRACK_INK = '#2a1810';
+
+// これより上の行は肩（頸ごと）、下は左右に割る。
+const SHARD_SPLIT_Y = 7;
+const SHARD_SPLIT_X = 8;
+
+function maskRows(rows, keep) {
+  return rows.map((row, y) => [...row].map((ch, x) => (keep(x, y) ? ch : '.')).join(''));
+}
+
+function flaskShatterBody(rows, palette) {
+  const shards = {
+    top: maskRows(rows, (x, y) => y < SHARD_SPLIT_Y),
+    left: maskRows(rows, (x, y) => y >= SHARD_SPLIT_Y && x < SHARD_SPLIT_X),
+    right: maskRows(rows, (x, y) => y >= SHARD_SPLIT_Y && x >= SHARD_SPLIT_X),
+  };
+  const cracks = CRACK_STAGES.map((points) => {
+    const overlay = rows.map(() => Array(16).fill('.'));
+    for (const [x, y] of points) overlay[y][x] = 'k';
+    return toRects({ rows: overlay.map((r) => r.join('')), palette: { k: CRACK_INK } });
+  });
+
+  return `
+    ${Object.entries(shards)
+      .map(([name, r]) => `<g class="shard shard-${name}">${toRects({ rows: r, palette })}</g>`)
+      .join('')}
+    ${cracks.map((c, i) => `<g class="crack crack-${i + 1}">${c}</g>`).join('')}
+  `;
 }
 
 function flask(mission, weekEnd) {
@@ -730,18 +772,18 @@ function flask(mission, weekEnd) {
   const key = over ? 'over' : left <= 1 ? 'soon' : 'far';
   const href = `#/${mission.source_type}/${mission.source_id}`;
 
-  const body = toRects({
-    rows: flaskRows(ratio, over),
-    palette: {
-      o: over ? FLASK_TONE.over.deep : '#8fa79c',
-      c: '#8a5a2b',
-      l: FLASK_TONE[key].deep,
-      h: FLASK_TONE[key].lit,
-    },
-  });
+  const rows = flaskRows(ratio);
+  const palette = {
+    o: over ? FLASK_TONE.over.deep : '#8fa79c',
+    c: '#8a5a2b',
+    l: FLASK_TONE[key].deep,
+    h: FLASK_TONE[key].lit,
+  };
+  const body = over ? flaskShatterBody(rows, palette) : toRects({ rows, palette });
 
   return `
-    <a class="flask is-${key}" href="${href}" aria-label="${esc(mission.title)}">
+    <a class="flask is-${key}" href="${href}" aria-label="${esc(mission.title)}"
+       data-id="${mission.id}">
       <svg viewBox="0 0 16 16" shape-rendering="crispEdges"
            aria-hidden="true" focusable="false">${body}</svg>
       ${
@@ -750,6 +792,63 @@ function flask(mission, weekEnd) {
       }
     </a>
   `;
+}
+
+// ヒビが増える間隔と、砕けて散る動き。棚番と同じくゆっくり進める。
+const CRACK_STEP = 3; // ヒビが1本増えるまでの秒数
+const CRACK_HOLD = 2; // 全部ヒビが入ってから砕けるまで
+const BREAK_SPAN = 0.5; // 砕けて飛び散る動きの長さ
+const BREAK_GONE = 1.5; // 消えたままにしておく間
+
+/* 期限切れフラスコのヒビと破裂。棚番と同じ理由で element.animate() を直に使う。
+   フラスコごとに開始位置をずらす（id で割った余りを負の delay にする）。
+   全部が同時に割れると、放っておかれた感じではなく人形劇に見える。 */
+function wireFlaskDecay() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const crackAt = CRACK_STAGES.map((_, i) => (i + 1) * CRACK_STEP);
+  const breakAt = crackAt[crackAt.length - 1] + CRACK_HOLD;
+  const goneAt = breakAt + BREAK_SPAN;
+  const seconds = goneAt + BREAK_GONE;
+  const at = (t) => t / seconds;
+
+  const THROWS = {
+    top: 'translate(0px,-10px) rotate(-16deg)',
+    left: 'translate(-9px,7px) rotate(24deg)',
+    right: 'translate(9px,8px) rotate(-26deg)',
+  };
+
+  for (const el of viewEl.querySelectorAll('.flask.is-over')) {
+    const delay = -((Number(el.dataset.id) % 11) / 11) * seconds * 1000;
+    const opts = { duration: seconds * 1000, iterations: Infinity, delay };
+
+    crackAt.forEach((t, i) => {
+      el.querySelector(`.crack-${i + 1}`)?.animate(
+        [
+          { offset: 0, opacity: 0, easing: 'step-end' },
+          { offset: at(t), opacity: 1, easing: 'step-end' },
+          { offset: at(goneAt), opacity: 1, easing: 'step-end' },
+          { offset: at(goneAt), opacity: 0 },
+          { offset: 1, opacity: 0 },
+        ],
+        opts,
+      );
+    });
+
+    // 割れて散った姿は、次の巡り（offset 0 で無傷へ戻る）まで保つ。
+    // 直後に組み直すと、砕けたことにならない。
+    for (const [name, thrown] of Object.entries(THROWS)) {
+      el.querySelector(`.shard-${name}`)?.animate(
+        [
+          { offset: 0, transform: 'none', opacity: 1, easing: 'step-end' },
+          { offset: at(breakAt), transform: 'none', opacity: 1, easing: 'ease-in' },
+          { offset: at(goneAt), transform: thrown, opacity: 0 },
+          { offset: 1, transform: thrown, opacity: 0 },
+        ],
+        opts,
+      );
+    }
+  }
 }
 
 function shelf(missions, weekEnd) {
@@ -876,10 +975,11 @@ async function renderHome() {
 
     ${
       // 期限を持たない見積もりは試験管に乗らない。乗っていないことを見せて取りこぼしを防ぐ。
+      // プロセスの一覧はもう無い（出したアイデア・ログの側にしか居ない）ので、飛び先は持たせない。
       summary.undated.time || summary.undated.money
         ? `<div class="panel warn">
              <div class="stat-line">
-               <span><a class="link" href="#/missions">期限なしの見積 →</a></span>
+               <span>期限なしの見積</span>
                <span class="v neg">${esc(fmtTime(summary.undated.time))} · ${esc(
                  fmtMoney(summary.undated.money),
                )}</span>
@@ -891,6 +991,7 @@ async function renderHome() {
   `;
 
   wireKeeper();
+  wireFlaskDecay();
 }
 
 /* ---------- ストリーム ---------- */
@@ -1383,11 +1484,11 @@ async function renderEntry(kind, entryId) {
         kind === 'log'
           ? `<div class="field">
                <div class="seg-toggle seg-4" id="goods-toggle">
-                 ${['log', ...GOODS]
+                 ${['process', ...GOODS]
                    .map(
                      (face) => `<button type="button" data-goods="${
-                       face === 'log' ? '' : face
-                     }" aria-pressed="${(entry.goods ?? 'log') === face}">${icon(
+                       face === 'process' ? '' : face
+                     }" aria-pressed="${(entry.goods ?? 'process') === face}">${icon(
                        KIND_ICON[face],
                      )}${KIND_LABEL[face]}</button>`,
                    )
@@ -1564,104 +1665,59 @@ async function renderEntry(kind, entryId) {
   wireLegacy(viewEl, () => renderEntry(kind, entryId));
 }
 
-/* ---------- プロセス ---------- */
+/* ---------- ログ ---------- */
 
-/* 'process' = 予定、'log' = 行ったこと。同じ画面の2つの面。 */
-let workFace = 'process';
-// 'once' = 一回きり（種から生えたものを含む）、'seed' = 繰り返しの種
-let missionRepeat = 'once';
-// ログ側の絞り込み。'log' は素のログ、GOODS はその別。
-let logFilter = 'log';
+/* 予定（プロセス）は、それを生んだアイデア・ログの側に居る。
+   ここは行ったことだけを見る場所。糧・装備・祭事はログの中の別、
+   プロセスは別を付けていないぶん（プロセスの完了で生まれたログと、
+   素のまま書き留めたログ）。 */
+let logFilter = 'process';
 
-/* プロセス（予定）とログ（行ったこと）は、同じものの前後の姿。
-   だから同じ画面に置く。上段でどちらを見るかを選び、下段でその中を絞る。 */
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: workFace === 'log' ? 'ログ' : 'プロセス' });
+  setTopbar({ title: 'ログ' });
 
-  const items =
-    workFace === 'log'
-      ? await api(`/stream?type=${logFilter}`)
-      : await api(`/missions?status=active&sort=due&repeat=${missionRepeat}`);
+  const items = await api(`/stream?type=${logFilter}`);
 
   const totals = items.reduce(
-    (acc, item) =>
-      workFace === 'log'
-        ? { time: acc.time + item.time_spent, money: acc.money + item.money_spent }
-        : { time: acc.time + item.estimated_time, money: acc.money + item.estimated_money },
+    (acc, item) => ({ time: acc.time + item.time_spent, money: acc.money + item.money_spent }),
     { time: 0, money: 0 },
   );
 
-  const sub =
-    workFace === 'log'
-      ? [['log', 'すべて'], ...GOODS.map((g) => [g, KIND_LABEL[g]])]
-      : [['once', '一回きり'], ['seed', '繰り返す']];
-  const picked = workFace === 'log' ? logFilter : missionRepeat;
+  const sub = [...GOODS.map((g) => [g, KIND_LABEL[g]]), ['process', KIND_LABEL.process]];
 
   viewEl.innerHTML = `
     <div class="filter-bar">
       <div class="filters">
-        ${[['process', 'プロセス'], ['log', 'ログ']]
-          .map(
-            ([face, label]) => `<button class="filter" data-face="${face}"
-               aria-pressed="${workFace === face}">${icon(
-                 face === 'log' ? KIND_ICON.log : KIND_ICON.mission,
-               )}${label}</button>`,
-          )
-          .join('')}
-      </div>
-      <div class="filters">
         ${sub
           .map(
             ([key, label]) => `<button class="filter" data-sub="${key}"
-               aria-pressed="${picked === key}">${
-                 key === 'seed' ? icon('cycle') : ''
-               }${label}</button>`,
+               aria-pressed="${logFilter === key}">${icon(KIND_ICON[key])}${label}</button>`,
           )
           .join('')}
       </div>
     </div>
-    ${
-      // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
-      (() => {
-        const undated =
-          workFace === 'log' ? 0 : items.filter((m) => !m.due_date && !m.repeat_days).length;
-        return `<div class="panel tight">
-          <div class="stat-line">
-            <span>${items.length}件${undated ? `（期限なし ${undated}）` : ''}</span>
-            <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
-          </div>
-        </div>`;
-      })()
-    }
+    <div class="panel tight">
+      <div class="stat-line">
+        <span>${items.length}件</span>
+        <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
+      </div>
+    </div>
     <div class="list" id="mission-list">
       ${
         items.length
-          ? items
-              .map((item) => (workFace === 'log' ? streamCard(item) : missionCard(item)))
-              .join('')
-          : `<div class="empty">${
-              workFace === 'log' ? 'まだ記録がありません' : 'プロセスはありません'
-            }</div>`
+          ? items.map(streamCard).join('')
+          : '<div class="empty">まだ記録がありません</div>'
       }
     </div>
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter[data-face]')) {
-    button.addEventListener('click', () => {
-      workFace = button.dataset.face;
-      renderMissions();
-    });
-  }
   for (const button of viewEl.querySelectorAll('.filter[data-sub]')) {
     button.addEventListener('click', () => {
-      if (workFace === 'log') logFilter = button.dataset.sub;
-      else missionRepeat = button.dataset.sub;
+      logFilter = button.dataset.sub;
       renderMissions();
     });
   }
-  wireMissionActions(document.getElementById('mission-list'), renderMissions);
-  wireLegacy(document.getElementById('mission-list'), renderMissions);
 }
 
 /* ---------- 設定 ---------- */
@@ -2730,14 +2786,10 @@ async function route() {
     if (hash === '/home') return await renderHome();
     if (hash === '/stream' || hash.startsWith('/stream?')) return await renderStream();
     if (hash === '/missions' || hash.startsWith('/missions?')) {
-      // ユーズドから、見たい面と絞り込みを指定して来られるようにする。
+      // ユーズドから、見たい絞り込みを指定して来られるようにする。
       const query = new URLSearchParams(hash.split('?')[1] ?? '');
-      if (query.get('face') === 'log') workFace = 'log';
       const sub = query.get('sub');
-      if (sub && (sub === 'log' || GOODS.includes(sub))) {
-        workFace = 'log';
-        logFilter = sub;
-      }
+      if (sub && (sub === 'process' || GOODS.includes(sub))) logFilter = sub;
       return await renderMissions();
     }
     if (hash === '/dungeon') return await renderDungeon();

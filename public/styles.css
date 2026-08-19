@@ -670,7 +670,7 @@ body::after {
   border-left-color: var(--gem);
 }
 
-.card.kind-log {
+.card.kind-process {
   border-left-color: var(--trail);
 }
 
@@ -743,7 +743,7 @@ body::after {
   border-color: #dcb5ac;
 }
 
-.badge.log {
+.badge.process {
   color: var(--trail);
   border-color: #c4ccd0;
 }
@@ -2096,6 +2096,14 @@ a.room-title {
   width: 100%;
   max-width: 44px;
   height: auto;
+}
+
+/* 期限切れフラスコの肩・左半身・右半身。砕けるときはそれぞれの塊の
+   真ん中を軸に回す。既定（fill-box の左上）のままだと、回転のたびに
+   絵の外へ弾かれたように見える。 */
+.flask .shard {
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 /* 棚番。フラスコと同じ段を、同じ棚板の上で歩く。

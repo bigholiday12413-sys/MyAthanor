@@ -26,7 +26,7 @@ function id(req) {
 
 /* ストリーム */
 // 記録そのもの（すべて／アイデア／ログ）と、ログの中の別（糧・装備・祭事）。
-const STREAM_TYPES = ['all', 'idea', 'log', ...store.GOODS];
+const STREAM_TYPES = ['all', 'idea', 'log', 'process', ...store.GOODS];
 
 function streamType(value, fallback = 'all') {
   const type = value ?? fallback;
