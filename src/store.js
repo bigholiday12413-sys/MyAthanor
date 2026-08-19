@@ -412,7 +412,7 @@ export function getMission(id) {
 
    周期（日）を持つプロセスが「種」。そこから一回きりのプロセスが生えてくる。
    種そのものは棚にも一覧にも出さず、繰り返しの側にだけ並ぶ。
-   生えたものは自分で立てたものと同じに扱えて、完了も断念もできる。
+   生えたものは自分で立てたものと同じに扱えて、完了も削除もできる。
 
    無限には作れないので、今日から HORIZON 日先までを保つ。
    読むたびに足りないぶんを継ぎ足すので、使っている限り先が尽きない。 */
@@ -604,27 +604,8 @@ export function completeMission(id) {
   });
 }
 
-// 断念：消費予定から外す。ログは生成しない。
-export function abandonMission(id) {
-  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
-  if (!row) throw notFound('mission');
-  if (row.status === 'done') {
-    const err = new Error('completed mission cannot be abandoned');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE mission SET status = 'abandoned', completed_at = NULL WHERE id = ?`).run(id);
-  // 種を止めたら、まだ手を付けていない先のぶんは引き上げる。
-  if (row.repeat_days !== null) {
-    db.prepare(`
-      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
-    `).run(id, dateKey(new Date()));
-  }
-  refreshCauldron(row.cauldron_id);
-  return getMission(id);
-}
-
-/* 消す。断念は「やらないことにした」という記録だが、こちらは記録ごと無かったことにする。
+/* 消す。やらないことにしたものは消す。「断念」という状態は持たない。
+   やり直すなら、そのとき新しく立てればよい。
    種なら、そこから生えたぶんも道連れにする。種だけ消しても回りは残らない。
 
    完了して生まれたログは残し、出どころだけ外す。
@@ -648,19 +629,6 @@ export function deleteMission(id) {
   });
 }
 
-// 進行中に戻す（断念の取り消し）。
-export function reopenMission(id) {
-  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
-  if (!row) throw notFound('mission');
-  if (row.status === 'done') {
-    const err = new Error('completed mission cannot be reopened');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE mission SET status = 'active', completed_at = NULL WHERE id = ?`).run(id);
-  refreshCauldron(row.cauldron_id);
-  return getMission(id);
-}
 
 export function isMissionStatus(status) {
   return MISSION_STATUSES.has(status);

@@ -86,6 +86,8 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 断念という状態は持たない。やらないことにしたものは消す。
+// 過去に断念したものが残っているので、札の名前だけは引ける形で置いておく。
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
 const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事' };
 
@@ -289,21 +291,23 @@ function missionCard(mission, { showSource = true } = {}) {
   const sourceHref = `#/${mission.source_type}/${mission.source_id}`;
   const done = mission.status === 'done';
   const due = dueState(mission);
+  /* やらないことにしたものは消す。「断念」という状態は持たない。
+     やり直すなら、そのとき新しく立てればよい。畳んだ札の中に削除がある。 */
   const actions =
-    // 種は完了しない。回り続けるものなので、止めるだけ。
-    mission.status === 'active' && mission.repeat_days
-      ? `<button data-act="abandon" data-id="${mission.id}" class="ghost danger">止める</button>`
-      : mission.status === 'active'
-      ? `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>
-         <button data-act="abandon" data-id="${mission.id}" class="ghost danger">断念</button>`
-      : mission.status === 'abandoned'
-        ? `<button data-act="reopen" data-id="${mission.id}" class="ghost">進行中に戻す</button>`
-        : legacyButton('mission', mission.id, mission.is_legacy);
+    mission.status === 'active'
+      // 種は完了しない。回り続けるものなので、終わるのは消したとき。
+      ? mission.repeat_days
+        ? ''
+        : `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>`
+      : legacyButton('mission', mission.id, mission.is_legacy);
   return `
     <div class="card status-${esc(mission.status)} ${mission.is_legacy ? 'is-legacy' : ''}"
          data-mission="${mission.id}">
       <div class="card-top">
-        <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
+        ${/* 何であるかを先に言う。状態しか出していないと、ログの札と見分けが付かない。 */ ''}
+        <span class="badge ${esc(mission.status)}">${icon(KIND_ICON.mission)}${esc(
+          STATUS_LABEL[mission.status],
+        )}</span>
         ${
           due
             ? `<span class="badge due-${due.key}">${esc(due.label)}</span>`
@@ -360,7 +364,7 @@ function missionCard(mission, { showSource = true } = {}) {
   `;
 }
 
-// プロセスカードの完了／断念／再開と、期日の保存をまとめて処理する。
+// プロセスカードの完了と削除、直した中身の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
   container.addEventListener('submit', async (event) => {
     const form = event.target.closest('form[data-edit]');
@@ -392,7 +396,6 @@ function wireMissionActions(container, onChanged) {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     const { act, id } = button.dataset;
-    if (act === 'abandon' && !confirm('このプロセスを断念しますか？')) return;
     if (
       act === 'delete' &&
       !confirm('このプロセスを消しますか？（循環の種なら、生えたぶんも消えます）')
@@ -407,9 +410,7 @@ function wireMissionActions(container, onChanged) {
         return await onChanged();
       }
       await api(`/missions/${id}/${act}`, { method: 'POST' });
-      toast(
-        act === 'complete' ? '完了：ログを生成しました' : act === 'abandon' ? '断念しました' : '進行中に戻しました',
-      );
+      toast('完了：ログを生成しました');
       await onChanged();
     } catch (err) {
       toast(err.message, true);
@@ -951,7 +952,7 @@ function streamCard(item) {
   return `
     <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
+        <span class="badge ${esc(face)}">${icon(KIND_ICON[face])}${esc(KIND_LABEL[face])}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>プロセス由来</span>' : ''}
         ${item.from_recurrence ? '<span>定期</span>' : ''}
@@ -1625,7 +1626,7 @@ async function renderMissions() {
   viewEl.innerHTML = `
     <div class="filter-bar">
       <div class="filters">
-        ${['active', 'abandoned', 'done']
+        ${['active', 'done']
           .map(
             (status) => `<button class="filter" data-filter="${status}"
                aria-pressed="${missionFilter === status}">${STATUS_LABEL[status]}</button>`,

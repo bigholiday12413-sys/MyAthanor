@@ -678,12 +678,20 @@ body::after {
   border-left-color: var(--wood);
 }
 
+/* プロセスの札は縁を太くする。記録（アイデア・ログ）と同じ細さだと、
+   離れて見たときに札の群れとして混ざる。緑はプロセスの側だけで使う。 */
+.card.status-active,
+.card.status-done,
+.card.status-abandoned {
+  border-left-width: 6px;
+}
+
 .card.status-active {
   border-left-color: var(--green);
 }
 
 .card.status-done {
-  border-left-color: var(--green);
+  border-left-color: var(--green-dark);
 }
 
 .card.status-abandoned {
@@ -2389,9 +2397,10 @@ a.room-title {
   border-bottom: 1px dotted var(--line-soft);
 }
 
-/* 消え物は薬草色、残るものは鋼の色。 */
+/* 消え物は麦、残るものは鋼、祭事は実り。
+   緑はプロセスの側で使っているので、記録の側では使わない。 */
 .card.kind-food {
-  border-left-color: var(--green);
+  border-left-color: #9a9a44;
 }
 
 .card.kind-gear {
@@ -2399,8 +2408,8 @@ a.room-title {
 }
 
 .badge.food {
-  color: var(--green);
-  border-color: var(--green-dark);
+  color: #6b6b28;
+  border-color: #b8b877;
 }
 
 .badge.gear {
