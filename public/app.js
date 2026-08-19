@@ -888,6 +888,11 @@ async function renderStream() {
             : '<div class="empty">まだ記録がありません</div>'
         }</div>`;
 
+  /* 下段はログの中の別なので、ログの側に居るときだけ押せる。
+     アイデアを見ている最中に糧が押せると、上段の選びが黙って外れることになる。
+     ログの札は、下段のどれかを選んでいる間も親として点いたままにする。 */
+  const inLog = streamFilter === 'log' || GOODS.includes(streamFilter);
+
   viewEl.innerHTML = `
     <div class="filter-bar">
       ${/* 上段は記録そのもの、下段はログの中の別。6つを横1列に並べると
@@ -898,7 +903,8 @@ async function renderStream() {
             ${group
               .map(
                 (type) => `<button class="filter" data-filter="${type}"
-                   aria-pressed="${streamFilter === type}">${
+                   ${GOODS.includes(type) && !inLog ? 'disabled' : ''}
+                   aria-pressed="${type === 'log' ? inLog : streamFilter === type}">${
                      type === 'all' ? 'すべて' : KIND_LABEL[type]
                    }</button>`,
               )

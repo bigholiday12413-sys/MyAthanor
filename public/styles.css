@@ -848,6 +848,15 @@ body::after {
   text-align: center;
 }
 
+/* 押せない札。ログの側に居ないときの、ログの中の別がこれになる。 */
+.filter:disabled {
+  color: #b0b0a2;
+  background: #f1f0e8;
+  border-color: var(--line-soft);
+  box-shadow: none;
+  cursor: default;
+}
+
 .filter[aria-pressed='true'] {
   color: #ffffff;
   background: var(--green);
