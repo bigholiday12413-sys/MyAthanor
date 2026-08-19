@@ -87,10 +87,10 @@ function fmtDate(iso) {
 }
 
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
-const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備' };
+const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事' };
 
-/* 糧と装備はログの器に入っている。見た目の別だけここで引き直す。 */
-const GOODS = ['food', 'gear'];
+/* 糧・装備・祭事はログの器に入っている。見た目の別だけここで引き直す。 */
+const GOODS = ['food', 'gear', 'feast'];
 const isGoods = (kind) => GOODS.includes(kind);
 const faceOf = (item) => item.goods ?? item.kind;
 const toYen = (value) => Math.max(0, Math.round(Number(value) || 0));
@@ -519,8 +519,14 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
 /* ユーズド＝今週のウォレットが何に出ていったか。
    金額の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
    家計簿として見るときに効かない。行を押すとストリームのその絞り込みへ飛ぶ。 */
-const GOODS_TONE = { food: 'var(--green)', gear: '#9aa5ab', event: 'var(--gold-dark)' };
-const GOODS_NAME = { food: '糧', gear: '装備', event: '出来事' };
+const GOODS_TONE = {
+  food: 'var(--green)',
+  gear: '#9aa5ab',
+  feast: 'var(--gold-dark)',
+  other: '#a89d7c',
+};
+// other＝別を付けていないぶん。プロセスの完了で生まれたログはここに落ちる。
+const GOODS_NAME = { ...KIND_LABEL, other: 'その他' };
 
 function walletBars(rows) {
   const total = rows.reduce((sum, row) => sum + row.money, 0);
@@ -532,10 +538,10 @@ function walletBars(rows) {
         <div class="spend">
           <div class="spend-head">
             <a class="spend-name" href="#/stream?type=${
-              // 出来事＝素のログ。ストリームの絞り込みでは 'log' に当たる。
-              row.goods === 'event' ? 'log' : row.goods
+              // 別を付けていないぶんは素のログ。ストリームの絞り込みでは 'log' に当たる。
+              row.goods === 'other' ? 'log' : row.goods
             }">${
-              row.goods === 'event' ? '' : icon(KIND_ICON[row.goods])
+              row.goods === 'other' ? '' : icon(KIND_ICON[row.goods])
             }<span>${GOODS_NAME[row.goods]}</span> →</a>
             <span class="spend-count">${row.count}件</span>
             <span class="spend-money">${esc(fmtMoney(row.money))}</span>
@@ -804,7 +810,6 @@ async function renderHome() {
   setTopbar({
     title: 'MyAthanor',
     action:
-      `<a class="icon-btn" href="#/spells" aria-label="インゴット">${icon('ingot')}</a>` +
       `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
@@ -867,7 +872,7 @@ async function renderHome() {
 
 /* ---------- ストリーム ---------- */
 
-const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
+const STREAM_TYPES = ['all', 'idea', 'log', ...GOODS];
 let streamFilter = 'all';
 
 async function renderStream() {
@@ -883,18 +888,30 @@ async function renderStream() {
             : '<div class="empty">まだ記録がありません</div>'
         }</div>`;
 
+  /* 下段はログの中の別なので、ログの側に居るときだけ押せる。
+     アイデアを見ている最中に糧が押せると、上段の選びが黙って外れることになる。
+     ログの札は、下段のどれかを選んでいる間も親として点いたままにする。 */
+  const inLog = streamFilter === 'log' || GOODS.includes(streamFilter);
+
   viewEl.innerHTML = `
     <div class="filter-bar">
-      <div class="filters">
-        ${STREAM_TYPES
-          .map(
-            (type) => `<button class="filter" data-filter="${type}"
-               aria-pressed="${streamFilter === type}">${
-                 type === 'all' ? 'すべて' : KIND_LABEL[type]
-               }</button>`,
-          )
-          .join('')}
-      </div>
+      ${/* 上段は記録そのもの、下段はログの中の別。6つを横1列に並べると
+            「アイデア」だけ2行に折れて、段が揃わない。 */ ''}
+      ${[['all', 'idea', 'log'], GOODS]
+        .map(
+          (group) => `<div class="filters">
+            ${group
+              .map(
+                (type) => `<button class="filter" data-filter="${type}"
+                   ${GOODS.includes(type) && !inLog ? 'disabled' : ''}
+                   aria-pressed="${type === 'log' ? inLog : streamFilter === type}">${
+                     type === 'all' ? 'すべて' : KIND_LABEL[type]
+                   }</button>`,
+              )
+              .join('')}
+          </div>`,
+        )
+        .join('')}
     </div>
     ${body}
   `;
@@ -956,8 +973,8 @@ function openCapture() {
     <form class="modal" id="capture">
       <h2>書き留める</h2>
       <div class="field">
-        <div class="seg-toggle seg-4" id="kind-toggle">
-          ${['idea', 'log', 'food', 'gear']
+        <div class="seg-toggle seg-5" id="kind-toggle">
+          ${['idea', 'log', ...GOODS]
             .map(
               (kind) => `<button type="button" data-kind="${kind}"
                 aria-pressed="${captureKind === kind}">${icon(KIND_ICON[kind])}${
@@ -984,7 +1001,7 @@ function openCapture() {
   const money = backdrop.querySelector('#capture-money');
   const caughtEl = backdrop.querySelector('#caught');
 
-  // 糧と装備は買ったものなので、金額を並べて受ける。
+  // 糧・装備・祭事は買ったものなので、金額を並べて受ける。
   function dressFor(kind) {
     money.hidden = !isGoods(kind);
     if (money.hidden) money.value = '';
@@ -1399,10 +1416,21 @@ async function renderEntry(kind, entryId) {
         <input id="title" value="${esc(entry.title)}" autocomplete="off" />
       </div>
       ${
+        // 本文。題だけで足りるものが多いので、書いてあるときだけ開いておく。
+        kind === 'idea'
+          ? `<details class="optional" ${entry.body ? 'open' : ''}>
+               <summary>本文</summary>
+               <div class="field">
+                 <textarea id="body" rows="5">${esc(entry.body ?? '')}</textarea>
+               </div>
+             </details>`
+          : ''
+      }
+      ${
         kind === 'log'
           ? `<div class="field">
-               <div class="seg-toggle seg-3" id="goods-toggle">
-                 ${['log', 'food', 'gear']
+               <div class="seg-toggle seg-4" id="goods-toggle">
+                 ${['log', ...GOODS]
                    .map(
                      (face) => `<button type="button" data-goods="${
                        face === 'log' ? '' : face
@@ -1502,6 +1530,7 @@ async function renderEntry(kind, entryId) {
     // 日時も直せる。空にはさせない（日時の無い記録は作らない）。
     const moment = fromLocalInput(document.getElementById('at').value);
     if (moment) body[kind === 'idea' ? 'created_at' : 'occurred_at'] = moment;
+    if (kind === 'idea') body.body = document.getElementById('body').value;
     if (kind === 'log') {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
@@ -1914,205 +1943,6 @@ async function renderSettings() {
   }
 }
 
-/* ---------- インゴット ---------- */
-
-// インゴットは「したいこと」ではなく、良いと思った物事を持っておくもの。
-// 時系列の出来事ではないのでストリームには出さず、ここに溜める。
-async function renderSpells() {
-  setActiveTab('home');
-  setTopbar({ title: 'インゴット', back: '#/home' });
-  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
-
-  const spells = await api('/spells');
-
-  viewEl.innerHTML = `
-    <form class="panel" id="spell-new">
-      <div class="field">
-        <input id="s-title" autocomplete="off" />
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">書き留める</button></div>
-    </form>
-
-    <div class="section-title">インゴット<span class="section-count">${spells.length}</span></div>
-    <div class="list">
-      ${
-        spells.length
-          ? spells
-              .map(
-                (spell) => `
-        <a class="card kind-spell" href="#/spell/${spell.id}">
-          <div class="card-top">
-            <span class="spacer"></span>
-            <span>${esc(fmtDate(spell.created_at))}</span>
-          </div>
-          <div class="card-title">${icon('sigil')}<span>${esc(spell.title)}</span></div>
-          ${spell.body ? `<div class="spell-excerpt">${esc(spell.body)}</div>` : ''}
-          ${
-            spell.mission_count
-              ? `<div class="card-meta"><span class="${
-                  spell.active_mission_count ? 'hot' : ''
-                }">プロセス ${spell.mission_count}件${
-                  spell.active_mission_count ? `（進行中 ${spell.active_mission_count}）` : ''
-                }</span></div>`
-              : ''
-          }
-        </a>`,
-              )
-              .join('')
-          : '<div class="empty">まだ何も書かれていません</div>'
-      }
-    </div>
-  `;
-
-  document.getElementById('spell-new').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const input = document.getElementById('s-title');
-    const title = input.value.trim();
-    if (!title) return input.focus();
-    try {
-      const created = await api('/spells', { method: 'POST', body: { title } });
-      toast('インゴットを書き留めました');
-      location.hash = `#/spell/${created.id}`;
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
-async function renderSpell(spellId) {
-  setActiveTab('home');
-  setTopbar({ title: 'インゴット', back: '#/spells' });
-  viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
-
-  const spell = await api(`/spells/${spellId}`);
-
-  viewEl.innerHTML = `
-    <form class="panel" id="spell-form">
-      <div class="field">
-        <label for="title">インゴット</label>
-        <input id="title" value="${esc(spell.title)}" autocomplete="off" />
-      </div>
-      <div class="field">
-        <textarea id="body" rows="5">${esc(
-          spell.body ?? '',
-        )}</textarea>
-      </div>
-      <div class="btn-row">
-        <button type="submit" class="primary">保存</button>
-        <button type="button" class="ghost danger" id="spell-delete">捨てる</button>
-      </div>
-    </form>
-
-    <div class="section-title">ここから出たプロセス</div>
-    <div class="list" id="entry-missions">
-      ${
-        spell.missions.length
-          ? spell.missions.map((m) => missionCard(m, { showSource: false })).join('')
-          : '<div class="empty">まだありません</div>'
-      }
-    </div>
-
-    <div class="section-title">プロセスを切り出す</div>
-    <form class="panel" id="mission-form">
-      <div class="field">
-        <input id="m-title" autocomplete="off" />
-      </div>
-      <details class="optional">
-        <summary>見積と日付</summary>
-        <div class="row">
-          <div class="field">
-            <label for="m-time">タイム（時間）</label>
-            <input id="m-time" type="number" step="0.25" min="0" value="0" />
-          </div>
-          <div class="field">
-            <label for="m-money">ウォレット（円）</label>
-            <input id="m-money" type="number" step="1" min="0" value="0" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="m-from">いつから</label>
-            <input id="m-from" type="date" />
-          </div>
-          <div class="field">
-            <label for="m-to">いつまで</label>
-            <input id="m-to" type="date" />
-          </div>
-        </div>
-        <div class="field">
-          <label for="m-repeat">${icon('cycle')}何日ごと</label>
-          <input id="m-repeat" type="number" step="1" min="0" max="365" value="0" />
-        </div>
-      </details>
-      <div class="btn-row"><button type="submit" class="primary">追加</button></div>
-    </form>
-  `;
-
-  const reload = () => renderSpell(spellId);
-
-  document.getElementById('spell-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api(`/spells/${spellId}`, {
-        method: 'PATCH',
-        body: {
-          title: document.getElementById('title').value.trim(),
-          body: document.getElementById('body').value,
-        },
-      });
-      toast('保存しました');
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  document.getElementById('spell-delete').addEventListener('click', async () => {
-    const derived = spell.missions.length;
-    const also = derived ? `（ここから出たプロセス${derived}件も消えます）` : '';
-    if (!confirm(`このインゴットを捨てますか？${also}`)) return;
-    try {
-      await api(`/spells/${spellId}`, { method: 'DELETE' });
-      toast('インゴットを捨てました');
-      location.hash = '#/spells';
-    } catch (err) {
-      toast(
-        err.message === 'spell still has missions'
-          ? 'プロセスが残っているので捨てられません'
-          : err.message,
-        true,
-      );
-    }
-  });
-
-  document.getElementById('mission-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const title = document.getElementById('m-title').value.trim();
-    if (!title) return toast('やることを入力してください', true);
-    try {
-      await api('/missions', {
-        method: 'POST',
-        body: {
-          title,
-          source_type: 'idea',
-          source_id: spellId,
-          estimated_time: hoursToMinutes(document.getElementById('m-time').value),
-          estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
-          repeat_days: Number(document.getElementById('m-repeat')?.value || 0),
-          start_date: document.getElementById('m-from').value || null,
-          due_date: document.getElementById('m-to').value || null,
-        },
-      });
-      toast('プロセスを切り出しました');
-      await reload();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  wireMissionActions(document.getElementById('entry-missions'), reload);
-  wireLegacy(viewEl, reload);
-}
-
 /* ---------- 金庫 ---------- */
 
 // 月が終わると、その月のウォレットの余りが金庫に積まれる。
@@ -2380,7 +2210,6 @@ const SPHERE = {
 // 節の色。輪で描き、中は紙のまま抜く。
 const NODE_HUE = {
   idea: { ring: '#b8452f', glow: '184, 69, 47' },
-  spell: { ring: '#a8802a', glow: '168, 128, 42' },
   log: { ring: '#8a7a55', glow: '138, 122, 85' },
   cauldron: { ring: '#4e8b3a', glow: '78, 139, 58' },
   dead: { ring: '#b3b2a4', glow: '179, 178, 164' },
@@ -2501,7 +2330,7 @@ function layoutBoard(roads) {
   };
 }
 
-const ROOM_ICON = { idea: 'stone', spell: 'ingot', log: 'footsteps' };
+const ROOM_ICON = { idea: 'stone', log: 'footsteps' };
 
 function clip(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -2919,10 +2748,6 @@ async function route() {
     if (hash === '/settings') return await renderSettings();
     if (hash === '/vault') return await renderVault();
     if (hash === '/used') return await renderUsed();
-    if (hash === '/spells') return await renderSpells();
-    if ((match = hash.match(/^\/spell\/(\d+)$/))) {
-      return await renderSpell(Number(match[1]));
-    }
     if ((match = hash.match(/^\/(idea|log)\/(\d+)$/))) {
       return await renderEntry(match[1], Number(match[2]));
     }

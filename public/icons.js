@@ -489,6 +489,37 @@ const HELM = {
   },
 };
 
+/* 祭事＝その場限りのもの。幟（のぼり）。竿に長い旗を掛けて、裾を切り込む。
+   糧（食い物）も装備（兜）も物の形をしているので、三つ目は物でないと分かる形にする。
+   幟は立てて畳むもので、終われば何も残らない。 */
+const BANNER = {
+  rows: [
+    '.....p..........',
+    '.....p..........',
+    '.....poooooooo..',
+    '.....pobbbbbbo..',
+    '.....pobggggbo..',
+    '.....pobgrrgbo..',
+    '.....pobgrrgbo..',
+    '.....pobggggbo..',
+    '.....pobbbbbbo..',
+    '.....pobobbobo..',
+    '.....pooboobo...',
+    '.....p..........',
+    '.....p..........',
+    '....ppp.........',
+    '...ppppp........',
+    '................',
+  ],
+  palette: {
+    p: '#5d3a18', // 竿と台
+    o: '#7d5f18', // 旗の縁
+    b: '#c9b78a', // 生成りの布
+    g: '#4e8b3a', // 染めの帯
+    r: '#a8802a', // 紋
+  },
+};
+
 // 週の紙。7枚並べて曜日を数える。右下が折れていて、左の縁が少し欠けている。
 // 面は白より温かくしておく。白いカードの上に白い紙を置くと枠しか見えず、
 // 「点線の四角」になってしまう。欠けも1か所だけ。増やすと点線に戻る。
@@ -560,29 +591,6 @@ const FLASK = {
   palette: { o: '#5f6d73', g: '#cfe0d8', c: WOOD, l: GREEN },
 };
 
-// インゴット＝炉から出てきた地金。意思や思いつきを、溶かして固めたもの。
-// 2本を積んで、上の1本の面を明るくする。1本だけだと札の中で潰れて読めない。
-const INGOT = {
-  rows: [
-    '................',
-    '................',
-    '......oooooo....',
-    '.....ohhhhhho...',
-    '....ohhhhhhhho..',
-    '....obbbbbbbbo..',
-    '....obbbbbbbbo..',
-    '....oddddddddo..',
-    '..oooooooooooo..',
-    '.ohhhhhhhhhhhho.',
-    'ohhhhhhhhhhhhhho',
-    'obbbbbbbbbbbbbbo',
-    'obbbbbbbbbbbbbbo',
-    'oddddddddddddddo',
-    '.oooooooooooooo.',
-    '................',
-  ],
-  palette: { o: GOLD_DARK, h: '#f0c96a', b: GOLD, d: '#6b4f14' },
-};
 
 // アストロラーベ＝天体の位置を読む器具。同心の輪と、中を渡す横木。
 const ASTROLABE = {
@@ -799,8 +807,8 @@ const SOURCES = {
   'keeper-c': KEEPER_C,
   astrolabe: ASTROLABE,
   spark: SPARK,
-  ingot: INGOT,
   flask: FLASK,
+  banner: BANNER,
   sheet: SHEET,
   'sheet-done': SHEET_DONE,
 };
@@ -842,8 +850,7 @@ export const KIND_ICON = {
   idea: 'stone',
   food: 'provision',
   gear: 'helm',
-  spell: 'ingot',
+  feast: 'banner',
   log: 'footsteps',
   mission: 'flask',
-  recurrence: 'hourglass',
 };

@@ -25,7 +25,8 @@ function id(req) {
 }
 
 /* ストリーム */
-const STREAM_TYPES = ['all', 'idea', 'log', 'food', 'gear'];
+// 記録そのもの（すべて／アイデア／ログ）と、ログの中の別（糧・装備・祭事）。
+const STREAM_TYPES = ['all', 'idea', 'log', ...store.GOODS];
 
 function streamType(value, fallback = 'all') {
   const type = value ?? fallback;
@@ -47,11 +48,11 @@ api.post('/entries', handle((req, res) => {
   const { kind, title, money_spent } = req.body ?? {};
   if (kind === 'idea') return res.status(201).json(store.createIdea({ title }));
   if (kind === 'log') return res.status(201).json(store.createLog({ title }));
-  // 糧と装備はログの器に入れ、買ったものの別と金額だけ添える。
+  // 糧・装備・祭事はログの器に入れ、買ったものの別と金額だけ添える。
   if (store.isGoods(kind)) {
     return res.status(201).json(store.createLog({ title, money_spent, goods: kind }));
   }
-  const err = new Error('kind must be "idea", "log", "food" or "gear"');
+  const err = new Error(`kind must be idea, log, ${store.GOODS.join(', ')}`);
   err.status = 400;
   throw err;
 }));
@@ -61,14 +62,6 @@ api.post('/ideas', handle((req, res) => res.status(201).json(store.createIdea(re
 api.get('/ideas/:id', handle((req, res) => res.json(store.getIdea(id(req)))));
 api.patch('/ideas/:id', handle((req, res) => res.json(store.updateIdea(id(req), req.body ?? {}))));
 api.delete('/ideas/:id', handle((req, res) => res.json(store.deleteIdea(id(req)))));
-
-/* スペル（スペルブック） */
-api.get('/spells', handle((_req, res) => res.json(store.listSpells())));
-api.post('/spells', handle((req, res) => res.status(201).json(store.createSpell(req.body ?? {}))));
-api.get('/spells/:id', handle((req, res) => res.json(store.getSpell(id(req)))));
-api.patch('/spells/:id', handle((req, res) =>
-  res.json(store.updateSpell(id(req), req.body ?? {}))));
-api.delete('/spells/:id', handle((req, res) => res.json(store.deleteSpell(id(req)))));
 
 /* ログ */
 api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.body ?? {}))));
