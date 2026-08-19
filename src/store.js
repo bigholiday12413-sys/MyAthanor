@@ -89,11 +89,22 @@ export function getIdea(id) {
   };
 }
 
-export function updateIdea(id, { title, temperature }) {
+// 日時は後から直せる。書き留めた時刻がそのまま正しいとは限らない。
+function requireMoment(value, label) {
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) throw badRequest(`${label} must be a date`);
+  return at.toISOString();
+}
+
+export function updateIdea(id, { title, created_at, temperature }) {
   const row = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
   if (!row) throw notFound('idea');
   if (title !== undefined) {
     db.prepare(`UPDATE idea SET title = ? WHERE id = ?`).run(requireTitle(title), id);
+  }
+  if (created_at !== undefined) {
+    db.prepare(`UPDATE idea SET created_at = ? WHERE id = ?`)
+      .run(requireMoment(created_at, 'created_at'), id);
   }
   if (temperature !== undefined) {
     // 熱を入れ直したら冷却の起点も今にする。
@@ -102,6 +113,24 @@ export function updateIdea(id, { title, temperature }) {
       .run(kelvin, nowIso(), id);
   }
   return getIdea(id);
+}
+
+/* 消す。ここから出たプロセスも道連れにする。出どころの無いプロセスは、
+   どこから来たのか辿れないまま残るだけになる。
+   完了して生まれたログは残し、出どころだけ外す（前掲）。 */
+export function deleteIdea(id) {
+  const row = db.prepare(`SELECT * FROM idea WHERE id = ? AND is_spell = 0`).get(id);
+  if (!row) throw notFound('idea');
+  return transaction(() => {
+    for (const mission of db
+      .prepare(`SELECT * FROM mission WHERE source_type = 'idea' AND source_id = ?`)
+      .all(id)) {
+      removeMission(mission);
+    }
+    db.prepare(`DELETE FROM cauldron WHERE source_type = 'idea' AND source_id = ?`).run(id);
+    db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
 }
 
 /* ---------- spell（スペルブック） ---------- */
@@ -157,15 +186,17 @@ export function updateSpell(id, { title, body }) {
 }
 
 // ミッションを抱えたままのスペルは消させない。道が切れてしまうため。
+/* 消す。ここから出たプロセスも道連れにする。アイデアと同じ扱い。
+   以前はプロセスが残っていると断っていたが、片方だけ消せないのは筋が通らない。 */
 export function deleteSpell(id) {
   spellRow(id);
-  const missions = listMissionsBySource('idea', id);
-  if (missions.length > 0) {
-    const err = new Error('spell still has missions');
-    err.status = 409;
-    throw err;
-  }
   return transaction(() => {
+    for (const mission of db
+      .prepare(`SELECT * FROM mission WHERE source_type = 'idea' AND source_id = ?`)
+      .all(id)) {
+      removeMission(mission);
+    }
+    db.prepare(`DELETE FROM cauldron WHERE source_type = 'idea' AND source_id = ?`).run(id);
     db.prepare(`DELETE FROM idea WHERE id = ?`).run(id);
     return { id, deleted: true };
   });
@@ -233,13 +264,30 @@ export function updateLog(id, { title, occurred_at, time_spent, money_spent, goo
     WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
-    occurred_at === undefined ? row.occurred_at : occurred_at,
+    occurred_at === undefined ? row.occurred_at : requireMoment(occurred_at, 'occurred_at'),
     time_spent === undefined ? row.time_spent : int(time_spent),
     money_spent === undefined ? row.money_spent : int(money_spent),
     goods === undefined ? row.goods : goodsOf(goods),
     id,
   );
   return getLog(id);
+}
+
+/* 消す。ここから出たプロセスも道連れにする（アイデアと同じ）。
+   消費済みからも消えるので、リソースの集計はその場で戻る。 */
+export function deleteLog(id) {
+  const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
+  if (!row) throw notFound('log');
+  return transaction(() => {
+    for (const mission of db
+      .prepare(`SELECT * FROM mission WHERE source_type = 'log' AND source_id = ?`)
+      .all(id)) {
+      removeMission(mission);
+    }
+    db.prepare(`DELETE FROM cauldron WHERE source_type = 'log' AND source_id = ?`).run(id);
+    db.prepare(`DELETE FROM log WHERE id = ?`).run(id);
+    return { id, deleted: true };
+  });
 }
 
 /* ---------- stream ---------- */
@@ -622,6 +670,30 @@ export function abandonMission(id) {
   }
   refreshCauldron(row.cauldron_id);
   return getMission(id);
+}
+
+/* 消す。断念は「やらないことにした」という記録だが、こちらは記録ごと無かったことにする。
+   種なら、そこから生えたぶんも道連れにする。種だけ消しても回りは残らない。
+
+   完了して生まれたログは残し、出どころだけ外す。
+   ログは「起きたこと」の記録で、段取りを消したからといって消えるものではない。 */
+// 中身だけ。まとめて消すときに外から呼べるよう、囲い（transaction）は持たない。
+function removeMission(row) {
+  if (row.repeat_days !== null) {
+    db.prepare(`DELETE FROM mission WHERE repeat_of = ?`).run(row.id);
+  }
+  db.prepare(`UPDATE log SET source_mission_id = NULL WHERE source_mission_id = ?`).run(row.id);
+  db.prepare(`DELETE FROM mission WHERE id = ?`).run(row.id);
+  refreshCauldron(row.cauldron_id);
+}
+
+export function deleteMission(id) {
+  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
+  if (!row) throw notFound('mission');
+  return transaction(() => {
+    removeMission(row);
+    return { id, deleted: true };
+  });
 }
 
 // 進行中に戻す（断念の取り消し）。

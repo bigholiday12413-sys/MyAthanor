@@ -1030,7 +1030,7 @@ button:disabled {
    点線の枠だと「畳んである見出し」に見えて、押すものだと分からない。 */
 .card-foot > .mission-dates > summary {
   gap: 5px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 10px;
   justify-content: center;
   font-family: var(--serif);
@@ -2357,6 +2357,7 @@ a.room-title {
 }
 
 .mission-date-form button {
+  min-height: 44px;
   padding: 7px 10px;
   font-size: 12px;
 }

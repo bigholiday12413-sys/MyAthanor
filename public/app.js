@@ -63,6 +63,22 @@ function fmtMoney(yen) {
   return `${sign}¥${Math.abs(yen).toLocaleString('ja-JP')}`;
 }
 
+/* datetime-local が読み書きする形（YYYY-MM-DDTHH:mm）。地元の時刻で出す。
+   ISO をそのまま入れると UTC で表示され、入力欄と札の時刻が食い違う。 */
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 入力欄の値を ISO に戻す。空なら触らせない（日時の無い記録は作らない）。
+function fromLocalInput(value) {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function fmtDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -196,25 +212,57 @@ function dueRange(mission) {
   return `${from}${from ? ' ' : ''}→${to ? ' ' : ''}${to}`;
 }
 
-function missionDates(mission) {
+/* 札の中で直す。どの項目も後から書き換えられる。
+   種は日付を持たないので周期を、そうでないものは日付を出す。
+   畳んであるのは、ふだん見たいのは題と期限だけだから。 */
+function missionEdit(mission) {
   const range = dueRange(mission);
+  const seed = Boolean(mission.repeat_days);
+  const id = mission.id;
   return `
     <details class="mission-dates">
-      <summary>${icon('hourglass')}<span>${range ? esc(range) : '期限'}</span></summary>
-      <form class="mission-date-form" data-dates="${mission.id}">
+      <summary>${icon('hourglass')}<span>${range ? esc(range) : '直す'}</span></summary>
+      <form class="mission-date-form" data-edit="${id}">
+        <div class="field">
+          <label for="t-${id}">題</label>
+          <input id="t-${id}" name="title" value="${esc(mission.title)}" autocomplete="off" />
+        </div>
         <div class="row">
           <div class="field">
-            <label for="from-${mission.id}">いつから</label>
-            <input id="from-${mission.id}" type="date" name="start_date"
-                   value="${esc(mission.start_date ?? '')}" />
+            <label for="mt-${id}">タイム（時間）</label>
+            <input id="mt-${id}" type="number" step="0.25" min="0" name="estimated_time"
+                   value="${minutesToHours(mission.estimated_time)}" />
           </div>
           <div class="field">
-            <label for="to-${mission.id}">いつまで</label>
-            <input id="to-${mission.id}" type="date" name="due_date"
-                   value="${esc(mission.due_date ?? '')}" />
+            <label for="mm-${id}">ウォレット（円）</label>
+            <input id="mm-${id}" type="number" step="1" min="0" name="estimated_money"
+                   value="${mission.estimated_money}" />
           </div>
         </div>
-        <div class="btn-row"><button type="submit">日付を保存</button></div>
+        ${
+          seed
+            ? `<div class="field">
+                 <label for="rp-${id}">${icon('cycle')}何日ごと</label>
+                 <input id="rp-${id}" type="number" step="1" min="0" max="365" name="repeat_days"
+                        value="${mission.repeat_days}" />
+               </div>`
+            : `<div class="row">
+                 <div class="field">
+                   <label for="from-${id}">いつから</label>
+                   <input id="from-${id}" type="date" name="start_date"
+                          value="${esc(mission.start_date ?? '')}" />
+                 </div>
+                 <div class="field">
+                   <label for="to-${id}">いつまで</label>
+                   <input id="to-${id}" type="date" name="due_date"
+                          value="${esc(mission.due_date ?? '')}" />
+                 </div>
+               </div>`
+        }
+        <div class="btn-row">
+          <button type="submit">保存</button>
+          <button type="button" class="ghost danger" data-act="delete" data-id="${id}">削除</button>
+        </div>
       </form>
     </details>
   `;
@@ -300,17 +348,13 @@ function missionCard(mission, { showSource = true } = {}) {
           : ''
       }
       ${
-        // 日付と操作を1行に混ぜる。別々の行に置くと札が241pxになり、
+        // 直す口と操作を1行に混ぜる。別々の行に置くと札が241pxになり、
         // 1画面に1枚しか乗らなくなる。開いたときだけ下へ折り返す。
-        mission.status === 'active' || actions
-          ? `<div class="btn-row card-foot">
-               ${
-                 // 種は日付を持たない。生えたほうが日付を持つ。
-                 mission.status === 'active' && !mission.repeat_days ? missionDates(mission) : ''
-               }
-               ${actions}
-             </div>`
-          : ''
+        // 直す口は終わった札にも出す。後から書き換えられないものを作らない。
+        `<div class="btn-row card-foot">
+           ${missionEdit(mission)}
+           ${actions}
+         </div>`
       }
     </div>
   `;
@@ -319,18 +363,25 @@ function missionCard(mission, { showSource = true } = {}) {
 // プロセスカードの完了／断念／再開と、期日の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
   container.addEventListener('submit', async (event) => {
-    const form = event.target.closest('form[data-dates]');
+    const form = event.target.closest('form[data-edit]');
     if (!form) return;
     event.preventDefault();
+    const { title, estimated_time, estimated_money, repeat_days, start_date, due_date } =
+      form.elements;
     try {
-      await api(`/missions/${form.dataset.dates}`, {
+      await api(`/missions/${form.dataset.edit}`, {
         method: 'PATCH',
         body: {
-          start_date: form.elements.start_date.value || null,
-          due_date: form.elements.due_date.value || null,
+          title: title.value,
+          estimated_time: hoursToMinutes(estimated_time.value),
+          estimated_money: Math.round(Number(estimated_money.value || 0)),
+          // 種は周期を、そうでないものは日付を持つ。無いほうは触らない。
+          ...(repeat_days
+            ? { repeat_days: Math.round(Number(repeat_days.value || 0)) }
+            : { start_date: start_date.value || null, due_date: due_date.value || null }),
         },
       });
-      toast('日付を保存しました');
+      toast('保存しました');
       await onChanged();
     } catch (err) {
       toast(err.message, true);
@@ -342,8 +393,19 @@ function wireMissionActions(container, onChanged) {
     if (!button) return;
     const { act, id } = button.dataset;
     if (act === 'abandon' && !confirm('このプロセスを断念しますか？')) return;
+    if (
+      act === 'delete' &&
+      !confirm('このプロセスを消しますか？（循環の種なら、生えたぶんも消えます）')
+    ) {
+      return;
+    }
     button.disabled = true;
     try {
+      if (act === 'delete') {
+        await api(`/missions/${id}`, { method: 'DELETE' });
+        toast('削除しました');
+        return await onChanged();
+      }
       await api(`/missions/${id}/${act}`, { method: 'POST' });
       toast(
         act === 'complete' ? '完了：ログを生成しました' : act === 'abandon' ? '断念しました' : '進行中に戻しました',
@@ -522,17 +584,25 @@ function keeperMark(name) {
    動かすのは transform と opacity だけなので、合成だけで済む。 */
 function keeperWalk(n) {
   /* 出来事を時間順に並べる。
-     右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。 */
+     右へ n 歩 → 消える → 待つ → 左へ n 歩 → 消える → 待つ。
+
+     フラスコが1本のときは歩く先が無いので、その場で柄の数だけ拍を打つ。
+     位置は変えられないが、柄が巡って、消えて戻ってくる。
+     ずっと立ちっぱなしだと、居るのではなく描き損ねたように見える。 */
+  const inPlace = n < 2;
+  const beats = inPlace ? KEEPER_FRAMES.length : n;
   const stops = [];
   let t = 0;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) stops.push({ t, pos: i, on: 1, face: 1 });
-  stops.push({ t, pos: n - 1, on: 0, face: 1 });
-  t += KEEPER_AWAY;
-  for (let i = 0; i < n; i += 1, t += KEEPER_STEP) {
-    stops.push({ t, pos: n - 1 - i, on: 1, face: -1 });
+  for (const face of [1, -1]) {
+    // 戻りは逆から辿る。折り返しでは体ごと裏返して、進む向きに顔を向ける。
+    const at = (i) => (inPlace ? 0 : face > 0 ? i : n - 1 - i);
+    for (let i = 0; i < beats; i += 1, t += KEEPER_STEP) {
+      stops.push({ t, pos: at(i), on: 1, face });
+    }
+    stops.push({ t, pos: at(beats - 1), on: 0, face });
+    t += KEEPER_AWAY;
   }
-  stops.push({ t, pos: 0, on: 0, face: -1 });
-  const seconds = t + KEEPER_AWAY;
+  const seconds = t;
 
   /* 最後の点から終いまでは、そのままの姿勢で消えている。
      終端が無いと元の値へ戻そうとするので、明示して置く。 */
@@ -558,16 +628,6 @@ function wireKeeper() {
         })),
         opts,
       ));
-
-  /* フラスコが1本だけなら歩く先が無い。それでも布だけは動かす。
-     じっと固まっていると、居るのではなく描き損ねたように見える。 */
-  if (n < 2) {
-    const each = 1 / dresses.length;
-    return cycle(
-      [...dresses.map((_, index) => ({ offset: index * each, index })), { offset: 1, index: 0 }],
-      { duration: KEEPER_STEP * dresses.length * 1000, iterations: Infinity },
-    );
-  }
 
   const { seconds, stops } = keeperWalk(n);
   const opts = { duration: seconds * 1000, iterations: Infinity };
@@ -1367,7 +1427,10 @@ async function renderEntry(kind, entryId) {
              </div>`
           : ''
       }
-      <div class="stat-line"><span>${kind === 'idea' ? '作成' : '発生'}</span><span class="v">${esc(fmtDate(at))}</span></div>
+      <div class="field">
+        <label for="at">${kind === 'idea' ? '作成' : '発生'}</label>
+        <input id="at" type="datetime-local" value="${esc(toLocalInput(at))}" />
+      </div>
       ${
         entry.source_mission
           ? `<div class="stat-line"><span>由来</span><span class="v">プロセス完了「${esc(entry.source_mission.title)}」</span></div>`
@@ -1383,6 +1446,7 @@ async function renderEntry(kind, entryId) {
       <div class="btn-row">
         <button type="submit" class="primary">保存</button>
         ${kind === 'log' ? legacyButton('log', entry.id, entry.is_legacy) : ''}
+        <button type="button" class="ghost danger" id="entry-delete">削除</button>
       </div>
     </form>
 
@@ -1435,6 +1499,9 @@ async function renderEntry(kind, entryId) {
   document.getElementById('entry-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const body = { title: document.getElementById('title').value.trim() };
+    // 日時も直せる。空にはさせない（日時の無い記録は作らない）。
+    const moment = fromLocalInput(document.getElementById('at').value);
+    if (moment) body[kind === 'idea' ? 'created_at' : 'occurred_at'] = moment;
     if (kind === 'log') {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
@@ -1444,6 +1511,19 @@ async function renderEntry(kind, entryId) {
     try {
       await api(path, { method: 'PATCH', body });
       toast('保存しました');
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('entry-delete').addEventListener('click', async () => {
+    const derived = entry.missions.length;
+    const also = derived ? `（ここから出たプロセス${derived}件も消えます）` : '';
+    if (!confirm(`この${KIND_LABEL[kind]}を消しますか？${also}`)) return;
+    try {
+      await api(path, { method: 'DELETE' });
+      toast('削除しました');
+      location.hash = '#/stream';
     } catch (err) {
       toast(err.message, true);
     }
@@ -1987,7 +2067,9 @@ async function renderSpell(spellId) {
   });
 
   document.getElementById('spell-delete').addEventListener('click', async () => {
-    if (!confirm('このインゴットを捨てますか？')) return;
+    const derived = spell.missions.length;
+    const also = derived ? `（ここから出たプロセス${derived}件も消えます）` : '';
+    if (!confirm(`このインゴットを捨てますか？${also}`)) return;
     try {
       await api(`/spells/${spellId}`, { method: 'DELETE' });
       toast('インゴットを捨てました');

@@ -60,6 +60,7 @@ api.post('/entries', handle((req, res) => {
 api.post('/ideas', handle((req, res) => res.status(201).json(store.createIdea(req.body ?? {}))));
 api.get('/ideas/:id', handle((req, res) => res.json(store.getIdea(id(req)))));
 api.patch('/ideas/:id', handle((req, res) => res.json(store.updateIdea(id(req), req.body ?? {}))));
+api.delete('/ideas/:id', handle((req, res) => res.json(store.deleteIdea(id(req)))));
 
 /* スペル（スペルブック） */
 api.get('/spells', handle((_req, res) => res.json(store.listSpells())));
@@ -73,6 +74,7 @@ api.delete('/spells/:id', handle((req, res) => res.json(store.deleteSpell(id(req
 api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.body ?? {}))));
 api.get('/logs/:id', handle((req, res) => res.json(store.getLog(id(req)))));
 api.patch('/logs/:id', handle((req, res) => res.json(store.updateLog(id(req), req.body ?? {}))));
+api.delete('/logs/:id', handle((req, res) => res.json(store.deleteLog(id(req)))));
 
 /* ミッション */
 api.get('/missions', handle((req, res) => {
@@ -103,6 +105,8 @@ api.get('/missions/:id', handle((req, res) => res.json(store.getMission(id(req))
 
 api.patch('/missions/:id', handle((req, res) =>
   res.json(store.updateMission(id(req), req.body ?? {}))));
+
+api.delete('/missions/:id', handle((req, res) => res.json(store.deleteMission(id(req)))));
 
 api.post('/missions/:id/complete', handle((req, res) =>
   res.json(store.completeMission(id(req)))));
