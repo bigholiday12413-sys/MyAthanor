@@ -1466,7 +1466,7 @@ async function renderEntry(kind, entryId) {
   `;
 
   const titleSection = `
-    <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
+    <div class="section-title">${KIND_LABEL[kind]}</div>
     <form class="panel" id="entry-form">
       <div class="field">
         <label for="title">タイトル</label>
