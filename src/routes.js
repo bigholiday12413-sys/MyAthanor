@@ -62,6 +62,7 @@ api.post('/ideas', handle((req, res) => res.status(201).json(store.createIdea(re
 api.get('/ideas/:id', handle((req, res) => res.json(store.getIdea(id(req)))));
 api.patch('/ideas/:id', handle((req, res) => res.json(store.updateIdea(id(req), req.body ?? {}))));
 api.delete('/ideas/:id', handle((req, res) => res.json(store.deleteIdea(id(req)))));
+api.post('/ideas/:id/conclude', handle((req, res) => res.status(201).json(store.concludeIdea(id(req)))));
 
 /* ログ */
 api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.body ?? {}))));

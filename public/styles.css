@@ -674,6 +674,11 @@ body::after {
   border-left-color: var(--trail);
 }
 
+/* アイデアそのものの終わり。別を付けていないログの中でもさらに金で目立たせる。 */
+.card.is-conclusion {
+  border-left-color: var(--gold);
+}
+
 .card.kind-recurrence {
   border-left-color: var(--wood);
 }
@@ -746,6 +751,11 @@ body::after {
 .badge.process {
   color: var(--trail);
   border-color: #c4ccd0;
+}
+
+.badge.is-conclusion {
+  color: var(--gold-dark);
+  border-color: var(--gold);
 }
 
 .badge.recurrence {

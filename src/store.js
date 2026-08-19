@@ -231,7 +231,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
              0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_repeat,
-             i.temperature, i.temperature_at, NULL AS goods
+             i.temperature, i.temperature_at, NULL AS goods, 0 AS is_conclusion
       FROM idea i
     `);
   }
@@ -249,7 +249,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
              l.time_spent, l.money_spent,
              CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission,
              CASE WHEN l.repeat_of IS NULL THEN 0 ELSE 1 END AS from_repeat,
-             NULL AS temperature, NULL AS temperature_at, l.goods
+             NULL AS temperature, NULL AS temperature_at, l.goods, l.is_conclusion
       FROM log l ${where}
     `);
   }
@@ -278,6 +278,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
         ...row,
         from_mission: Boolean(row.from_mission),
         from_repeat: Boolean(row.from_repeat),
+        is_conclusion: Boolean(row.is_conclusion),
         current_temperature:
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
@@ -402,6 +403,32 @@ export function getMission(id) {
   const row = db.prepare(`${MISSION_SELECT} WHERE m.id = ?`).get(id);
   if (!row) throw notFound('mission');
   return decorate(row);
+}
+
+/* アイデアそのものを終える。子のプロセスと違い、出どころはアイデア自身、
+   題もアイデアのものをそのまま使う。すでに立ててあるなら、それを返す
+   （終わりは1つでよく、押すたびに増える理由がない）。 */
+export function concludeIdea(id) {
+  const idea = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
+  if (!idea) throw notFound('idea');
+
+  const existing = db
+    .prepare(`
+      SELECT id FROM mission
+      WHERE source_type = 'idea' AND source_id = ? AND is_conclusion = 1 AND status = 'active'
+    `)
+    .get(id);
+  if (existing) return getMission(existing.id);
+
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO mission
+        (title, source_type, source_id, status, estimated_time, estimated_money,
+         created_at, is_conclusion)
+      VALUES (?, 'idea', ?, 'active', 0, 0, ?, 1)
+    `)
+    .run(idea.title, id, nowIso());
+  return getMission(Number(lastInsertRowid));
 }
 
 // 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
@@ -601,8 +628,8 @@ export function completeMission(id) {
       .prepare(`
         INSERT INTO log
           (title, occurred_at, time_spent, money_spent,
-           source_type, source_id, repeat_of, is_legacy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           source_type, source_id, repeat_of, is_legacy, is_conclusion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         mission.title,
@@ -613,6 +640,7 @@ export function completeMission(id) {
         mission.source_id,
         mission.repeat_of,
         mission.is_legacy,
+        mission.is_conclusion,
       );
 
     db.prepare(`DELETE FROM mission WHERE id = ?`).run(id);
