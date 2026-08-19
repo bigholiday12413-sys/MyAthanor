@@ -104,12 +104,6 @@ api.delete('/missions/:id', handle((req, res) => res.json(store.deleteMission(id
 api.post('/missions/:id/complete', handle((req, res) =>
   res.json(store.completeMission(id(req)))));
 
-api.post('/missions/:id/abandon', handle((req, res) =>
-  res.json(store.abandonMission(id(req)))));
-
-api.post('/missions/:id/reopen', handle((req, res) =>
-  res.json(store.reopenMission(id(req)))));
-
 /* 設定（既定値） */
 api.get('/settings', handle((_req, res) => res.json(store.getSettings())));
 api.put('/settings', handle((req, res) => res.json(store.updateSettings(req.body ?? {}))));
@@ -178,3 +172,6 @@ api.get('/dungeon', handle((req, res) =>
 
 /* ホームのサマリ */
 api.get('/summary', handle((_req, res) => res.json(store.getSummary())));
+
+// その週、何に出ていったか。ウォレットは別ごと、タイムは1件ずつ。
+api.get('/used', handle((req, res) => res.json(store.getUsed(req.query.kind ?? 'money'))));

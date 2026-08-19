@@ -678,12 +678,20 @@ body::after {
   border-left-color: var(--wood);
 }
 
+/* プロセスの札は縁を太くする。記録（アイデア・ログ）と同じ細さだと、
+   離れて見たときに札の群れとして混ざる。緑はプロセスの側だけで使う。 */
+.card.status-active,
+.card.status-done,
+.card.status-abandoned {
+  border-left-width: 6px;
+}
+
 .card.status-active {
   border-left-color: var(--green);
 }
 
 .card.status-done {
-  border-left-color: var(--green);
+  border-left-color: var(--green-dark);
 }
 
 .card.status-abandoned {
@@ -1068,53 +1076,73 @@ button:disabled {
   order: 1;
 }
 
-/* ---------- 期間ごとに使える量 ---------- */
+/* ---------- 設定の項目（項目ベース） ----------
 
-.budget-row {
-  display: grid;
-  grid-template-columns: 1fr 96px 62px;
-  gap: 8px;
-  align-items: center;
-  padding: 9px 0;
+   設定は「常に開いた入力欄の並び」ではなく、値を見せるだけの項目にする。
+   開けばその場で直せる、閉じれば値だけの行に戻る。
+   期間ごとの個別設定（特例）は、これでいちばん効く。全期間ぶんの入力欄を
+   常設すると、使わない週の欄まで並んで「特例が既定であるかのように」見えてしまう。 */
+.settings-item {
   border-bottom: 1px dotted var(--line-soft);
 }
 
-.budget-row:first-child {
-  padding-top: 0;
+.settings-item:last-child {
+  border-bottom: none;
 }
 
-.budget-key {
+.settings-item > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 9px 0;
   font-family: var(--mono);
   font-size: 13px;
   color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-item-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   white-space: nowrap;
 }
 
-.budget-consumed {
+.settings-item > summary .v {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.settings-item[open] > summary {
+  color: var(--green-dark);
+}
+
+.settings-item-body {
+  padding-bottom: 12px;
+}
+
+.settings-item-body .field:first-child {
   margin-top: 2px;
+}
+
+.budget-consumed {
+  margin-bottom: 8px;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--dim);
 }
 
-.budget-row input {
-  padding: 8px;
-  font-size: 15px;
-  text-align: right;
-}
-
-.budget-row button {
-  width: 100%;
-  padding: 7px 2px;
-  font-size: 11px;
-  letter-spacing: 0;
-}
-
-.budget-src {
-  font-family: var(--mono);
-  font-size: 10px;
+.badge.override {
   color: var(--dim);
-  text-align: center;
+  border-color: var(--line);
 }
 
 /* ---------- 定期イベントの回 ---------- */
@@ -2389,9 +2417,10 @@ a.room-title {
   border-bottom: 1px dotted var(--line-soft);
 }
 
-/* 消え物は薬草色、残るものは鋼の色。 */
+/* 消え物は麦、残るものは鋼、祭事は実り。
+   緑はプロセスの側で使っているので、記録の側では使わない。 */
 .card.kind-food {
-  border-left-color: var(--green);
+  border-left-color: #9a9a44;
 }
 
 .card.kind-gear {
@@ -2399,8 +2428,8 @@ a.room-title {
 }
 
 .badge.food {
-  color: var(--green);
-  border-color: var(--green-dark);
+  color: #6b6b28;
+  border-color: #b8b877;
 }
 
 .badge.gear {

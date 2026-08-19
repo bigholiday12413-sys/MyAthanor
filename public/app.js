@@ -86,6 +86,8 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 断念という状態は持たない。やらないことにしたものは消す。
+// 過去に断念したものが残っているので、札の名前だけは引ける形で置いておく。
 const STATUS_LABEL = { active: '進行中', abandoned: '断念', done: '完了' };
 const KIND_LABEL = { idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事' };
 
@@ -289,21 +291,23 @@ function missionCard(mission, { showSource = true } = {}) {
   const sourceHref = `#/${mission.source_type}/${mission.source_id}`;
   const done = mission.status === 'done';
   const due = dueState(mission);
+  /* やらないことにしたものは消す。「断念」という状態は持たない。
+     やり直すなら、そのとき新しく立てればよい。畳んだ札の中に削除がある。 */
   const actions =
-    // 種は完了しない。回り続けるものなので、止めるだけ。
-    mission.status === 'active' && mission.repeat_days
-      ? `<button data-act="abandon" data-id="${mission.id}" class="ghost danger">止める</button>`
-      : mission.status === 'active'
-      ? `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>
-         <button data-act="abandon" data-id="${mission.id}" class="ghost danger">断念</button>`
-      : mission.status === 'abandoned'
-        ? `<button data-act="reopen" data-id="${mission.id}" class="ghost">進行中に戻す</button>`
-        : legacyButton('mission', mission.id, mission.is_legacy);
+    mission.status === 'active'
+      // 種は完了しない。回り続けるものなので、終わるのは消したとき。
+      ? mission.repeat_days
+        ? ''
+        : `<button data-act="complete" data-id="${mission.id}" class="act">完了</button>`
+      : legacyButton('mission', mission.id, mission.is_legacy);
   return `
     <div class="card status-${esc(mission.status)} ${mission.is_legacy ? 'is-legacy' : ''}"
          data-mission="${mission.id}">
       <div class="card-top">
-        <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
+        ${/* 何であるかを先に言う。状態しか出していないと、ログの札と見分けが付かない。 */ ''}
+        <span class="badge ${esc(mission.status)}">${icon(KIND_ICON.mission)}${esc(
+          STATUS_LABEL[mission.status],
+        )}</span>
         ${
           due
             ? `<span class="badge due-${due.key}">${esc(due.label)}</span>`
@@ -360,7 +364,7 @@ function missionCard(mission, { showSource = true } = {}) {
   `;
 }
 
-// プロセスカードの完了／断念／再開と、期日の保存をまとめて処理する。
+// プロセスカードの完了と削除、直した中身の保存をまとめて処理する。
 function wireMissionActions(container, onChanged) {
   container.addEventListener('submit', async (event) => {
     const form = event.target.closest('form[data-edit]');
@@ -392,7 +396,6 @@ function wireMissionActions(container, onChanged) {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     const { act, id } = button.dataset;
-    if (act === 'abandon' && !confirm('このプロセスを断念しますか？')) return;
     if (
       act === 'delete' &&
       !confirm('このプロセスを消しますか？（循環の種なら、生えたぶんも消えます）')
@@ -407,9 +410,7 @@ function wireMissionActions(container, onChanged) {
         return await onChanged();
       }
       await api(`/missions/${id}/${act}`, { method: 'POST' });
-      toast(
-        act === 'complete' ? '完了：ログを生成しました' : act === 'abandon' ? '断念しました' : '進行中に戻しました',
-      );
+      toast('完了：ログを生成しました');
       await onChanged();
     } catch (err) {
       toast(err.message, true);
@@ -516,9 +517,9 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
   `;
 }
 
-/* ユーズド＝今週のウォレットが何に出ていったか。
-   金額の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
-   家計簿として見るときに効かない。行を押すとストリームのその絞り込みへ飛ぶ。 */
+/* ユーズド＝その週、何に出ていったか。
+   量の大小がそのまま帯の長さになる。数字だけだと割合が読めず、
+   家計簿として見るときに効かない。行を押すとその先へ飛べる。 */
 const GOODS_TONE = {
   food: 'var(--green)',
   gear: '#9aa5ab',
@@ -528,30 +529,33 @@ const GOODS_TONE = {
 // other＝別を付けていないぶん。プロセスの完了で生まれたログはここに落ちる。
 const GOODS_NAME = { ...KIND_LABEL, other: 'その他' };
 
-function walletBars(rows) {
-  const total = rows.reduce((sum, row) => sum + row.money, 0);
-  if (!total) return '';
-  return rows
-    .filter((row) => row.money)
-    .map(
-      (row) => `
+function usedBars(used, format) {
+  const money = used.kind === 'money';
+  return used.rows
+    .filter((row) => row.value)
+    .map((row) => {
+      /* ウォレットは別ごとなので、その絞り込みへ飛ぶ。
+         タイムは1件ずつなので、そのログへ飛ぶ。 */
+      const href = money
+        ? `#/missions?face=log&sub=${row.key === 'other' ? 'log' : row.key}`
+        : `#/log/${row.id}`;
+      const face = money ? row.key : row.goods;
+      const name = money ? GOODS_NAME[row.key] : clip(row.title, 12);
+      return `
         <div class="spend">
           <div class="spend-head">
-            <a class="spend-name" href="#/stream?type=${
-              // 別を付けていないぶんは素のログ。ストリームの絞り込みでは 'log' に当たる。
-              row.goods === 'other' ? 'log' : row.goods
-            }">${
-              row.goods === 'other' ? '' : icon(KIND_ICON[row.goods])
-            }<span>${GOODS_NAME[row.goods]}</span> →</a>
-            <span class="spend-count">${row.count}件</span>
-            <span class="spend-money">${esc(fmtMoney(row.money))}</span>
+            <a class="spend-name" href="${href}">${
+              face && face !== 'other' ? icon(KIND_ICON[face]) : ''
+            }<span>${esc(name)}</span> →</a>
+            ${money ? `<span class="spend-count">${row.count}件</span>` : ''}
+            <span class="spend-money">${esc(format(row.value))}</span>
           </div>
           <div class="spend-bar">
-            <i style="width:${Math.round((row.money / total) * 100)}%;
-              background:${GOODS_TONE[row.goods]}"></i>
+            <i style="width:${Math.round((row.value / used.total) * 100)}%;
+              background:${money ? GOODS_TONE[row.key] : 'var(--green)'}"></i>
           </div>
-        </div>`,
-    )
+        </div>`;
+    })
     .join('');
 }
 
@@ -781,28 +785,46 @@ function shelf(missions, weekEnd) {
   `;
 }
 
-async function renderUsed() {
+// 管の名前。ユーズドはどちらの管の話かを切り替えて見る。
+const TUBE_LABEL = { time: 'タイム', money: 'ウォレット' };
+
+async function renderUsed(kind) {
   setActiveTab('home');
-  setTopbar({ title: 'ユーズド', back: '#/home' });
+  setTopbar({ title: `ユーズド・${TUBE_LABEL[kind]}`, back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
-  const summary = await api('/summary');
-  const rows = summary.wallet_by_goods;
-  const total = rows.reduce((sum, row) => sum + row.money, 0);
+  const used = await api(`/used?kind=${kind}`);
+  const format = kind === 'money' ? fmtMoney : fmtTime;
 
   viewEl.innerHTML = `
+    <div class="filter-bar">
+      <div class="filters">
+        ${['time', 'money']
+          .map(
+            (face) => `<button class="filter" data-used="${face}"
+               aria-pressed="${kind === face}">${TUBE_LABEL[face]}</button>`,
+          )
+          .join('')}
+      </div>
+    </div>
     <div class="panel tight">
       <div class="stat-line">
-        <span>週 ${esc(summary.money.period.label)}</span>
-        <span class="v">${esc(fmtMoney(total))}</span>
+        <span>週 ${esc(used.period.label)}</span>
+        <span class="v">${esc(format(used.total))}</span>
       </div>
     </div>
     ${
-      total
-        ? `<div class="panel">${walletBars(rows)}</div>`
+      used.total
+        ? `<div class="panel">${usedBars(used, format)}</div>`
         : '<div class="empty">今週はまだ出ていません</div>'
     }
   `;
+
+  for (const button of viewEl.querySelectorAll('.filter[data-used]')) {
+    button.addEventListener('click', () => {
+      location.hash = `#/used?kind=${button.dataset.used}`;
+    });
+  }
 }
 
 async function renderHome() {
@@ -831,6 +853,7 @@ async function renderHome() {
         data: summary.time,
         format: fmtTime,
         plannedLabel: '今週予定',
+        href: '#/used?kind=time',
         // タイムは貯まらないので数は出さない。使える幅を決めに行く入口だけ置く。
         store: { icon: 'timegrid', href: '#/settings', label: '週のタイムを決める' },
       })}
@@ -839,7 +862,7 @@ async function renderHome() {
         data: summary.money,
         format: fmtMoney,
         plannedLabel: '今週予定',
-        href: '#/used',
+        href: '#/used?kind=money',
         store: { icon: 'coins', text: fmtMoney(vault.balance), href: '#/vault', label: '金庫' },
       })}
     </div>
@@ -872,56 +895,22 @@ async function renderHome() {
 
 /* ---------- ストリーム ---------- */
 
-const STREAM_TYPES = ['all', 'idea', 'log', ...GOODS];
-let streamFilter = 'all';
-
+/* ストリームはアイデアだけを流す。
+   行ったこと（ログ）はプロセスと同じ画面へ移した。予定と実績は同じものの
+   前後の姿なので、離して置くと行き来のたびにタブをまたぐことになる。 */
 async function renderStream() {
   setActiveTab('stream');
-  setTopbar({ title: 'ストリーム' });
+  setTopbar({ title: 'アイデア' });
 
-  const items = await api(`/stream?type=${streamFilter}`);
-
-  const body =
-    `<div class="list">${
-          items.length
-            ? items.map(streamCard).join('')
-            : '<div class="empty">まだ記録がありません</div>'
-        }</div>`;
-
-  /* 下段はログの中の別なので、ログの側に居るときだけ押せる。
-     アイデアを見ている最中に糧が押せると、上段の選びが黙って外れることになる。
-     ログの札は、下段のどれかを選んでいる間も親として点いたままにする。 */
-  const inLog = streamFilter === 'log' || GOODS.includes(streamFilter);
+  const items = await api('/stream?type=idea');
 
   viewEl.innerHTML = `
-    <div class="filter-bar">
-      ${/* 上段は記録そのもの、下段はログの中の別。6つを横1列に並べると
-            「アイデア」だけ2行に折れて、段が揃わない。 */ ''}
-      ${[['all', 'idea', 'log'], GOODS]
-        .map(
-          (group) => `<div class="filters">
-            ${group
-              .map(
-                (type) => `<button class="filter" data-filter="${type}"
-                   ${GOODS.includes(type) && !inLog ? 'disabled' : ''}
-                   aria-pressed="${type === 'log' ? inLog : streamFilter === type}">${
-                     type === 'all' ? 'すべて' : KIND_LABEL[type]
-                   }</button>`,
-              )
-              .join('')}
-          </div>`,
-        )
-        .join('')}
-    </div>
-    ${body}
+    <div class="list">${
+      items.length
+        ? items.map(streamCard).join('')
+        : '<div class="empty">まだ記録がありません</div>'
+    }</div>
   `;
-
-  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
-    button.addEventListener('click', () => {
-      streamFilter = button.dataset.filter;
-      renderStream();
-    });
-  }
 }
 
 function streamCard(item) {
@@ -929,10 +918,10 @@ function streamCard(item) {
   return `
     <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(face)}">${esc(KIND_LABEL[face])}</span>
+        <span class="badge ${esc(face)}">${icon(KIND_ICON[face])}${esc(KIND_LABEL[face])}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>プロセス由来</span>' : ''}
-        ${item.from_recurrence ? '<span>定期</span>' : ''}
+        ${item.from_repeat ? icon('cycle', 'cycle-mark') : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
       </div>
@@ -1424,15 +1413,11 @@ async function renderEntry(kind, entryId) {
         <input id="at" type="datetime-local" value="${esc(toLocalInput(at))}" />
       </div>
       ${
-        entry.source_mission
-          ? `<div class="stat-line"><span>由来</span><span class="v">プロセス完了「${esc(entry.source_mission.title)}」</span></div>`
-          : ''
-      }
-      ${
-        entry.source_recurrence
-          ? `<div class="stat-line"><span>由来</span><span class="v">${esc(
-              entry.source_recurrence.title,
-            )}</span></div>`
+        entry.source_title
+          ? `<div class="stat-line"><span>出どころ</span><span class="v"><a class="link"
+               href="#/${esc(entry.source_type)}/${entry.source_id}">${esc(
+                 clip(entry.source_title, 14),
+               )} ↗</a></span></div>`
           : ''
       }
       <div class="btn-row">
@@ -1581,53 +1566,69 @@ async function renderEntry(kind, entryId) {
 
 /* ---------- プロセス ---------- */
 
-let missionFilter = 'active';
+/* 'process' = 予定、'log' = 行ったこと。同じ画面の2つの面。 */
+let workFace = 'process';
 // 'once' = 一回きり（種から生えたものを含む）、'seed' = 繰り返しの種
 let missionRepeat = 'once';
+// ログ側の絞り込み。'log' は素のログ、GOODS はその別。
+let logFilter = 'log';
 
+/* プロセス（予定）とログ（行ったこと）は、同じものの前後の姿。
+   だから同じ画面に置く。上段でどちらを見るかを選び、下段でその中を絞る。 */
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: 'プロセス' });
+  setTopbar({ title: workFace === 'log' ? 'ログ' : 'プロセス' });
 
-  const missions = await api(
-    `/missions?status=${missionFilter}&sort=due&repeat=${missionRepeat}`,
-  );
-  const totals = missions.reduce(
-    (acc, m) => ({
-      time: acc.time + m.estimated_time,
-      money: acc.money + m.estimated_money,
-    }),
+  const items =
+    workFace === 'log'
+      ? await api(`/stream?type=${logFilter}`)
+      : await api(`/missions?status=active&sort=due&repeat=${missionRepeat}`);
+
+  const totals = items.reduce(
+    (acc, item) =>
+      workFace === 'log'
+        ? { time: acc.time + item.time_spent, money: acc.money + item.money_spent }
+        : { time: acc.time + item.estimated_time, money: acc.money + item.estimated_money },
     { time: 0, money: 0 },
   );
+
+  const sub =
+    workFace === 'log'
+      ? [['log', 'すべて'], ...GOODS.map((g) => [g, KIND_LABEL[g]])]
+      : [['once', '一回きり'], ['seed', '繰り返す']];
+  const picked = workFace === 'log' ? logFilter : missionRepeat;
 
   viewEl.innerHTML = `
     <div class="filter-bar">
       <div class="filters">
-        ${['active', 'abandoned', 'done']
+        ${[['process', 'プロセス'], ['log', 'ログ']]
           .map(
-            (status) => `<button class="filter" data-filter="${status}"
-               aria-pressed="${missionFilter === status}">${STATUS_LABEL[status]}</button>`,
+            ([face, label]) => `<button class="filter" data-face="${face}"
+               aria-pressed="${workFace === face}">${icon(
+                 face === 'log' ? KIND_ICON.log : KIND_ICON.mission,
+               )}${label}</button>`,
           )
           .join('')}
       </div>
       <div class="filters">
-        <button class="filter" data-repeat="once" aria-pressed="${
-          missionRepeat === 'once'
-        }">一回きり</button>
-        <button class="filter" data-repeat="seed" aria-pressed="${
-          missionRepeat === 'seed'
-        }">${icon('cycle')}繰り返す</button>
+        ${sub
+          .map(
+            ([key, label]) => `<button class="filter" data-sub="${key}"
+               aria-pressed="${picked === key}">${
+                 key === 'seed' ? icon('cycle') : ''
+               }${label}</button>`,
+          )
+          .join('')}
       </div>
     </div>
     ${
       // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
       (() => {
-        const undated = missions.filter((m) => !m.due_date).length;
+        const undated =
+          workFace === 'log' ? 0 : items.filter((m) => !m.due_date && !m.repeat_days).length;
         return `<div class="panel tight">
           <div class="stat-line">
-            <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}${
-              missionRepeat === 'once' && undated ? `（期限なし ${undated}）` : ''
-            }</span>
+            <span>${items.length}件${undated ? `（期限なし ${undated}）` : ''}</span>
             <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
           </div>
         </div>`;
@@ -1635,22 +1636,27 @@ async function renderMissions() {
     }
     <div class="list" id="mission-list">
       ${
-        missions.length
-          ? missions.map((m) => missionCard(m)).join('')
-          : '<div class="empty">該当するプロセスはありません</div>'
+        items.length
+          ? items
+              .map((item) => (workFace === 'log' ? streamCard(item) : missionCard(item)))
+              .join('')
+          : `<div class="empty">${
+              workFace === 'log' ? 'まだ記録がありません' : 'プロセスはありません'
+            }</div>`
       }
     </div>
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-face]')) {
     button.addEventListener('click', () => {
-      missionFilter = button.dataset.filter;
+      workFace = button.dataset.face;
       renderMissions();
     });
   }
-  for (const button of viewEl.querySelectorAll('.filter[data-repeat]')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-sub]')) {
     button.addEventListener('click', () => {
-      missionRepeat = button.dataset.repeat;
+      if (workFace === 'log') logFilter = button.dataset.sub;
+      else missionRepeat = button.dataset.sub;
       renderMissions();
     });
   }
@@ -1684,43 +1690,51 @@ const BUDGET_UI = {
 // 過去は「さらに過去」で伸ばせる。最初から6期ぶん開くと、設定だけで2ページ食う。
 const budgetWindow = { time: 3, money: 3 };
 
+/* 期間ごとの個別設定（特例）。ふだんは値だけを見せて、開けば直せる。
+   全期間ぶんの入力欄を常に並べていたが、実際に上書きするのはごく一部の週だけ。
+   使わない欄まで常設すると「特例」が既定であるかのように見えてしまう。
+   項目（details）として畳んでおき、開いた期間だけがその場で1件ずつ確定する。 */
 function budgetSection(kind, rows) {
   const ui = BUDGET_UI[kind];
   return `
     <div class="section-title">${esc(ui.title)}</div>
-    <form class="panel budget-form" data-kind="${kind}">
+    <div class="panel budget-list" data-kind="${kind}">
       ${rows
         .map(
           (row) => `
-        <div class="budget-row">
-          <div>
-            <div class="budget-key">${esc(row.label)}${
-              row.is_current ? '<span class="badge now">現在</span>' : ''
-            }</div>
+        <details class="settings-item" data-key="${esc(row.key)}">
+          <summary>
+            <span class="settings-item-label">
+              ${esc(row.label)}${row.is_current ? '<span class="badge now">現在</span>' : ''}
+              ${row.source === 'override' ? '<span class="badge override">特例</span>' : ''}
+            </span>
+            <span class="v">${esc(ui.format(row.amount))}</span>
+          </summary>
+          <div class="settings-item-body">
             <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}${
               // 固定費を引く前と後で数が違うので、後のほうも出す。
               // 名前は管の読み取りに合わせる。同じ数を別の名前で呼ばない。
               row.fixed ? ` · 全体 ${esc(ui.format(row.amount))}` : ''
             }</div>
+            <div class="field">
+              <input type="number" min="0" step="${ui.step}"
+                     value="${ui.toInput(row.gross)}"
+                     aria-label="${esc(row.label)} の${esc(ui.unit)}" />
+            </div>
+            <div class="btn-row">
+              <button type="button" class="primary" data-save>保存</button>
+              ${
+                row.source === 'override'
+                  ? '<button type="button" class="ghost" data-reset>既定へ</button>'
+                  : ''
+              }
+            </div>
           </div>
-          <input type="number" min="0" step="${ui.step}"
-                 data-key="${esc(row.key)}"
-                 data-original="${ui.toInput(row.gross)}"
-                 value="${ui.toInput(row.gross)}"
-                 aria-label="${esc(row.label)} の${esc(ui.unit)}" />
-          ${
-            row.source === 'override'
-              ? `<button type="button" class="ghost" data-reset="${esc(row.key)}">既定へ</button>`
-              : '<div class="budget-src">既定</div>'
-          }
-        </div>`,
+        </details>`,
         )
         .join('')}
-      <div class="btn-row">
-        <button type="button" data-more>さらに過去</button>
-        <button type="submit" class="primary">保存</button>
-      </div>
-    </form>
+      <div class="btn-row"><button type="button" class="ghost" data-more>さらに過去</button></div>
+    </div>
   `;
 }
 
@@ -1743,6 +1757,8 @@ async function renderSettings() {
   const fixedTime = fixedOf(timeBudgets);
   const fixedMoney = fixedOf(moneyBudgets);
 
+  /* 既定値の2つ（報酬・冷却）も、期間ごとの個別設定と同じ項目の形にする。
+     常に開いた入力欄を並べず、値だけを見せて、開けば直す。 */
   viewEl.innerHTML = `
     <div class="section-title">週のタイム</div>
     <div class="panel" id="time-grid-panel">
@@ -1770,40 +1786,58 @@ async function renderSettings() {
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
-    <div class="section-title">報酬</div>
-    <form class="panel" id="settings-form">
-      <div class="field">
-        <label for="monthly-money">月あたり（円）</label>
-        <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
-      </div>
+    <div class="section-title">既定値</div>
+    <div class="panel">
+      <details class="settings-item" id="reward-item">
+        <summary>
+          <span class="settings-item-label">報酬（月あたり）</span>
+          <span class="v">${esc(fmtMoney(settings.monthly_money))}</span>
+        </summary>
+        <div class="settings-item-body">
+          <div class="field">
+            <input id="monthly-money" type="number" step="100" min="0"
+                   value="${settings.monthly_money}" aria-label="報酬（月あたり）の円" />
+          </div>
+          ${
+            fixedMoney
+              ? `<div class="stat-line">
+                   <span>固定費</span>
+                   <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
+                 </div>`
+              : ''
+          }
+          <div class="stat-line">
+            <span>週のウォレット</span>
+            <span class="v" id="weekly-share"></span>
+          </div>
+          <div class="btn-row"><button type="button" class="primary" id="reward-save">保存</button></div>
+        </div>
+      </details>
       ${
-        fixedMoney
-          ? `<div class="stat-line">
-               <span>固定費</span>
-               <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
-             </div>`
+        SHOW.temperature
+          ? `<details class="settings-item" id="cooling-item">
+               <summary>
+                 <span class="settings-item-label">アイデアの冷却</span>
+                 <span class="v">${
+                   settings.cooling_half_life_days
+                     ? `${esc(settings.cooling_half_life_days)}日`
+                     : '冷めない'
+                 }</span>
+               </summary>
+               <div class="settings-item-body">
+                 <div class="field">
+                   <label for="half-life">冷却の半減期（日）</label>
+                   <input id="half-life" type="number" step="1" min="0"
+                          value="${settings.cooling_half_life_days}" />
+                 </div>
+                 <div class="btn-row">
+                   <button type="button" class="primary" id="cooling-save">保存</button>
+                 </div>
+               </div>
+             </details>`
           : ''
       }
-      <div class="stat-line">
-        <span>週のウォレット</span>
-        <span class="v" id="weekly-share"></span>
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>
-
-    ${
-      SHOW.temperature
-        ? `<div class="section-title">アイデアの冷却</div>
-    <form class="panel" id="cooling-form">
-      <div class="field">
-        <label for="half-life">冷却の半減期（日）</label>
-        <input id="half-life" type="number" step="1" min="0"
-               value="${settings.cooling_half_life_days}" />
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>`
-        : ''
-    }
+    </div>
 
     <div class="section-title">金庫</div>
     <a class="card nav-card" href="#/vault">
@@ -1826,14 +1860,11 @@ async function renderSettings() {
   showShare();
   rewardInput.addEventListener('input', showShare);
 
-  document.getElementById('settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
+  document.getElementById('reward-save').addEventListener('click', async () => {
     try {
       await api('/settings', {
         method: 'PUT',
-        body: {
-          monthly_money: Math.round(Number(document.getElementById('monthly-money').value || 0)),
-        },
+        body: { monthly_money: Math.round(Number(rewardInput.value || 0)) },
       });
       toast('既定値を保存しました');
       await renderSettings();
@@ -1845,8 +1876,7 @@ async function renderSettings() {
   wireTimeGrid(document.getElementById('time-grid-panel'), grid, fixedTime);
 
   if (SHOW.temperature) {
-    document.getElementById('cooling-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
+    document.getElementById('cooling-save').addEventListener('click', async () => {
       try {
         await api('/settings', {
           method: 'PUT',
@@ -1857,51 +1887,46 @@ async function renderSettings() {
           },
         });
         toast('冷却の設定を保存しました');
+        await renderSettings();
       } catch (err) {
         toast(err.message, true);
       }
     });
   }
 
-  for (const form of viewEl.querySelectorAll('.budget-form')) {
-    const kind = form.dataset.kind;
+  // 期間ごとの個別設定。項目を開いて、1件ずつその場で保存する。
+  for (const list of viewEl.querySelectorAll('.budget-list')) {
+    const kind = list.dataset.kind;
     const ui = BUDGET_UI[kind];
 
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const changed = [...form.querySelectorAll('input[data-key]')].filter(
-        (input) => input.value !== input.dataset.original,
-      );
-      if (changed.length === 0) return toast('変更はありません');
+    list.addEventListener('click', async (event) => {
+      const save = event.target.closest('button[data-save]');
+      const reset = event.target.closest('button[data-reset]');
+      const more = event.target.closest('button[data-more]');
+      if (more) {
+        budgetWindow[kind] += 8;
+        await renderSettings();
+        return;
+      }
+      const item = event.target.closest('.settings-item[data-key]');
+      if (!item) return;
+      const key = item.dataset.key;
       try {
-        for (const input of changed) {
-          await api(`/budgets/${kind}/${input.dataset.key}`, {
+        if (save) {
+          const input = item.querySelector('input');
+          await api(`/budgets/${kind}/${key}`, {
             method: 'PUT',
             body: { amount: ui.fromInput(input.value) },
           });
-        }
-        toast(`${changed.length}件の期間を保存しました`);
-        await renderSettings();
-      } catch (err) {
-        toast(err.message, true);
-      }
-    });
-
-    form.addEventListener('click', async (event) => {
-      const reset = event.target.closest('button[data-reset]');
-      if (reset) {
-        try {
-          await api(`/budgets/${kind}/${reset.dataset.reset}`, { method: 'DELETE' });
+          toast('この期間の値を保存しました');
+          await renderSettings();
+        } else if (reset) {
+          await api(`/budgets/${kind}/${key}`, { method: 'DELETE' });
           toast('既定値に戻しました');
           await renderSettings();
-        } catch (err) {
-          toast(err.message, true);
         }
-        return;
-      }
-      if (event.target.closest('button[data-more]')) {
-        budgetWindow[kind] += 8;
-        await renderSettings();
+      } catch (err) {
+        toast(err.message, true);
       }
     });
   }
@@ -2703,17 +2728,25 @@ async function route() {
   try {
     let match;
     if (hash === '/home') return await renderHome();
-    if (hash === '/stream' || hash.startsWith('/stream?')) {
-      // ユーズドから種別を指定して来られるようにする。
-      const type = new URLSearchParams(hash.split('?')[1] ?? '').get('type');
-      if (type && STREAM_TYPES.includes(type)) streamFilter = type;
-      return await renderStream();
+    if (hash === '/stream' || hash.startsWith('/stream?')) return await renderStream();
+    if (hash === '/missions' || hash.startsWith('/missions?')) {
+      // ユーズドから、見たい面と絞り込みを指定して来られるようにする。
+      const query = new URLSearchParams(hash.split('?')[1] ?? '');
+      if (query.get('face') === 'log') workFace = 'log';
+      const sub = query.get('sub');
+      if (sub && (sub === 'log' || GOODS.includes(sub))) {
+        workFace = 'log';
+        logFilter = sub;
+      }
+      return await renderMissions();
     }
-    if (hash === '/missions') return await renderMissions();
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/vault') return await renderVault();
-    if (hash === '/used') return await renderUsed();
+    if (hash === '/used' || hash.startsWith('/used?')) {
+      const kind = new URLSearchParams(hash.split('?')[1] ?? '').get('kind');
+      return await renderUsed(kind === 'time' ? 'time' : 'money');
+    }
     if ((match = hash.match(/^\/(idea|log)\/(\d+)$/))) {
       return await renderEntry(match[1], Number(match[2]));
     }

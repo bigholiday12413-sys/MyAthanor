@@ -156,19 +156,20 @@ function goodsOf(value) {
 }
 
 export function createLog({
-  title, occurred_at, time_spent, money_spent, source_mission_id, goods,
+  title, occurred_at, time_spent, money_spent, goods, source_type, source_id,
 }) {
   const stmt = db.prepare(`
-    INSERT INTO log (title, occurred_at, time_spent, money_spent, source_mission_id, goods)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO log (title, occurred_at, time_spent, money_spent, goods, source_type, source_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const { lastInsertRowid } = stmt.run(
     requireTitle(title),
     occurred_at || nowIso(),
     int(time_spent),
     int(money_spent),
-    source_mission_id ?? null,
     goodsOf(goods),
+    source_type ?? null,
+    source_id ?? null,
   );
   return getLog(Number(lastInsertRowid));
 }
@@ -176,25 +177,17 @@ export function createLog({
 export function getLog(id) {
   const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
   if (!row) throw notFound('log');
-  const source = row.source_mission_id
-    ? db.prepare(`SELECT id, title, source_type, source_id FROM mission WHERE id = ?`)
-        .get(row.source_mission_id) ?? null
-    : null;
-  const recurrence = row.source_recurrence_id
-    ? db.prepare(`SELECT id, title FROM recurrence WHERE id = ?`).get(row.source_recurrence_id) ??
-      null
-    : null;
   return {
     ...row,
     kind: 'log',
-    source_mission: source,
-    source_recurrence: recurrence,
+    source_title: row.source_type ? sourceTitle(row.source_type, row.source_id) : null,
     cauldrons: listCauldronsBySource('log', id),
     missions: listMissionsBySource('log', id),
   };
 }
 
 export function updateLog(id, { title, occurred_at, time_spent, money_spent, goods }) {
+  // 出どころは書き換えない。どこから来たかは、生まれたときに決まっている。
   const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
   if (!row) throw notFound('log');
 
@@ -237,21 +230,20 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
-             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_recurrence,
+             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_repeat,
              i.temperature, i.temperature_at, NULL AS goods
       FROM idea i
     `);
   }
-  // 糧と装備もログの器に入っているので、別で絞り込むだけでよい。
+  /* 糧・装備・祭事もログの器に入っているので、別で絞り込むだけでよい。
+     'log' はログ全部。別を付けていないものだけを見る絞り込みは持たない。 */
   if (type === 'all' || type === 'log' || isGoods(type)) {
-    const where = isGoods(type)
-      ? `WHERE l.goods = '${type}'`
-      : type === 'log' ? `WHERE l.goods IS NULL` : '';
+    const where = isGoods(type) ? `WHERE l.goods = '${type}'` : '';
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,
-             CASE WHEN l.source_mission_id IS NULL THEN 0 ELSE 1 END AS from_mission,
-             CASE WHEN l.source_recurrence_id IS NULL THEN 0 ELSE 1 END AS from_recurrence,
+             CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission,
+             CASE WHEN l.repeat_of IS NULL THEN 0 ELSE 1 END AS from_repeat,
              NULL AS temperature, NULL AS temperature_at, l.goods
       FROM log l ${where}
     `);
@@ -280,7 +272,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
       return {
         ...row,
         from_mission: Boolean(row.from_mission),
-        from_recurrence: Boolean(row.from_recurrence),
+        from_repeat: Boolean(row.from_repeat),
         current_temperature:
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
@@ -412,7 +404,7 @@ export function getMission(id) {
 
    周期（日）を持つプロセスが「種」。そこから一回きりのプロセスが生えてくる。
    種そのものは棚にも一覧にも出さず、繰り返しの側にだけ並ぶ。
-   生えたものは自分で立てたものと同じに扱えて、完了も断念もできる。
+   生えたものは自分で立てたものと同じに扱えて、完了も削除もできる。
 
    無限には作れないので、今日から HORIZON 日先までを保つ。
    読むたびに足りないぶんを継ぎ足すので、使っている限り先が尽きない。 */
@@ -570,71 +562,58 @@ export function updateMission(
   return getMission(id);
 }
 
-// 完了：ログを自動生成し、見積もりを消費済みとして確定する。
+/* 完了：プロセス（予定）がログ（行ったこと）に移る。
+
+   同じ1件の前後の姿なので、両方を残さない。見積もりをそのまま実績として写し、
+   出どころと輝きも連れて行って、残ったプロセスの行は畳む。
+   2つの器に同じものが居ると、片方だけ直す・片方だけ消すが起きる。 */
 export function completeMission(id) {
   return transaction(() => {
     const mission = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
     if (!mission) throw notFound('mission');
-    // 種は完了しない。回り続けるものなので、終わるのは止めたときだけ。
+    // 種は完了しない。回り続けるものなので、終わるのは消したときだけ。
     if (mission.repeat_days !== null) {
       const err = new Error('a repeating process cannot be completed');
       err.status = 409;
       throw err;
     }
-    if (mission.status === 'done') {
-      const log = db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(id);
-      return { mission: decorate(mission), log: log ?? null };
-    }
 
     const at = nowIso();
-    db.prepare(`UPDATE mission SET status = 'done', completed_at = ? WHERE id = ?`).run(at, id);
-
     const { lastInsertRowid } = db
       .prepare(`
-        INSERT INTO log (title, occurred_at, time_spent, money_spent, source_mission_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO log
+          (title, occurred_at, time_spent, money_spent,
+           source_type, source_id, repeat_of, is_legacy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(mission.title, at, mission.estimated_time, mission.estimated_money, id);
+      .run(
+        mission.title,
+        at,
+        mission.estimated_time,
+        mission.estimated_money,
+        mission.source_type,
+        mission.source_id,
+        mission.repeat_of,
+        mission.is_legacy,
+      );
 
+    db.prepare(`DELETE FROM mission WHERE id = ?`).run(id);
     refreshCauldron(mission.cauldron_id);
-    return {
-      mission: decorate(db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id)),
-      log: db.prepare(`SELECT * FROM log WHERE id = ?`).get(Number(lastInsertRowid)),
-    };
+    return { log: getLog(Number(lastInsertRowid)) };
   });
 }
 
-// 断念：消費予定から外す。ログは生成しない。
-export function abandonMission(id) {
-  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
-  if (!row) throw notFound('mission');
-  if (row.status === 'done') {
-    const err = new Error('completed mission cannot be abandoned');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE mission SET status = 'abandoned', completed_at = NULL WHERE id = ?`).run(id);
-  // 種を止めたら、まだ手を付けていない先のぶんは引き上げる。
-  if (row.repeat_days !== null) {
-    db.prepare(`
-      DELETE FROM mission WHERE repeat_of = ? AND status = 'active' AND due_date > ?
-    `).run(id, dateKey(new Date()));
-  }
-  refreshCauldron(row.cauldron_id);
-  return getMission(id);
-}
-
-/* 消す。断念は「やらないことにした」という記録だが、こちらは記録ごと無かったことにする。
+/* 消す。やらないことにしたものは消す。「断念」という状態は持たない。
+   やり直すなら、そのとき新しく立てればよい。
    種なら、そこから生えたぶんも道連れにする。種だけ消しても回りは残らない。
 
-   完了して生まれたログは残し、出どころだけ外す。
-   ログは「起きたこと」の記録で、段取りを消したからといって消えるものではない。 */
+   完了して生まれたログは触らない。ログは行ったことの記録で、
+   その時点でプロセスの行はもう畳まれている。 */
 // 中身だけ。まとめて消すときに外から呼べるよう、囲い（transaction）は持たない。
 function removeMission(row) {
   if (row.repeat_days !== null) {
     db.prepare(`DELETE FROM mission WHERE repeat_of = ?`).run(row.id);
   }
-  db.prepare(`UPDATE log SET source_mission_id = NULL WHERE source_mission_id = ?`).run(row.id);
   db.prepare(`DELETE FROM mission WHERE id = ?`).run(row.id);
   refreshCauldron(row.cauldron_id);
 }
@@ -648,19 +627,6 @@ export function deleteMission(id) {
   });
 }
 
-// 進行中に戻す（断念の取り消し）。
-export function reopenMission(id) {
-  const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
-  if (!row) throw notFound('mission');
-  if (row.status === 'done') {
-    const err = new Error('completed mission cannot be reopened');
-    err.status = 409;
-    throw err;
-  }
-  db.prepare(`UPDATE mission SET status = 'active', completed_at = NULL WHERE id = ?`).run(id);
-  refreshCauldron(row.cauldron_id);
-  return getMission(id);
-}
 
 export function isMissionStatus(status) {
   return MISSION_STATUSES.has(status);
@@ -842,11 +808,8 @@ export function resolveBudget(kind, periodKey, fixed = fixedPerWeek()[kind]) {
 
 /* 循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。
    数えると同じ出費を2回引くことになる。
-   出どころのプロセスが無い普通のログは、LEFT JOIN の結果が NULL なので残る。 */
-const NOT_FROM_REPEAT = `
-  LEFT JOIN mission src ON src.id = l.source_mission_id
-  WHERE src.repeat_of IS NULL
-`;
+   どの種から来たかはログ自身が持つ。持たないものが普通のログ。 */
+const NOT_FROM_REPEAT = `WHERE l.repeat_of IS NULL`;
 
 function consumedIn(kind, period) {
   return db
@@ -1120,11 +1083,8 @@ function monthsAgoIso(months) {
   return date.toISOString();
 }
 
-function corridorFrom(mission, depth) {
-  const generated =
-    mission.status === 'done' && depth < DUNGEON_MAX_DEPTH
-      ? db.prepare(`SELECT * FROM log WHERE source_mission_id = ?`).get(mission.id) ?? null
-      : null;
+/* 予定のプロセス。まだ着いていないので、先の部屋は無い。 */
+function corridorFromMission(mission) {
   return {
     mission: {
       id: mission.id,
@@ -1133,20 +1093,56 @@ function corridorFrom(mission, depth) {
       time: mission.estimated_time,
       money: mission.estimated_money,
       is_legacy: Boolean(mission.is_legacy),
-      at: mission.completed_at ?? mission.created_at,
+      at: mission.created_at,
     },
-    room: generated ? dungeonRoom('log', generated, depth + 1) : null,
+    room: null,
   };
 }
 
+/* 行ったこと。その先に部屋がある。
+   プロセスが完了するとログに移るので、済んだ通路はログ自身が持っている。 */
+function corridorFromLog(log, depth) {
+  return {
+    mission: {
+      id: log.id,
+      title: log.title,
+      status: 'done',
+      time: log.time_spent,
+      money: log.money_spent,
+      is_legacy: Boolean(log.is_legacy),
+      at: log.occurred_at,
+    },
+    room: depth < DUNGEON_MAX_DEPTH ? dungeonRoom('log', log, depth + 1) : null,
+  };
+}
+
+/* その節から出た、行ったこと。
+   糧は盤に出さないので外す。循環から生えたぶんも外す。
+   同じ用事が何十本も枝になると、盤がその一色で埋まって読めなくなる。
+   回っていること自体は、種が1本の軌道として出しているので足りる。 */
+function listLogsBySource(source_type, source_id) {
+  return db
+    .prepare(`
+      SELECT * FROM log
+       WHERE source_type = ? AND source_id = ?
+         AND repeat_of IS NULL AND COALESCE(goods, '') <> 'food'
+       ORDER BY occurred_at, id
+    `)
+    .all(source_type, source_id);
+}
+
 function dungeonRoom(type, row, depth) {
-  const missions = depth >= DUNGEON_MAX_DEPTH ? [] : listMissionsBySource(type, row.id);
+  const deeper = depth < DUNGEON_MAX_DEPTH;
+  // 循環から生えた予定も同じ理由で外す。出すのは種のほうだけ。
+  const missions = deeper
+    ? listMissionsBySource(type, row.id).filter((mission) => !mission.repeat_of)
+    : [];
 
   // 大釜に入っている通路は束ねて、器ごとにまとめて出す。
-  const loose = [];
+  const loose = deeper ? listLogsBySource(type, row.id).map((log) => corridorFromLog(log, depth)) : [];
   const bundles = new Map();
   for (const mission of missions) {
-    const corridor = corridorFrom(mission, depth);
+    const corridor = corridorFromMission(mission);
     if (!mission.cauldron_id) {
       loose.push(corridor);
       continue;
@@ -1173,7 +1169,7 @@ function dungeonRoom(type, row, depth) {
     time: type === 'log' ? row.time_spent : 0,
     money: type === 'log' ? row.money_spent : 0,
     is_legacy: Boolean(row.is_legacy),
-    from_recurrence: type === 'log' ? Boolean(row.source_recurrence_id) : false,
+    from_repeat: type === 'log' ? Boolean(row.repeat_of) : false,
     temperature: type === 'idea' ? withTemperature(row).current_temperature : null,
     corridors: loose,
     cauldrons: [...bundles.values()],
@@ -1242,7 +1238,7 @@ export function getDungeon({ since = null, until = null } = {}) {
     /* 糧は盤に出さない。食べれば消えるものなので、買った回数だけ節が増えると
        盤が読めなくなる。装備は物が残り、祭事は見聞が残るので、どちらも節にする。 */
     ...db
-      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL AND COALESCE(goods, '') <> 'food'`)
+      .prepare(`SELECT * FROM log WHERE source_type IS NULL AND COALESCE(goods, '') <> 'food'`)
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
@@ -1288,6 +1284,47 @@ export function getDungeon({ since = null, until = null } = {}) {
   );
 
   return { totals, roads, period: { since: from, until: to } };
+}
+
+/* ---------- ユーズド（その週、何に出ていったか） ---------- */
+
+/* ウォレットは別（糧・装備・祭事）でまとめる。買い物は数が多くて似通うので、
+   1件ずつ並べても割合が読めない。
+   タイムは1件ずつ並べる。時間を使ったことは数が少なく、どれも中身が違うので、
+   まとめてしまうと「何に使ったか」が消える。 */
+export function getUsed(kind, now = new Date()) {
+  requireKind(kind);
+  const period = periods[kind].of(now);
+
+  if (kind === 'money') {
+    const found = db
+      .prepare(`
+        SELECT COALESCE(l.goods, 'other') AS key,
+               COALESCE(SUM(l.money_spent), 0) AS value,
+               COUNT(*) AS count
+        FROM log l ${NOT_FROM_REPEAT}
+          AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
+        GROUP BY COALESCE(l.goods, 'other')
+      `)
+      .all(period.start, period.end);
+    const rows = [...GOODS, 'other'].map((key) => {
+      const row = found.find((item) => item.key === key);
+      return { key, value: row?.value ?? 0, count: row?.count ?? 0 };
+    });
+    return { kind, period, total: rows.reduce((sum, row) => sum + row.value, 0), rows };
+  }
+
+  const rows = db
+    .prepare(`
+      SELECT l.id, l.title, l.goods, l.time_spent AS value,
+             CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission
+      FROM log l ${NOT_FROM_REPEAT}
+        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.time_spent > 0
+      ORDER BY l.time_spent DESC, l.id DESC
+    `)
+    .all(period.start, period.end)
+    .map((row) => ({ ...row, from_mission: Boolean(row.from_mission) }));
+  return { kind, period, total: rows.reduce((sum, row) => sum + row.value, 0), rows };
 }
 
 /* ---------- summary（ホームのタンク） ---------- */
@@ -1346,19 +1383,6 @@ export function getSummary(now = new Date()) {
     .prepare(`SELECT COUNT(*) AS count FROM mission WHERE status = 'active' AND repeat_of IS NULL`)
     .get().count;
 
-  /* 今週のウォレットが何に出ていったか。糧・装備・出来事の3つに割る。
-     管の消費済みの内訳なので、外す条件も管と揃える。 */
-  const spendByGoods = db
-    .prepare(`
-      SELECT COALESCE(l.goods, 'other') AS goods,
-             COALESCE(SUM(l.money_spent), 0) AS money,
-             COUNT(*) AS count
-      FROM log l ${NOT_FROM_REPEAT}
-        AND l.occurred_at >= ? AND l.occurred_at < ? AND l.money_spent <> 0
-      GROUP BY COALESCE(l.goods, 'other')
-    `)
-    .all(moneyWeek.start, moneyWeek.end);
-
   const plannedWeek = plannedMissions(week);
   const plannedMoney = plannedMissions(moneyWeek);
 
@@ -1394,11 +1418,6 @@ export function getSummary(now = new Date()) {
       fixed: moneyBudget.fixed,
       due_mission_count: plannedMoney.count,
     },
-    // 今週のウォレットの内訳。何に出ていったかを家計簿として見るためのもの。
-    wallet_by_goods: [...GOODS, 'other'].map((goods) => {
-      const row = spendByGoods.find((item) => item.goods === goods);
-      return { goods, money: row?.money ?? 0, count: row?.count ?? 0 };
-    }),
     // 期限を持たないぶん。運用上ここは 0 のはずで、増えていたら取りこぼしの合図。
     undated: undated,
     active_mission_count: activeCount,
