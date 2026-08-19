@@ -1417,8 +1417,7 @@ async function renderEntry(kind, entryId) {
     ? entry.missions.filter((mission) => !mission.cauldron_id)
     : entry.missions;
 
-  viewEl.innerHTML = `
-    ${/* いちばん使うのはプロセスを足すこと。1ページ目に置く。 */ ''}
+  const addSection = `
     <div class="section-title">プロセスを追加</div>
     <form class="panel" id="mission-form">
       <div class="field">
@@ -1453,7 +1452,9 @@ async function renderEntry(kind, entryId) {
       </details>
       <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
+  `;
 
+  const listSection = `
     <div class="section-title">${SHOW.cauldron ? '単独のプロセス' : 'プロセス'}</div>
     <div class="list" id="entry-missions">
       ${
@@ -1462,7 +1463,9 @@ async function renderEntry(kind, entryId) {
           : '<div class="empty">プロセスはありません</div>'
       }
     </div>
+  `;
 
+  const titleSection = `
     <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
     <form class="panel" id="entry-form">
       <div class="field">
@@ -1527,6 +1530,17 @@ async function renderEntry(kind, entryId) {
         <button type="button" class="ghost danger" id="entry-delete">削除</button>
       </div>
     </form>
+  `;
+
+  viewEl.innerHTML = `
+    ${
+      /* アイデアはプロセスを切り出すのが主な用なので、その入口を先に置く。
+         ログはすでに済んだことの記録なので、まずタイトル側で中身を確かめてから、
+         そこから続けるプロセスを足す順にする。 */
+      kind === 'log'
+        ? `${titleSection}${addSection}${listSection}`
+        : `${addSection}${listSection}${titleSection}`
+    }
 
     ${
       SHOW.cauldron
