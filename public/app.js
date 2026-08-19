@@ -537,7 +537,7 @@ function usedBars(used, format) {
       /* ウォレットは別ごとなので、その絞り込みへ飛ぶ。
          タイムは1件ずつなので、そのログへ飛ぶ。 */
       const href = money
-        ? `#/stream?type=${row.key === 'other' ? 'log' : row.key}`
+        ? `#/missions?face=log&sub=${row.key === 'other' ? 'log' : row.key}`
         : `#/log/${row.id}`;
       const face = money ? row.key : row.goods;
       const name = money ? GOODS_NAME[row.key] : clip(row.title, 12);
@@ -895,56 +895,22 @@ async function renderHome() {
 
 /* ---------- ストリーム ---------- */
 
-const STREAM_TYPES = ['all', 'idea', 'log', ...GOODS];
-let streamFilter = 'all';
-
+/* ストリームはアイデアだけを流す。
+   行ったこと（ログ）はプロセスと同じ画面へ移した。予定と実績は同じものの
+   前後の姿なので、離して置くと行き来のたびにタブをまたぐことになる。 */
 async function renderStream() {
   setActiveTab('stream');
-  setTopbar({ title: 'ストリーム' });
+  setTopbar({ title: 'アイデア' });
 
-  const items = await api(`/stream?type=${streamFilter}`);
-
-  const body =
-    `<div class="list">${
-          items.length
-            ? items.map(streamCard).join('')
-            : '<div class="empty">まだ記録がありません</div>'
-        }</div>`;
-
-  /* 下段はログの中の別なので、ログの側に居るときだけ押せる。
-     アイデアを見ている最中に糧が押せると、上段の選びが黙って外れることになる。
-     ログの札は、下段のどれかを選んでいる間も親として点いたままにする。 */
-  const inLog = streamFilter === 'log' || GOODS.includes(streamFilter);
+  const items = await api('/stream?type=idea');
 
   viewEl.innerHTML = `
-    <div class="filter-bar">
-      ${/* 上段は記録そのもの、下段はログの中の別。6つを横1列に並べると
-            「アイデア」だけ2行に折れて、段が揃わない。 */ ''}
-      ${[['all', 'idea', 'log'], GOODS]
-        .map(
-          (group) => `<div class="filters">
-            ${group
-              .map(
-                (type) => `<button class="filter" data-filter="${type}"
-                   ${GOODS.includes(type) && !inLog ? 'disabled' : ''}
-                   aria-pressed="${type === 'log' ? inLog : streamFilter === type}">${
-                     type === 'all' ? 'すべて' : KIND_LABEL[type]
-                   }</button>`,
-              )
-              .join('')}
-          </div>`,
-        )
-        .join('')}
-    </div>
-    ${body}
+    <div class="list">${
+      items.length
+        ? items.map(streamCard).join('')
+        : '<div class="empty">まだ記録がありません</div>'
+    }</div>
   `;
-
-  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
-    button.addEventListener('click', () => {
-      streamFilter = button.dataset.filter;
-      renderStream();
-    });
-  }
 }
 
 function streamCard(item) {
@@ -955,7 +921,7 @@ function streamCard(item) {
         <span class="badge ${esc(face)}">${icon(KIND_ICON[face])}${esc(KIND_LABEL[face])}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>プロセス由来</span>' : ''}
-        ${item.from_recurrence ? '<span>定期</span>' : ''}
+        ${item.from_repeat ? icon('cycle', 'cycle-mark') : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
       </div>
@@ -1447,15 +1413,11 @@ async function renderEntry(kind, entryId) {
         <input id="at" type="datetime-local" value="${esc(toLocalInput(at))}" />
       </div>
       ${
-        entry.source_mission
-          ? `<div class="stat-line"><span>由来</span><span class="v">プロセス完了「${esc(entry.source_mission.title)}」</span></div>`
-          : ''
-      }
-      ${
-        entry.source_recurrence
-          ? `<div class="stat-line"><span>由来</span><span class="v">${esc(
-              entry.source_recurrence.title,
-            )}</span></div>`
+        entry.source_title
+          ? `<div class="stat-line"><span>出どころ</span><span class="v"><a class="link"
+               href="#/${esc(entry.source_type)}/${entry.source_id}">${esc(
+                 clip(entry.source_title, 14),
+               )} ↗</a></span></div>`
           : ''
       }
       <div class="btn-row">
@@ -1604,53 +1566,69 @@ async function renderEntry(kind, entryId) {
 
 /* ---------- プロセス ---------- */
 
-let missionFilter = 'active';
+/* 'process' = 予定、'log' = 行ったこと。同じ画面の2つの面。 */
+let workFace = 'process';
 // 'once' = 一回きり（種から生えたものを含む）、'seed' = 繰り返しの種
 let missionRepeat = 'once';
+// ログ側の絞り込み。'log' は素のログ、GOODS はその別。
+let logFilter = 'log';
 
+/* プロセス（予定）とログ（行ったこと）は、同じものの前後の姿。
+   だから同じ画面に置く。上段でどちらを見るかを選び、下段でその中を絞る。 */
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: 'プロセス' });
+  setTopbar({ title: workFace === 'log' ? 'ログ' : 'プロセス' });
 
-  const missions = await api(
-    `/missions?status=${missionFilter}&sort=due&repeat=${missionRepeat}`,
-  );
-  const totals = missions.reduce(
-    (acc, m) => ({
-      time: acc.time + m.estimated_time,
-      money: acc.money + m.estimated_money,
-    }),
+  const items =
+    workFace === 'log'
+      ? await api(`/stream?type=${logFilter}`)
+      : await api(`/missions?status=active&sort=due&repeat=${missionRepeat}`);
+
+  const totals = items.reduce(
+    (acc, item) =>
+      workFace === 'log'
+        ? { time: acc.time + item.time_spent, money: acc.money + item.money_spent }
+        : { time: acc.time + item.estimated_time, money: acc.money + item.estimated_money },
     { time: 0, money: 0 },
   );
+
+  const sub =
+    workFace === 'log'
+      ? [['log', 'すべて'], ...GOODS.map((g) => [g, KIND_LABEL[g]])]
+      : [['once', '一回きり'], ['seed', '繰り返す']];
+  const picked = workFace === 'log' ? logFilter : missionRepeat;
 
   viewEl.innerHTML = `
     <div class="filter-bar">
       <div class="filters">
-        ${['active', 'done']
+        ${[['process', 'プロセス'], ['log', 'ログ']]
           .map(
-            (status) => `<button class="filter" data-filter="${status}"
-               aria-pressed="${missionFilter === status}">${STATUS_LABEL[status]}</button>`,
+            ([face, label]) => `<button class="filter" data-face="${face}"
+               aria-pressed="${workFace === face}">${icon(
+                 face === 'log' ? KIND_ICON.log : KIND_ICON.mission,
+               )}${label}</button>`,
           )
           .join('')}
       </div>
       <div class="filters">
-        <button class="filter" data-repeat="once" aria-pressed="${
-          missionRepeat === 'once'
-        }">一回きり</button>
-        <button class="filter" data-repeat="seed" aria-pressed="${
-          missionRepeat === 'seed'
-        }">${icon('cycle')}繰り返す</button>
+        ${sub
+          .map(
+            ([key, label]) => `<button class="filter" data-sub="${key}"
+               aria-pressed="${picked === key}">${
+                 key === 'seed' ? icon('cycle') : ''
+               }${label}</button>`,
+          )
+          .join('')}
       </div>
     </div>
     ${
       // 1行に畳む。2行あると札が1枚しか同じページに乗らない。
       (() => {
-        const undated = missions.filter((m) => !m.due_date).length;
+        const undated =
+          workFace === 'log' ? 0 : items.filter((m) => !m.due_date && !m.repeat_days).length;
         return `<div class="panel tight">
           <div class="stat-line">
-            <span>${missions.length}件 / ${esc(STATUS_LABEL[missionFilter])}${
-              missionRepeat === 'once' && undated ? `（期限なし ${undated}）` : ''
-            }</span>
+            <span>${items.length}件${undated ? `（期限なし ${undated}）` : ''}</span>
             <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
           </div>
         </div>`;
@@ -1658,22 +1636,27 @@ async function renderMissions() {
     }
     <div class="list" id="mission-list">
       ${
-        missions.length
-          ? missions.map((m) => missionCard(m)).join('')
-          : '<div class="empty">該当するプロセスはありません</div>'
+        items.length
+          ? items
+              .map((item) => (workFace === 'log' ? streamCard(item) : missionCard(item)))
+              .join('')
+          : `<div class="empty">${
+              workFace === 'log' ? 'まだ記録がありません' : 'プロセスはありません'
+            }</div>`
       }
     </div>
   `;
 
-  for (const button of viewEl.querySelectorAll('.filter[data-filter]')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-face]')) {
     button.addEventListener('click', () => {
-      missionFilter = button.dataset.filter;
+      workFace = button.dataset.face;
       renderMissions();
     });
   }
-  for (const button of viewEl.querySelectorAll('.filter[data-repeat]')) {
+  for (const button of viewEl.querySelectorAll('.filter[data-sub]')) {
     button.addEventListener('click', () => {
-      missionRepeat = button.dataset.repeat;
+      if (workFace === 'log') logFilter = button.dataset.sub;
+      else missionRepeat = button.dataset.sub;
       renderMissions();
     });
   }
@@ -2726,13 +2709,18 @@ async function route() {
   try {
     let match;
     if (hash === '/home') return await renderHome();
-    if (hash === '/stream' || hash.startsWith('/stream?')) {
-      // ユーズドから種別を指定して来られるようにする。
-      const type = new URLSearchParams(hash.split('?')[1] ?? '').get('type');
-      if (type && STREAM_TYPES.includes(type)) streamFilter = type;
-      return await renderStream();
+    if (hash === '/stream' || hash.startsWith('/stream?')) return await renderStream();
+    if (hash === '/missions' || hash.startsWith('/missions?')) {
+      // ユーズドから、見たい面と絞り込みを指定して来られるようにする。
+      const query = new URLSearchParams(hash.split('?')[1] ?? '');
+      if (query.get('face') === 'log') workFace = 'log';
+      const sub = query.get('sub');
+      if (sub && (sub === 'log' || GOODS.includes(sub))) {
+        workFace = 'log';
+        logFilter = sub;
+      }
+      return await renderMissions();
     }
-    if (hash === '/missions') return await renderMissions();
     if (hash === '/dungeon') return await renderDungeon();
     if (hash === '/settings') return await renderSettings();
     if (hash === '/vault') return await renderVault();

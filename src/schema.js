@@ -152,6 +152,13 @@ export const ADDED_COLUMNS = [
   ['mission', 'repeat_of', 'INTEGER'],
   // 種がどの日付ぶんまで生やし終えたか（YYYY-MM-DD）。
   ['mission', 'repeat_through', 'TEXT'],
+  /* ログの出どころ。どのアイデア（またはログ）から来たか。
+     プロセスは「予定」、ログは「行ったこと」で、同じものの前後の姿。
+     完了するとプロセスはログに移るので、出どころもログ側が持つ。 */
+  ['log', 'source_type', 'TEXT'],
+  ['log', 'source_id', 'INTEGER'],
+  // どの循環の種から来たか。固定費として先に引いてあるので、消費済みには数えない。
+  ['log', 'repeat_of', 'INTEGER'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。
@@ -173,4 +180,33 @@ function applyRewrites(db) {
   /* インゴットをやめ、アイデアに一本化した。同じ器に入っているので、
      印を外せばそのままアイデアになる。本文の列は残すので、書いたものは失われない。 */
   db.exec(`UPDATE idea SET is_spell = 0 WHERE is_spell = 1`);
+
+  /* プロセス（予定）とログ（行ったこと）を、同じものの前後の姿に揃えた。
+     完了したプロセスは、ログに移ってからは要らない。
+
+     いまは完了のたびにログを作りつつプロセスも残していたので、同じ1件が
+     2つの器に居る。ログ側へ出どころと輝きを写してから、残ったプロセスを畳む。
+     写してから消すので、どのアイデアから来たかは失われない。 */
+  db.exec(`
+    UPDATE log SET
+      source_type = COALESCE(source_type,
+        (SELECT m.source_type FROM mission m WHERE m.id = log.source_mission_id)),
+      source_id = COALESCE(source_id,
+        (SELECT m.source_id FROM mission m WHERE m.id = log.source_mission_id))
+    WHERE source_mission_id IS NOT NULL AND source_type IS NULL
+  `);
+  db.exec(`
+    UPDATE log SET repeat_of = (
+      SELECT m.repeat_of FROM mission m WHERE m.id = log.source_mission_id
+    )
+    WHERE source_mission_id IS NOT NULL AND repeat_of IS NULL
+  `);
+  db.exec(`
+    UPDATE log SET is_legacy = 1
+    WHERE is_legacy = 0 AND source_mission_id IN (SELECT id FROM mission WHERE is_legacy = 1)
+  `);
+  db.exec(`
+    DELETE FROM mission WHERE status = 'done'
+      AND id IN (SELECT source_mission_id FROM log WHERE source_mission_id IS NOT NULL)
+  `);
 }
