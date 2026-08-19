@@ -522,9 +522,22 @@ export function isMissionSort(sort) {
 }
 
 export function listMissionsBySource(source_type, source_id) {
+  /* 循環から生えたぶんは、進行中なら**いちばん近い1回だけ**出す（listMissions と同じ）。
+     先まで生やしてあるので、そのまま並べるとアイデア・ログの詳細が同じ用事で
+     何十枚も埋まり、単独のプロセスが押し出される。終わった回と止めた回は記録なので
+     全部出す。 */
   return db
     .prepare(`
       ${MISSION_SELECT} WHERE m.source_type = ? AND m.source_id = ?
+      AND (
+        m.repeat_of IS NULL
+        OR m.status <> 'active'
+        OR m.id = (
+          SELECT x.id FROM mission x
+           WHERE x.repeat_of = m.repeat_of AND x.status = 'active'
+           ORDER BY x.due_date, x.id LIMIT 1
+        )
+      )
       ${MISSION_ORDER.due}
     `)
     .all(source_type, source_id)
