@@ -499,6 +499,19 @@ export function listMissions({ status, sort = 'recent', due_by = null, repeat = 
   // 種は周期を持つもの。一回きりの側には出さない。
   if (repeat === 'seed') where.push('m.repeat_days IS NOT NULL');
   else if (repeat === 'once') where.push('m.repeat_days IS NULL');
+
+  /* 循環から生えたぶんは、進行中なら**いちばん近い1回だけ**出す。
+     先まで生やしてあるので、そのまま並べると同じ用事で欄が埋まって、
+     いま見るべきものが押し出される。終わった回と止めた回は記録なので全部出す。 */
+  where.push(`(
+    m.repeat_of IS NULL
+    OR m.status <> 'active'
+    OR m.id = (
+      SELECT x.id FROM mission x
+       WHERE x.repeat_of = m.repeat_of AND x.status = 'active'
+       ORDER BY x.due_date, x.id LIMIT 1
+    )
+  )`);
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   return db.prepare(`${MISSION_SELECT} ${clause} ${order}`).all(...params).map(decorate);
 }
@@ -1226,8 +1239,10 @@ export function getDungeon({ since = null, until = null } = {}) {
 
   const roads = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
+    /* 糧は盤に出さない。食べれば消えるものなので、買った回数だけ節が増えると
+       盤が読めなくなる。装備は物が残り、祭事は見聞が残るので、どちらも節にする。 */
     ...db
-      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL`)
+      .prepare(`SELECT * FROM log WHERE source_mission_id IS NULL AND COALESCE(goods, '') <> 'food'`)
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
