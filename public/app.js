@@ -181,6 +181,15 @@ function shelfHorizon(now = new Date()) {
   return end;
 }
 
+// ホーム下段のストリーム。暦の週ではなく、今日から遡って7日ぶん。
+const STREAM_DAYS = 7;
+
+function streamSince(now = new Date()) {
+  const start = new Date(now);
+  start.setDate(start.getDate() - STREAM_DAYS);
+  return start.toISOString();
+}
+
 const daysUntil = (key) =>
   Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
 
@@ -943,10 +952,12 @@ async function renderHome() {
 
   // 今日から7日先まで。ここまでに期限が来るプロセスを棚に並べる。
   const weekEnd = dateKeyOf(shelfHorizon());
-  const [summary, vault, due] = await Promise.all([
+  const [summary, vault, due, stream] = await Promise.all([
     api('/summary'),
     api('/vault'),
     api(`/missions?status=active&sort=due&due_by=${weekEnd}`),
+    // 今日から7日遡ったぶん。棚と違って先ではなく、もう起きたことを流す。
+    api(`/stream?type=all&since=${encodeURIComponent(streamSince())}&limit=100`),
   ]);
 
   viewEl.innerHTML = `
@@ -993,6 +1004,15 @@ async function renderHome() {
            </div>`
         : ''
     }
+
+    <div class="section-title">この1週間</div>
+    <div class="list">
+      ${
+        stream.length
+          ? stream.map(streamCard).join('')
+          : '<div class="empty">まだ記録がありません</div>'
+      }
+    </div>
 
   `;
 

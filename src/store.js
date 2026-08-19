@@ -225,7 +225,7 @@ export function deleteLog(id) {
 /* ---------- stream ---------- */
 
 // アイデアとログを時系列で混ぜて返す。
-export function listStream({ type = 'all', limit = 200 } = {}) {
+export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
@@ -255,9 +255,14 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
   }
   if (parts.length === 0) return [];
 
+  // since を渡すと、それ以降の日時に絞る。UNION ALL の外側で切るので、種別ごとに書かずに済む。
   const rows = db
-    .prepare(`${parts.join(' UNION ALL ')} ORDER BY at DESC, kind ASC, id DESC LIMIT ?`)
-    .all(int(limit, { min: 1 }));
+    .prepare(`
+      SELECT * FROM (${parts.join(' UNION ALL ')})
+      ${since ? 'WHERE at >= ?' : ''}
+      ORDER BY at DESC, kind ASC, id DESC LIMIT ?
+    `)
+    .all(...(since ? [since] : []), int(limit, { min: 1 }));
 
   const counts = db
     .prepare(`

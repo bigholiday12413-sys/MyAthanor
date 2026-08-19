@@ -38,9 +38,19 @@ function streamType(value, fallback = 'all') {
   return type;
 }
 
+function since(value) {
+  if (value === undefined) return null;
+  if (Number.isNaN(new Date(value).getTime())) {
+    const err = new Error('since must be a date');
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
 api.get('/stream', handle((req, res) => {
   const type = streamType(req.query.type);
-  res.json(store.listStream({ type, limit: req.query.limit ?? 200 }));
+  res.json(store.listStream({ type, limit: req.query.limit ?? 200, since: since(req.query.since) }));
 }));
 
 /* 新規追加（種別を選んでテキストのみ） */
