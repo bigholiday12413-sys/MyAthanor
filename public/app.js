@@ -1690,43 +1690,51 @@ const BUDGET_UI = {
 // 過去は「さらに過去」で伸ばせる。最初から6期ぶん開くと、設定だけで2ページ食う。
 const budgetWindow = { time: 3, money: 3 };
 
+/* 期間ごとの個別設定（特例）。ふだんは値だけを見せて、開けば直せる。
+   全期間ぶんの入力欄を常に並べていたが、実際に上書きするのはごく一部の週だけ。
+   使わない欄まで常設すると「特例」が既定であるかのように見えてしまう。
+   項目（details）として畳んでおき、開いた期間だけがその場で1件ずつ確定する。 */
 function budgetSection(kind, rows) {
   const ui = BUDGET_UI[kind];
   return `
     <div class="section-title">${esc(ui.title)}</div>
-    <form class="panel budget-form" data-kind="${kind}">
+    <div class="panel budget-list" data-kind="${kind}">
       ${rows
         .map(
           (row) => `
-        <div class="budget-row">
-          <div>
-            <div class="budget-key">${esc(row.label)}${
-              row.is_current ? '<span class="badge now">現在</span>' : ''
-            }</div>
+        <details class="settings-item" data-key="${esc(row.key)}">
+          <summary>
+            <span class="settings-item-label">
+              ${esc(row.label)}${row.is_current ? '<span class="badge now">現在</span>' : ''}
+              ${row.source === 'override' ? '<span class="badge override">特例</span>' : ''}
+            </span>
+            <span class="v">${esc(ui.format(row.amount))}</span>
+          </summary>
+          <div class="settings-item-body">
             <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}${
               // 固定費を引く前と後で数が違うので、後のほうも出す。
               // 名前は管の読み取りに合わせる。同じ数を別の名前で呼ばない。
               row.fixed ? ` · 全体 ${esc(ui.format(row.amount))}` : ''
             }</div>
+            <div class="field">
+              <input type="number" min="0" step="${ui.step}"
+                     value="${ui.toInput(row.gross)}"
+                     aria-label="${esc(row.label)} の${esc(ui.unit)}" />
+            </div>
+            <div class="btn-row">
+              <button type="button" class="primary" data-save>保存</button>
+              ${
+                row.source === 'override'
+                  ? '<button type="button" class="ghost" data-reset>既定へ</button>'
+                  : ''
+              }
+            </div>
           </div>
-          <input type="number" min="0" step="${ui.step}"
-                 data-key="${esc(row.key)}"
-                 data-original="${ui.toInput(row.gross)}"
-                 value="${ui.toInput(row.gross)}"
-                 aria-label="${esc(row.label)} の${esc(ui.unit)}" />
-          ${
-            row.source === 'override'
-              ? `<button type="button" class="ghost" data-reset="${esc(row.key)}">既定へ</button>`
-              : '<div class="budget-src">既定</div>'
-          }
-        </div>`,
+        </details>`,
         )
         .join('')}
-      <div class="btn-row">
-        <button type="button" data-more>さらに過去</button>
-        <button type="submit" class="primary">保存</button>
-      </div>
-    </form>
+      <div class="btn-row"><button type="button" class="ghost" data-more>さらに過去</button></div>
+    </div>
   `;
 }
 
@@ -1749,6 +1757,8 @@ async function renderSettings() {
   const fixedTime = fixedOf(timeBudgets);
   const fixedMoney = fixedOf(moneyBudgets);
 
+  /* 既定値の2つ（報酬・冷却）も、期間ごとの個別設定と同じ項目の形にする。
+     常に開いた入力欄を並べず、値だけを見せて、開けば直す。 */
   viewEl.innerHTML = `
     <div class="section-title">週のタイム</div>
     <div class="panel" id="time-grid-panel">
@@ -1776,40 +1786,58 @@ async function renderSettings() {
       <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
     </div>
 
-    <div class="section-title">報酬</div>
-    <form class="panel" id="settings-form">
-      <div class="field">
-        <label for="monthly-money">月あたり（円）</label>
-        <input id="monthly-money" type="number" step="100" min="0" value="${settings.monthly_money}" />
-      </div>
+    <div class="section-title">既定値</div>
+    <div class="panel">
+      <details class="settings-item" id="reward-item">
+        <summary>
+          <span class="settings-item-label">報酬（月あたり）</span>
+          <span class="v">${esc(fmtMoney(settings.monthly_money))}</span>
+        </summary>
+        <div class="settings-item-body">
+          <div class="field">
+            <input id="monthly-money" type="number" step="100" min="0"
+                   value="${settings.monthly_money}" aria-label="報酬（月あたり）の円" />
+          </div>
+          ${
+            fixedMoney
+              ? `<div class="stat-line">
+                   <span>固定費</span>
+                   <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
+                 </div>`
+              : ''
+          }
+          <div class="stat-line">
+            <span>週のウォレット</span>
+            <span class="v" id="weekly-share"></span>
+          </div>
+          <div class="btn-row"><button type="button" class="primary" id="reward-save">保存</button></div>
+        </div>
+      </details>
       ${
-        fixedMoney
-          ? `<div class="stat-line">
-               <span>固定費</span>
-               <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
-             </div>`
+        SHOW.temperature
+          ? `<details class="settings-item" id="cooling-item">
+               <summary>
+                 <span class="settings-item-label">アイデアの冷却</span>
+                 <span class="v">${
+                   settings.cooling_half_life_days
+                     ? `${esc(settings.cooling_half_life_days)}日`
+                     : '冷めない'
+                 }</span>
+               </summary>
+               <div class="settings-item-body">
+                 <div class="field">
+                   <label for="half-life">冷却の半減期（日）</label>
+                   <input id="half-life" type="number" step="1" min="0"
+                          value="${settings.cooling_half_life_days}" />
+                 </div>
+                 <div class="btn-row">
+                   <button type="button" class="primary" id="cooling-save">保存</button>
+                 </div>
+               </div>
+             </details>`
           : ''
       }
-      <div class="stat-line">
-        <span>週のウォレット</span>
-        <span class="v" id="weekly-share"></span>
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>
-
-    ${
-      SHOW.temperature
-        ? `<div class="section-title">アイデアの冷却</div>
-    <form class="panel" id="cooling-form">
-      <div class="field">
-        <label for="half-life">冷却の半減期（日）</label>
-        <input id="half-life" type="number" step="1" min="0"
-               value="${settings.cooling_half_life_days}" />
-      </div>
-      <div class="btn-row"><button type="submit" class="primary">保存</button></div>
-    </form>`
-        : ''
-    }
+    </div>
 
     <div class="section-title">金庫</div>
     <a class="card nav-card" href="#/vault">
@@ -1832,14 +1860,11 @@ async function renderSettings() {
   showShare();
   rewardInput.addEventListener('input', showShare);
 
-  document.getElementById('settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
+  document.getElementById('reward-save').addEventListener('click', async () => {
     try {
       await api('/settings', {
         method: 'PUT',
-        body: {
-          monthly_money: Math.round(Number(document.getElementById('monthly-money').value || 0)),
-        },
+        body: { monthly_money: Math.round(Number(rewardInput.value || 0)) },
       });
       toast('既定値を保存しました');
       await renderSettings();
@@ -1851,8 +1876,7 @@ async function renderSettings() {
   wireTimeGrid(document.getElementById('time-grid-panel'), grid, fixedTime);
 
   if (SHOW.temperature) {
-    document.getElementById('cooling-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
+    document.getElementById('cooling-save').addEventListener('click', async () => {
       try {
         await api('/settings', {
           method: 'PUT',
@@ -1863,51 +1887,46 @@ async function renderSettings() {
           },
         });
         toast('冷却の設定を保存しました');
+        await renderSettings();
       } catch (err) {
         toast(err.message, true);
       }
     });
   }
 
-  for (const form of viewEl.querySelectorAll('.budget-form')) {
-    const kind = form.dataset.kind;
+  // 期間ごとの個別設定。項目を開いて、1件ずつその場で保存する。
+  for (const list of viewEl.querySelectorAll('.budget-list')) {
+    const kind = list.dataset.kind;
     const ui = BUDGET_UI[kind];
 
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const changed = [...form.querySelectorAll('input[data-key]')].filter(
-        (input) => input.value !== input.dataset.original,
-      );
-      if (changed.length === 0) return toast('変更はありません');
+    list.addEventListener('click', async (event) => {
+      const save = event.target.closest('button[data-save]');
+      const reset = event.target.closest('button[data-reset]');
+      const more = event.target.closest('button[data-more]');
+      if (more) {
+        budgetWindow[kind] += 8;
+        await renderSettings();
+        return;
+      }
+      const item = event.target.closest('.settings-item[data-key]');
+      if (!item) return;
+      const key = item.dataset.key;
       try {
-        for (const input of changed) {
-          await api(`/budgets/${kind}/${input.dataset.key}`, {
+        if (save) {
+          const input = item.querySelector('input');
+          await api(`/budgets/${kind}/${key}`, {
             method: 'PUT',
             body: { amount: ui.fromInput(input.value) },
           });
-        }
-        toast(`${changed.length}件の期間を保存しました`);
-        await renderSettings();
-      } catch (err) {
-        toast(err.message, true);
-      }
-    });
-
-    form.addEventListener('click', async (event) => {
-      const reset = event.target.closest('button[data-reset]');
-      if (reset) {
-        try {
-          await api(`/budgets/${kind}/${reset.dataset.reset}`, { method: 'DELETE' });
+          toast('この期間の値を保存しました');
+          await renderSettings();
+        } else if (reset) {
+          await api(`/budgets/${kind}/${key}`, { method: 'DELETE' });
           toast('既定値に戻しました');
           await renderSettings();
-        } catch (err) {
-          toast(err.message, true);
         }
-        return;
-      }
-      if (event.target.closest('button[data-more]')) {
-        budgetWindow[kind] += 8;
-        await renderSettings();
+      } catch (err) {
+        toast(err.message, true);
       }
     });
   }
