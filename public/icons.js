@@ -43,6 +43,19 @@ const PHILOSOPHERS_STONE = {
   },
 };
 
+/* アイデアそのものの終わり＝金色の宝石。賢者の石と同じ形を金で磨き直す。
+   子のプロセスをいくつ完了しても付かない、アイデア自身の締めくくりだけの印。 */
+const PHILOSOPHERS_STONE_GOLD = {
+  rows: PHILOSOPHERS_STONE.rows,
+  palette: {
+    o: '#4a3410', // 縁
+    s: '#fff3c8', // きらめき
+    l: '#e8b23a', // 天面
+    r: '#c9932a', // 本体
+    d: GOLD_DARK, // 側面のファセット
+  },
+};
+
 // ログ（出来事）＝歩いた足跡。
 // くびれは片側だけ削って土踏まずにする。両側から削ると細くなりすぎて足に見えない。
 // 右上が前（右足）、左下が後ろ（左足）で、歩いている向きを出す。
@@ -788,6 +801,7 @@ const CYCLE = {
 
 const SOURCES = {
   stone: PHILOSOPHERS_STONE,
+  'stone-gold': PHILOSOPHERS_STONE_GOLD,
   footsteps: FOOTSTEPS,
   parchment: PARCHMENT,
   hourglass: HOURGLASS,

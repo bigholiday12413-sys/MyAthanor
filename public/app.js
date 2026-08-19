@@ -181,6 +181,15 @@ function shelfHorizon(now = new Date()) {
   return end;
 }
 
+// ホーム下段のストリーム。暦の週ではなく、今日から遡って7日ぶん。
+const STREAM_DAYS = 7;
+
+function streamSince(now = new Date()) {
+  const start = new Date(now);
+  start.setDate(start.getDate() - STREAM_DAYS);
+  return start.toISOString();
+}
+
 const daysUntil = (key) =>
   Math.round((new Date(`${key}T00:00:00`) - new Date(`${todayKey()}T00:00:00`)) / 86_400_000);
 
@@ -322,6 +331,12 @@ function missionCard(mission, { showSource = true } = {}) {
               : ''
         }
         ${mission.is_legacy ? `<span class="badge now">${icon('spark')}レガシー</span>` : ''}
+        ${
+          // アイデアそのものの終わり。子のプロセスとは違う重さなので、金の宝石で目立たせる。
+          mission.is_conclusion
+            ? `<span class="badge now">${icon('stone-gold')}終わり</span>`
+            : ''
+        }
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
@@ -937,10 +952,12 @@ async function renderHome() {
 
   // 今日から7日先まで。ここまでに期限が来るプロセスを棚に並べる。
   const weekEnd = dateKeyOf(shelfHorizon());
-  const [summary, vault, due] = await Promise.all([
+  const [summary, vault, due, stream] = await Promise.all([
     api('/summary'),
     api('/vault'),
     api(`/missions?status=active&sort=due&due_by=${weekEnd}`),
+    // 今日から7日遡ったぶん。棚と違って先ではなく、もう起きたことを流す。
+    api(`/stream?type=all&since=${encodeURIComponent(streamSince())}&limit=100`),
   ]);
 
   viewEl.innerHTML = `
@@ -988,6 +1005,15 @@ async function renderHome() {
         : ''
     }
 
+    <div class="section-title">この1週間</div>
+    <div class="list">
+      ${
+        stream.length
+          ? stream.map(streamCard).join('')
+          : '<div class="empty">まだ記録がありません</div>'
+      }
+    </div>
+
   `;
 
   wireKeeper();
@@ -1016,17 +1042,24 @@ async function renderStream() {
 
 function streamCard(item) {
   const face = faceOf(item);
+  // アイデアそのものの終わりは、子のプロセスの完了とは重さが違うので、
+  // 別を付けていないログの中でもさらに金の宝石で目立たせる。
+  const iconName = item.is_conclusion ? 'stone-gold' : KIND_ICON[face];
+  const label = item.is_conclusion ? '終わり' : KIND_LABEL[face];
   return `
-    <a class="card kind-${esc(face)}" href="#/${esc(item.kind)}/${item.id}">
+    <a class="card kind-${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''}"
+       href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(face)}">${icon(KIND_ICON[face])}${esc(KIND_LABEL[face])}</span>
+        <span class="badge ${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''}">${icon(
+          iconName,
+        )}${esc(label)}</span>
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_mission ? '<span>プロセス由来</span>' : ''}
         ${item.from_repeat ? icon('cycle', 'cycle-mark') : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
       </div>
-      <div class="card-title">${icon(KIND_ICON[face])}<span>${esc(item.title)}</span></div>
+      <div class="card-title">${icon(iconName)}<span>${esc(item.title)}</span></div>
       <div class="card-meta">
         ${
           item.kind === 'log' && (item.time_spent || item.money_spent)
@@ -1416,9 +1449,10 @@ async function renderEntry(kind, entryId) {
   const loose = SHOW.cauldron
     ? entry.missions.filter((mission) => !mission.cauldron_id)
     : entry.missions;
+  // すでに終わりを予定しているなら、押し直させない（終わりは1つでよい）。
+  const concluding = kind === 'idea' && entry.missions.some((m) => m.is_conclusion);
 
-  viewEl.innerHTML = `
-    ${/* いちばん使うのはプロセスを足すこと。1ページ目に置く。 */ ''}
+  const addSection = `
     <div class="section-title">プロセスを追加</div>
     <form class="panel" id="mission-form">
       <div class="field">
@@ -1453,7 +1487,9 @@ async function renderEntry(kind, entryId) {
       </details>
       <div class="btn-row"><button type="submit" class="primary">追加</button></div>
     </form>
+  `;
 
+  const listSection = `
     <div class="section-title">${SHOW.cauldron ? '単独のプロセス' : 'プロセス'}</div>
     <div class="list" id="entry-missions">
       ${
@@ -1462,8 +1498,14 @@ async function renderEntry(kind, entryId) {
           : '<div class="empty">プロセスはありません</div>'
       }
     </div>
+  `;
 
-    <div class="section-title">${KIND_LABEL[kind]} #${entryId}</div>
+  const titleSection = `
+    <div class="section-title">${KIND_LABEL[kind]}${
+      entry.is_conclusion
+        ? `<span class="badge now is-conclusion">${icon('stone-gold')}終わり</span>`
+        : ''
+    }</div>
     <form class="panel" id="entry-form">
       <div class="field">
         <label for="title">タイトル</label>
@@ -1524,9 +1566,28 @@ async function renderEntry(kind, entryId) {
       <div class="btn-row">
         <button type="submit" class="primary">保存</button>
         ${kind === 'log' ? legacyButton('log', entry.id, entry.is_legacy) : ''}
+        ${
+          // アイデアそのものの終わり。子のプロセスをいくつ完了しても付かない締めくくり。
+          kind === 'idea' && !concluding
+            ? `<button type="button" class="ghost" id="idea-conclude">${icon(
+                'stone-gold',
+              )}アイデアを終える</button>`
+            : ''
+        }
         <button type="button" class="ghost danger" id="entry-delete">削除</button>
       </div>
     </form>
+  `;
+
+  viewEl.innerHTML = `
+    ${
+      /* アイデアはプロセスを切り出すのが主な用なので、その入口を先に置く。
+         ログはすでに済んだことの記録なので、まずタイトル側で中身を確かめてから、
+         そこから続けるプロセスを足す順にする。 */
+      kind === 'log'
+        ? `${titleSection}${addSection}${listSection}`
+        : `${addSection}${listSection}${titleSection}`
+    }
 
     ${
       SHOW.cauldron
@@ -1603,6 +1664,16 @@ async function renderEntry(kind, entryId) {
       await api(path, { method: 'DELETE' });
       toast('削除しました');
       location.hash = '#/stream';
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  document.getElementById('idea-conclude')?.addEventListener('click', async () => {
+    try {
+      await api(`/ideas/${entryId}/conclude`, { method: 'POST' });
+      toast('終わりを予定に立てました');
+      await renderEntry(kind, entryId);
     } catch (err) {
       toast(err.message, true);
     }

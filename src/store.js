@@ -225,13 +225,13 @@ export function deleteLog(id) {
 /* ---------- stream ---------- */
 
 // アイデアとログを時系列で混ぜて返す。
-export function listStream({ type = 'all', limit = 200 } = {}) {
+export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
              0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_repeat,
-             i.temperature, i.temperature_at, NULL AS goods
+             i.temperature, i.temperature_at, NULL AS goods, 0 AS is_conclusion
       FROM idea i
     `);
   }
@@ -249,15 +249,20 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
              l.time_spent, l.money_spent,
              CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission,
              CASE WHEN l.repeat_of IS NULL THEN 0 ELSE 1 END AS from_repeat,
-             NULL AS temperature, NULL AS temperature_at, l.goods
+             NULL AS temperature, NULL AS temperature_at, l.goods, l.is_conclusion
       FROM log l ${where}
     `);
   }
   if (parts.length === 0) return [];
 
+  // since を渡すと、それ以降の日時に絞る。UNION ALL の外側で切るので、種別ごとに書かずに済む。
   const rows = db
-    .prepare(`${parts.join(' UNION ALL ')} ORDER BY at DESC, kind ASC, id DESC LIMIT ?`)
-    .all(int(limit, { min: 1 }));
+    .prepare(`
+      SELECT * FROM (${parts.join(' UNION ALL ')})
+      ${since ? 'WHERE at >= ?' : ''}
+      ORDER BY at DESC, kind ASC, id DESC LIMIT ?
+    `)
+    .all(...(since ? [since] : []), int(limit, { min: 1 }));
 
   const counts = db
     .prepare(`
@@ -278,6 +283,7 @@ export function listStream({ type = 'all', limit = 200 } = {}) {
         ...row,
         from_mission: Boolean(row.from_mission),
         from_repeat: Boolean(row.from_repeat),
+        is_conclusion: Boolean(row.is_conclusion),
         current_temperature:
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
@@ -404,6 +410,32 @@ export function getMission(id) {
   return decorate(row);
 }
 
+/* アイデアそのものを終える。子のプロセスと違い、出どころはアイデア自身、
+   題もアイデアのものをそのまま使う。すでに立ててあるなら、それを返す
+   （終わりは1つでよく、押すたびに増える理由がない）。 */
+export function concludeIdea(id) {
+  const idea = db.prepare(`SELECT * FROM idea WHERE id = ?`).get(id);
+  if (!idea) throw notFound('idea');
+
+  const existing = db
+    .prepare(`
+      SELECT id FROM mission
+      WHERE source_type = 'idea' AND source_id = ? AND is_conclusion = 1 AND status = 'active'
+    `)
+    .get(id);
+  if (existing) return getMission(existing.id);
+
+  const { lastInsertRowid } = db
+    .prepare(`
+      INSERT INTO mission
+        (title, source_type, source_id, status, estimated_time, estimated_money,
+         created_at, is_conclusion)
+      VALUES (?, 'idea', ?, 'active', 0, 0, ?, 1)
+    `)
+    .run(idea.title, id, nowIso());
+  return getMission(Number(lastInsertRowid));
+}
+
 // 期限順は「期限のあるものを近い順に、無いものは後ろへ」。
 /* ---------- 繰り返すプロセス ----------
 
@@ -522,9 +554,22 @@ export function isMissionSort(sort) {
 }
 
 export function listMissionsBySource(source_type, source_id) {
+  /* 循環から生えたぶんは、進行中なら**いちばん近い1回だけ**出す（listMissions と同じ）。
+     先まで生やしてあるので、そのまま並べるとアイデア・ログの詳細が同じ用事で
+     何十枚も埋まり、単独のプロセスが押し出される。終わった回と止めた回は記録なので
+     全部出す。 */
   return db
     .prepare(`
       ${MISSION_SELECT} WHERE m.source_type = ? AND m.source_id = ?
+      AND (
+        m.repeat_of IS NULL
+        OR m.status <> 'active'
+        OR m.id = (
+          SELECT x.id FROM mission x
+           WHERE x.repeat_of = m.repeat_of AND x.status = 'active'
+           ORDER BY x.due_date, x.id LIMIT 1
+        )
+      )
       ${MISSION_ORDER.due}
     `)
     .all(source_type, source_id)
@@ -588,8 +633,8 @@ export function completeMission(id) {
       .prepare(`
         INSERT INTO log
           (title, occurred_at, time_spent, money_spent,
-           source_type, source_id, repeat_of, is_legacy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           source_type, source_id, repeat_of, is_legacy, is_conclusion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         mission.title,
@@ -600,6 +645,7 @@ export function completeMission(id) {
         mission.source_id,
         mission.repeat_of,
         mission.is_legacy,
+        mission.is_conclusion,
       );
 
     db.prepare(`DELETE FROM mission WHERE id = ?`).run(id);

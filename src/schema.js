@@ -159,6 +159,10 @@ export const ADDED_COLUMNS = [
   ['log', 'source_id', 'INTEGER'],
   // どの循環の種から来たか。固定費として先に引いてあるので、消費済みには数えない。
   ['log', 'repeat_of', 'INTEGER'],
+  /* アイデアそのものの終わり。子のプロセスではなく、アイデア自体を完了したという印。
+     完了すると金色の宝石としてログに残る。 */
+  ['mission', 'is_conclusion', 'INTEGER NOT NULL DEFAULT 0'],
+  ['log', 'is_conclusion', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。
