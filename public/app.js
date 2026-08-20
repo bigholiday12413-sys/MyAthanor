@@ -50,6 +50,14 @@ function toast(message, isError = false) {
 const minutesToHours = (min) => Math.round((min / 60) * 100) / 100;
 const hoursToMinutes = (hours) => Math.round(Number(hours || 0) * 60);
 
+/* 見積もりタイムの選択肢（時間、30分刻み）。長くても1日で収まることが
+   多いので24時間まで並べる。 */
+function hourOptions(max = 24) {
+  const opts = [0];
+  for (let h = 0.5; h <= max; h += 0.5) opts.push(h);
+  return opts;
+}
+
 function fmtTime(min) {
   const sign = min < 0 ? '-' : '';
   const abs = Math.abs(min);
@@ -1131,12 +1139,15 @@ function openCapture() {
       <div class="field">
         <div class="seg-toggle seg-5" id="kind-toggle">
           ${['idea', 'log', ...GOODS]
-            .map(
-              (kind) => `<button type="button" data-kind="${kind}"
-                aria-pressed="${captureKind === kind}">${icon(KIND_ICON[kind])}${
-                KIND_LABEL[kind]
-              }</button>`,
-            )
+            .map((kind) => {
+              // 素のログは、プロセスを経ずに直接書き留めた済んだこと。
+              // 他の画面ではプロセスの顔（空フラスコ）で出しているので、ここも合わせる。
+              const face = kind === 'log' ? 'process' : kind;
+              return `<button type="button" data-kind="${kind}"
+                aria-pressed="${captureKind === kind}">${icon(KIND_ICON[face])}${
+                KIND_LABEL[face]
+              }</button>`;
+            })
             .join('')}
         </div>
       </div>
@@ -1215,7 +1226,7 @@ function openCapture() {
         body: { kind, title, money_spent: isGoods(kind) ? toYen(money.value) : 0 },
       });
       put = true;
-      toast(`${KIND_LABEL[kind]}を入れました`);
+      toast(`${KIND_LABEL[kind === 'log' ? 'process' : kind]}を入れました`);
       close();
     } catch (err) {
       toast(err.message, true);
@@ -1497,7 +1508,11 @@ async function renderEntry(kind, entryId) {
         <div class="row">
           <div class="field">
             <label for="m-time">タイム（時間）</label>
-            <input id="m-time" type="number" step="0.5" min="0" value="0" />
+            <select id="m-time">
+              ${hourOptions()
+                .map((h) => `<option value="${h}" ${h === 0 ? 'selected' : ''}>${h}</option>`)
+                .join('')}
+            </select>
           </div>
           <div class="field">
             <label for="m-money">ウォレット（円）</label>
