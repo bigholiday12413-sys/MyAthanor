@@ -247,7 +247,7 @@ function missionEdit(mission) {
         <div class="row">
           <div class="field">
             <label for="mt-${id}">タイム（時間）</label>
-            <input id="mt-${id}" type="number" step="0.25" min="0" name="estimated_time"
+            <input id="mt-${id}" type="number" step="0.5" min="0" name="estimated_time"
                    value="${minutesToHours(mission.estimated_time)}" />
           </div>
           <div class="field">
@@ -1463,7 +1463,7 @@ async function renderEntry(kind, entryId) {
         <div class="row">
           <div class="field">
             <label for="m-time">タイム（時間）</label>
-            <input id="m-time" type="number" step="0.25" min="0" value="0" />
+            <input id="m-time" type="number" step="0.5" min="0" value="0" />
           </div>
           <div class="field">
             <label for="m-money">ウォレット（円）</label>
@@ -1540,7 +1540,7 @@ async function renderEntry(kind, entryId) {
              <div class="row">
                <div class="field">
                  <label for="time-spent">消費タイム（時間）</label>
-                 <input id="time-spent" type="number" step="0.25" min="0"
+                 <input id="time-spent" type="number" step="0.5" min="0"
                         value="${minutesToHours(entry.time_spent)}" />
                </div>
                <div class="field">
@@ -1551,10 +1551,25 @@ async function renderEntry(kind, entryId) {
              </div>`
           : ''
       }
-      <div class="field">
-        <label for="at">${kind === 'idea' ? '作成' : '発生'}</label>
-        <input id="at" type="datetime-local" value="${esc(toLocalInput(at))}" />
-      </div>
+      ${
+        // 日付＋時刻の1本の枠（datetime-local）は、機種によって内側の絵が
+        // 縮まずに枠からはみ出す。日付と時刻を別の枠に分け、横に並べもしない
+        // （半分の幅では今度はそれぞれが詰まって欠ける）。
+        (() => {
+          const local = toLocalInput(at);
+          const [dateVal, timeVal] = local ? local.split('T') : ['', ''];
+          return `
+            <div class="field">
+              <label for="at-date">${kind === 'idea' ? '作成' : '発生'}</label>
+              <input id="at-date" type="date" value="${esc(dateVal)}" />
+            </div>
+            <div class="field">
+              <label for="at-time">時刻</label>
+              <input id="at-time" type="time" value="${esc(timeVal)}" />
+            </div>
+          `;
+        })()
+      }
       ${
         entry.source_title
           ? `<div class="stat-line"><span>出どころ</span><span class="v"><a class="link"
@@ -1638,8 +1653,11 @@ async function renderEntry(kind, entryId) {
   document.getElementById('entry-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const body = { title: document.getElementById('title').value.trim() };
-    // 日時も直せる。空にはさせない（日時の無い記録は作らない）。
-    const moment = fromLocalInput(document.getElementById('at').value);
+    // 日時も直せる。空にはさせない（日時の無い記録は作らない）。時刻を空にした
+    // だけなら、日付はそのままに 0時として扱う。
+    const dateVal = document.getElementById('at-date').value;
+    const timeVal = document.getElementById('at-time').value || '00:00';
+    const moment = dateVal ? fromLocalInput(`${dateVal}T${timeVal}`) : null;
     if (moment) body[kind === 'idea' ? 'created_at' : 'occurred_at'] = moment;
     if (kind === 'idea') body.body = document.getElementById('body').value;
     if (kind === 'log') {
