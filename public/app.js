@@ -1583,7 +1583,7 @@ async function renderEntry(kind, entryId) {
             </div>
             <div class="field">
               <label for="at-time">時刻</label>
-              <input id="at-time" type="time" value="${esc(timeVal)}" />
+              <input id="at-time" type="time" step="1800" value="${esc(timeVal)}" />
             </div>
           `;
         })()

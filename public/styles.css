@@ -962,8 +962,20 @@ textarea {
 }
 
 input[type='number'],
-input[type='date'] {
+input[type='date'],
+input[type='time'] {
   font-family: var(--mono);
+}
+
+/* date・time は機種のカレンダー／時計の絵を内側に持っていて、
+   その分の幅を自分で確保する。既定の左右余白のままだと、絵の分だけ
+   縮まずに枠からはみ出す機種がある。min-width は既定の auto を上書きする
+   （auto だと中身の絵の最小幅を守ろうとして縮まない）。 */
+input[type='date'],
+input[type='time'] {
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 6px;
 }
 
 input:focus,
