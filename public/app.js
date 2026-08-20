@@ -58,19 +58,10 @@ function hourOptions(max = 24) {
   return opts;
 }
 
-// 既存の値が刻みから外れていても選択肢に混ぜて残す（時刻の select と同じやり方）。
-function hourOptionsWith(current, max = 24) {
-  const opts = hourOptions(max);
-  if (typeof current === 'number' && !opts.includes(current)) {
-    opts.push(current);
-    opts.sort((a, b) => a - b);
-  }
-  return opts;
-}
-
+// 刻み外れは選ばせず、値そのものを常に30分刻みに揃える（db側で丸め済み）。
 function hourSelect(id, name, current, { max = 24, ariaLabel } = {}) {
   return `<select id="${id}" name="${name}" ${ariaLabel ? `aria-label="${esc(ariaLabel)}"` : ''}>
-    ${hourOptionsWith(current, max)
+    ${hourOptions(max)
       .map((h) => `<option value="${h}" ${h === current ? 'selected' : ''}>${h}</option>`)
       .join('')}
   </select>`;
@@ -108,15 +99,11 @@ function fromLocalInput(value) {
 /* 時刻の30分刻み。input[type=time] の step は機種によって
    選ぶ側の刻みには反映されず（1分刻みのまま）、送るときだけ
    刻み外れとして無効を返す機種があったため、選択式に変えた。
-   既存の値が刻みから外れていても選べるよう、混ぜて足しておく。 */
-function timeOptions(current) {
+   刻み外れは選ばせず、値そのものを常に30分刻みに揃える（db側で丸め済み）。 */
+function timeOptions() {
   const opts = [];
   for (let h = 0; h < 24; h++) {
     for (const m of [0, 30]) opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-  }
-  if (current && !opts.includes(current)) {
-    opts.push(current);
-    opts.sort();
   }
   return opts;
 }
@@ -1632,7 +1619,7 @@ async function renderEntry(kind, entryId) {
               <label for="at-time">時刻</label>
               <select id="at-time">
                 <option value=""></option>
-                ${timeOptions(timeVal)
+                ${timeOptions()
                   .map((t) => `<option value="${esc(t)}" ${t === timeVal ? 'selected' : ''}>${t}</option>`)
                   .join('')}
               </select>

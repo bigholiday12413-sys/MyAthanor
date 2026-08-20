@@ -227,4 +227,22 @@ function applyRewrites(db) {
       WHERE CAST(strftime('%s', ${column}) AS INTEGER) % 1800 != 0
     `);
   }
+
+  /* タイムの入力（見積・消費・タイム予算）も30分刻みの選択式にしたので、
+     刻み外れの選択肢は出さないことにした。出さない以上、既存の値も
+     選ばせる前に丸めておく（最寄りの30分。分は分のまま持つ列なので単位は分＝30）。 */
+  for (const [table, column] of [
+    ['mission', 'estimated_time'],
+    ['log', 'time_spent'],
+    ['settings', 'weekly_time'],
+  ]) {
+    db.exec(`
+      UPDATE ${table} SET ${column} = ((${column} + 15) / 30) * 30
+      WHERE ${column} % 30 != 0
+    `);
+  }
+  db.exec(`
+    UPDATE budget SET amount = ((amount + 15) / 30) * 30
+    WHERE kind = 'time' AND amount % 30 != 0
+  `);
 }
