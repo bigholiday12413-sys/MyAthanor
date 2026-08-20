@@ -50,12 +50,30 @@ function toast(message, isError = false) {
 const minutesToHours = (min) => Math.round((min / 60) * 100) / 100;
 const hoursToMinutes = (hours) => Math.round(Number(hours || 0) * 60);
 
-/* 見積もりタイムの選択肢（時間、30分刻み）。長くても1日で収まることが
+/* タイムの選択肢（時間、30分刻み）。長くても1日で収まることが
    多いので24時間まで並べる。 */
 function hourOptions(max = 24) {
   const opts = [0];
   for (let h = 0.5; h <= max; h += 0.5) opts.push(h);
   return opts;
+}
+
+// 既存の値が刻みから外れていても選択肢に混ぜて残す（時刻の select と同じやり方）。
+function hourOptionsWith(current, max = 24) {
+  const opts = hourOptions(max);
+  if (typeof current === 'number' && !opts.includes(current)) {
+    opts.push(current);
+    opts.sort((a, b) => a - b);
+  }
+  return opts;
+}
+
+function hourSelect(id, name, current, { max = 24, ariaLabel } = {}) {
+  return `<select id="${id}" name="${name}" ${ariaLabel ? `aria-label="${esc(ariaLabel)}"` : ''}>
+    ${hourOptionsWith(current, max)
+      .map((h) => `<option value="${h}" ${h === current ? 'selected' : ''}>${h}</option>`)
+      .join('')}
+  </select>`;
 }
 
 function fmtTime(min) {
@@ -271,8 +289,7 @@ function missionEdit(mission) {
         <div class="row">
           <div class="field">
             <label for="mt-${id}">タイム（時間）</label>
-            <input id="mt-${id}" type="number" step="0.5" min="0" name="estimated_time"
-                   value="${minutesToHours(mission.estimated_time)}" />
+            ${hourSelect(`mt-${id}`, 'estimated_time', minutesToHours(mission.estimated_time))}
           </div>
           <div class="field">
             <label for="mm-${id}">ウォレット（円）</label>
@@ -1589,8 +1606,7 @@ async function renderEntry(kind, entryId) {
              <div class="row">
                <div class="field">
                  <label for="time-spent">消費タイム（時間）</label>
-                 <input id="time-spent" type="number" step="0.5" min="0"
-                        value="${minutesToHours(entry.time_spent)}" />
+                 ${hourSelect('time-spent', 'time-spent', minutesToHours(entry.time_spent))}
                </div>
                <div class="field">
                  <label for="money-spent">消費ウォレット（円）</label>
@@ -1870,18 +1886,20 @@ const BUDGET_UI = {
   time: {
     title: 'タイム（週別）',
     unit: '時間',
-    step: '0.5',
     toInput: (amount) => minutesToHours(amount),
     fromInput: (value) => hoursToMinutes(value),
     format: fmtTime,
+    // 週まるごとを割り当てることもあり得るので、1週間ぶん（168時間）まで並べる。
+    field: (id, label, value) => hourSelect(id, 'amount', value, { max: 168, ariaLabel: `${label} の時間` }),
   },
   money: {
     title: 'ウォレット（週別）',
     unit: '円',
-    step: '100',
     toInput: (amount) => amount,
     fromInput: (value) => Math.round(Number(value || 0)),
     format: fmtMoney,
+    field: (id, label, value) =>
+      `<input id="${id}" type="number" min="0" step="100" value="${value}" aria-label="${esc(label)} の円" />`,
   },
 };
 
@@ -1916,9 +1934,7 @@ function budgetSection(kind, rows) {
               row.fixed ? ` · 全体 ${esc(ui.format(row.amount))}` : ''
             }</div>
             <div class="field">
-              <input type="number" min="0" step="${ui.step}"
-                     value="${ui.toInput(row.gross)}"
-                     aria-label="${esc(row.label)} の${esc(ui.unit)}" />
+              ${ui.field(`budget-${kind}-${esc(row.key)}`, row.label, ui.toInput(row.gross))}
             </div>
             <div class="btn-row">
               <button type="button" class="primary" data-save>保存</button>
@@ -2112,7 +2128,7 @@ async function renderSettings() {
       const key = item.dataset.key;
       try {
         if (save) {
-          const input = item.querySelector('input');
+          const input = item.querySelector('input, select');
           await api(`/budgets/${kind}/${key}`, {
             method: 'PUT',
             body: { amount: ui.fromInput(input.value) },
