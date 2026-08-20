@@ -79,6 +79,22 @@ function fromLocalInput(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/* 時刻の30分刻み。input[type=time] の step は機種によって
+   選ぶ側の刻みには反映されず（1分刻みのまま）、送るときだけ
+   刻み外れとして無効を返す機種があったため、選択式に変えた。
+   既存の値が刻みから外れていても選べるよう、混ぜて足しておく。 */
+function timeOptions(current) {
+  const opts = [];
+  for (let h = 0; h < 24; h++) {
+    for (const m of [0, 30]) opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  }
+  if (current && !opts.includes(current)) {
+    opts.push(current);
+    opts.sort();
+  }
+  return opts;
+}
+
 function fmtDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -1583,7 +1599,12 @@ async function renderEntry(kind, entryId) {
             </div>
             <div class="field">
               <label for="at-time">時刻</label>
-              <input id="at-time" type="time" step="1800" value="${esc(timeVal)}" />
+              <select id="at-time">
+                <option value=""></option>
+                ${timeOptions(timeVal)
+                  .map((t) => `<option value="${esc(t)}" ${t === timeVal ? 'selected' : ''}>${t}</option>`)
+                  .join('')}
+              </select>
             </div>
           `;
         })()
