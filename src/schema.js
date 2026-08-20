@@ -213,4 +213,18 @@ function applyRewrites(db) {
     DELETE FROM mission WHERE status = 'done'
       AND id IN (SELECT source_mission_id FROM log WHERE source_mission_id IS NOT NULL)
   `);
+
+  /* 時刻の入力を30分刻みの選択式にしたので、既存の値も刻みに揃える。
+     最寄りの30分へ丸める（切り捨てだと最大29分ずれる）。
+     揃っている行は WHERE で弾かれるので、毎起動でも実質何もしない。 */
+  for (const [table, column] of [['idea', 'created_at'], ['log', 'occurred_at']]) {
+    db.exec(`
+      UPDATE ${table} SET ${column} = strftime(
+        '%Y-%m-%dT%H:%M:00.000Z',
+        ((CAST(strftime('%s', ${column}) AS INTEGER) + 900) / 1800) * 1800,
+        'unixepoch'
+      )
+      WHERE CAST(strftime('%s', ${column}) AS INTEGER) % 1800 != 0
+    `);
+  }
 }
