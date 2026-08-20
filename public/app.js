@@ -1060,6 +1060,24 @@ function streamCard(item) {
         <span>${esc(fmtDate(item.at))}</span>
       </div>
       <div class="card-title">${icon(iconName)}<span>${esc(item.title)}</span></div>
+      ${
+        // アイデア産のプロセスは、件数の札ではなく実の題をインデントで出す。
+        // 1件ずつの中身は一行で軽く。詳しくはアイデアを開けば札で見える。
+        item.missions && item.missions.length
+          ? `<div class="idea-missions">
+               ${item.missions
+                 .map(
+                   (m) => `
+                 <div class="idea-mission">
+                   ${icon(m.is_conclusion ? 'stone-gold' : 'flask')}
+                   <span>${esc(m.title)}</span>
+                   ${m.cycle ? icon('cycle', 'cycle-mark') : ''}
+                 </div>`,
+                 )
+                 .join('')}
+             </div>`
+          : ''
+      }
       <div class="card-meta">
         ${
           item.kind === 'log' && (item.time_spent || item.money_spent)
@@ -1068,7 +1086,7 @@ function streamCard(item) {
             : ''
         }
         ${
-          item.mission_count
+          item.mission_count && !item.missions
             ? `<span class="${item.active_mission_count ? 'hot' : ''}">プロセス ${item.mission_count}件${
                 item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
               }</span>`
