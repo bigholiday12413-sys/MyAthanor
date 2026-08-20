@@ -797,6 +797,38 @@ body::after {
   height: 18px;
 }
 
+/* アイデア産のプロセス。件数の札ではなく実の題を、字下げで軽く出す。
+   縁の線1本を添えて、アイデアにぶら下がっているとひと目で分かるようにする。 */
+.idea-missions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 0 9px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--line-soft);
+}
+
+.idea-mission {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.idea-mission span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.idea-mission .px {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
 .card-meta {
   display: flex;
   flex-wrap: wrap;

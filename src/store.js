@@ -276,6 +276,11 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   const now = new Date();
   const halfLife = getSettings().cooling_half_life_days;
 
+  /* アイデアのタブでは、件数だけでなく実の題をインデントで出す。
+     一覧をまとめて引くのはここだけなので、アイデアの行ごとに詳細と同じ
+     絞り込み（listMissionsBySource）を呼んでも重くならない。 */
+  const includeMissions = type === 'idea';
+
   return rows
     .map((row) => {
       const c = byKey.get(`${row.kind}:${row.id}`);
@@ -290,6 +295,17 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
             : null,
         mission_count: c ? c.total : 0,
         active_mission_count: c ? c.active : 0,
+        missions:
+          includeMissions && row.kind === 'idea'
+            ? listMissionsBySource('idea', row.id)
+                .filter((m) => m.status === 'active')
+                .map((m) => ({
+                  id: m.id,
+                  title: m.title,
+                  is_conclusion: Boolean(m.is_conclusion),
+                  cycle: Boolean(m.repeat_days || m.repeat_of),
+                }))
+            : undefined,
       };
     });
 }
