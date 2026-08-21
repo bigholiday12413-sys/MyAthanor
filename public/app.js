@@ -1987,37 +1987,44 @@ async function renderSettings() {
   const fixedTime = fixedOf(timeBudgets);
   const fixedMoney = fixedOf(moneyBudgets);
 
-  /* 既定値の2つ（報酬・冷却）も、期間ごとの個別設定と同じ項目の形にする。
+  /* 既定値も、期間ごとの個別設定と同じ項目の形にする。
      常に開いた入力欄を並べず、値だけを見せて、開けば直す。 */
   viewEl.innerHTML = `
-    <div class="section-title">週のタイム</div>
-    <div class="panel" id="time-grid-panel">
-      <div class="tg-top">
-        <span class="tg-total" id="tg-total"></span>
-        ${/* 塗るあいだだけ表が指を取る。ふだんは画面を流せるようにしておく。 */ ''}
-        <button type="button" id="tg-paint" aria-pressed="false">塗る</button>
-        <button type="button" class="ghost" id="tg-clear">全部消す</button>
-      </div>
-      ${timeGridMarkup(grid)}
-      ${
-        /* 塗りが無いときは出さない。この行は塗った枚数から引いた数なので、
-           数字で持っている週のタイムとは食い違う。 */
-        fixedTime && settings.time_grid
-          ? `<div class="stat-line">
-               <span>固定費</span>
-               <span class="v neg">−${esc(fmtTime(fixedTime))}</span>
-             </div>
-             <div class="stat-line">
-               <span>使える量</span>
-               <span class="v" id="time-net"></span>
-             </div>`
-          : ''
-      }
-      <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
-    </div>
-
     <div class="section-title">既定値</div>
     <div class="panel">
+      ${/* 週のタイムも既定値のひとつなので、他と同じ項目の形に置く。
+           常に開いていると表だけで画面の半分以上を覆い、値を見に来ただけの
+           ときにも塗る面が立ちはだかる。 */ ''}
+      <details class="settings-item" id="time-grid-item">
+        <summary>
+          <span class="settings-item-label">週のタイム</span>
+          <span class="v">${esc(fmtTime(settings.weekly_time))}</span>
+        </summary>
+        <div class="settings-item-body" id="time-grid-panel">
+          <div class="tg-top">
+            <span class="tg-total" id="tg-total"></span>
+            ${/* 塗るあいだだけ表が指を取る。ふだんは画面を流せるようにしておく。 */ ''}
+            <button type="button" id="tg-paint" aria-pressed="false">塗る</button>
+            <button type="button" class="ghost" id="tg-clear">全部消す</button>
+          </div>
+          ${timeGridMarkup(grid)}
+          ${
+            /* 塗りが無いときは出さない。この行は塗った枚数から引いた数なので、
+               数字で持っている週のタイムとは食い違う。 */
+            fixedTime && settings.time_grid
+              ? `<div class="stat-line">
+                   <span>固定費</span>
+                   <span class="v neg">−${esc(fmtTime(fixedTime))}</span>
+                 </div>
+                 <div class="stat-line">
+                   <span>使える量</span>
+                   <span class="v" id="time-net"></span>
+                 </div>`
+              : ''
+          }
+          <div class="btn-row"><button type="button" class="primary" id="tg-save">保存</button></div>
+        </div>
+      </details>
       <details class="settings-item" id="reward-item">
         <summary>
           <span class="settings-item-label">報酬（月あたり）</span>
