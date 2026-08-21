@@ -2011,6 +2011,16 @@ async function renderSettings() {
           </div>
           ${timeGridMarkup(grid)}
           ${
+            /* 塗りが無くても数値で設定した値が残っていれば、そちらを注記に出す。
+               塗って保存するまで置き換わらない。 */
+            !settings.time_grid && settings.weekly_time
+              ? `<div class="stat-line" style="opacity: 0.7; font-size: 0.875em">
+                   <span>週のタイム（現在）</span>
+                   <span class="v">${esc(fmtTime(settings.weekly_time))}</span>
+                 </div>`
+              : ''
+          }
+          ${
             /* 塗りが無いときは出さない。この行は塗った枚数から引いた数なので、
                数字で持っている週のタイムとは食い違う。 */
             fixedTime && settings.time_grid
