@@ -214,35 +214,51 @@ function applyRewrites(db) {
       AND id IN (SELECT source_mission_id FROM log WHERE source_mission_id IS NOT NULL)
   `);
 
-  /* 時刻の入力を30分刻みの選択式にしたので、既存の値も刻みに揃える。
-     最寄りの30分へ丸める（切り捨てだと最大29分ずれる）。
-     揃っている行は WHERE で弾かれるので、毎起動でも実質何もしない。 */
+  /* 30分刻みへ揃えるのは記録の見た目を整えるだけの直しで、
+     これができないからといって起動を止める理由が無い。
+     applySchema は db.js の読み込みで走るため、ここで投げると
+     サーバごと立ち上がらなくなる。見送っても他の直しと列は入っている。 */
+  try {
+    alignToHalfHour(db);
+  } catch (err) {
+    console.warn('30分刻みへの整えを見送りました:', err.message);
+  }
+}
+
+/* 入力を30分刻みの選択式にし、刻み外れの選択肢を出さないことにしたので、
+   既存の値のほうを刻みに揃える。最寄りの30分へ丸める
+   （切り捨てだと最大29分ずれる）。
+   揃っている行は WHERE で弾かれるので、毎起動でも実質何もしない。 */
+function alignToHalfHour(db) {
+  /* 日時。丸めた先が SQLite で表せない日付（年9999の直前など）になる行は、
+     strftime が NULL を返す。日時の列は NOT NULL なので、そのまま入れると
+     起動が落ちる。COALESCE で元の値に落とし、その行だけ揃えないでおく。 */
   for (const [table, column] of [['idea', 'created_at'], ['log', 'occurred_at']]) {
     db.exec(`
-      UPDATE ${table} SET ${column} = strftime(
+      UPDATE ${table} SET ${column} = COALESCE(strftime(
         '%Y-%m-%dT%H:%M:00.000Z',
         ((CAST(strftime('%s', ${column}) AS INTEGER) + 900) / 1800) * 1800,
         'unixepoch'
-      )
+      ), ${column})
       WHERE CAST(strftime('%s', ${column}) AS INTEGER) % 1800 != 0
     `);
   }
 
-  /* タイムの入力（見積・消費・タイム予算）も30分刻みの選択式にしたので、
-     刻み外れの選択肢は出さないことにした。出さない以上、既存の値も
-     選ばせる前に丸めておく（最寄りの30分。分は分のまま持つ列なので単位は分＝30）。 */
+  /* 分の列（見積・消費・タイム予算）。CAST で整数に落としてから掛ける。
+     SQLite の / は片方が小数だと小数のままなので、落とさないと
+     丸めた値がまた刻みから外れ、起動のたびに増え続ける。 */
   for (const [table, column] of [
     ['mission', 'estimated_time'],
     ['log', 'time_spent'],
     ['settings', 'weekly_time'],
   ]) {
     db.exec(`
-      UPDATE ${table} SET ${column} = ((${column} + 15) / 30) * 30
+      UPDATE ${table} SET ${column} = CAST((${column} + 15) / 30 AS INTEGER) * 30
       WHERE ${column} % 30 != 0
     `);
   }
   db.exec(`
-    UPDATE budget SET amount = ((amount + 15) / 30) * 30
+    UPDATE budget SET amount = CAST((amount + 15) / 30 AS INTEGER) * 30
     WHERE kind = 'time' AND amount % 30 != 0
   `);
 }
