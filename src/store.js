@@ -263,26 +263,45 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
     `)
     .all(...(since ? [since] : []), int(limit, { min: 1 }));
 
-  const counts = db
-    .prepare(`
-      SELECT source_type, source_id, COUNT(*) AS total,
-             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active
-      FROM mission GROUP BY source_type, source_id
-    `)
-    .all();
-  const byKey = new Map(counts.map((c) => [`${c.source_type}:${c.source_id}`, c]));
-
   const now = new Date();
   const halfLife = getSettings().cooling_half_life_days;
 
-  /* アイデアのタブでは、件数だけでなく実の題をインデントで出す。
-     一覧をまとめて引くのはここだけなので、アイデアの行ごとに詳細と同じ
-     絞り込み（listMissionsBySource）を呼んでも重くならない。 */
-  const includeMissions = type === 'idea';
+  /* 札には件数ではなく実の題をインデントで出す。「プロセス3件」だけでは
+     何をやる気だったか思い出せないため。アイデアのタブでだけ題を出していたので、
+     同じ札がホームでは件数、タブでは題という二通りの見え方になっていた。
+     どの札も同じ規則で、進行中のぶんの題を連れて出す。
+
+     件数を数えていたときと同じく1回で引いてから配る。行ごとに引くと、
+     プロセスを持たない札のほうが多いログの絞り込みで、空の配列を得るために
+     行の数だけ叩くことになる。循環の絞り込みは詳細と同じ（いちばん近い1回だけ）。 */
+  const activeBySource = new Map();
+  for (const m of db
+    .prepare(`
+      ${MISSION_SELECT}
+      WHERE m.status = 'active'
+        AND (
+          m.repeat_of IS NULL
+          OR m.id = (
+            SELECT x.id FROM mission x
+             WHERE x.repeat_of = m.repeat_of AND x.status = 'active'
+             ORDER BY x.due_date, x.id LIMIT 1
+          )
+        )
+      ${MISSION_ORDER.due}
+    `)
+    .all()) {
+    const key = `${m.source_type}:${m.source_id}`;
+    if (!activeBySource.has(key)) activeBySource.set(key, []);
+    activeBySource.get(key).push({
+      id: m.id,
+      title: m.title,
+      is_conclusion: Boolean(m.is_conclusion),
+      cycle: Boolean(m.repeat_days || m.repeat_of),
+    });
+  }
 
   return rows
     .map((row) => {
-      const c = byKey.get(`${row.kind}:${row.id}`);
       return {
         ...row,
         from_repeat: Boolean(row.from_repeat),
@@ -291,19 +310,7 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
           row.kind === 'idea'
             ? coolTemperature(row.temperature, row.temperature_at ?? row.at, now, halfLife)
             : null,
-        mission_count: c ? c.total : 0,
-        active_mission_count: c ? c.active : 0,
-        missions:
-          includeMissions && row.kind === 'idea'
-            ? listMissionsBySource('idea', row.id)
-                .filter((m) => m.status === 'active')
-                .map((m) => ({
-                  id: m.id,
-                  title: m.title,
-                  is_conclusion: Boolean(m.is_conclusion),
-                  cycle: Boolean(m.repeat_days || m.repeat_of),
-                }))
-            : undefined,
+        missions: activeBySource.get(`${row.kind}:${row.id}`) ?? [],
       };
     });
 }
