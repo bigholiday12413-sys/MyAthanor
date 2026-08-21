@@ -334,7 +334,9 @@ function missionEdit(mission) {
         }
         <div class="btn-row">
           <button type="submit">保存</button>
-          <button type="button" class="ghost danger" data-act="delete" data-id="${id}">削除</button>
+          <button type="button" class="ghost danger" data-act="delete" data-id="${id}"${
+            seed ? ' data-seed="1"' : ''
+          }>削除</button>
         </div>
       </form>
     </details>
@@ -472,11 +474,10 @@ function wireMissionActions(container, onChanged) {
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     const { act, id } = button.dataset;
-    if (
-      act === 'delete' &&
-      !confirm('このプロセスを消しますか？（循環の種なら、生えたぶんも消えます）')
-    ) {
-      return;
+    if (act === 'delete') {
+      // 種かどうかはこちらが知っている。「循環の種なら」と条件を人に判じさせない。
+      const also = button.dataset.seed ? '（生えたぶんも消えます）' : '';
+      if (!confirm(`このプロセスを消しますか？${also}`)) return;
     }
     button.disabled = true;
     try {
@@ -486,7 +487,7 @@ function wireMissionActions(container, onChanged) {
         return await onChanged();
       }
       await api(`/missions/${id}/${act}`, { method: 'POST' });
-      toast('完了：ログを生成しました');
+      toast('ログへ移りました');
       await onChanged();
     } catch (err) {
       toast(err.message, true);
@@ -1397,7 +1398,7 @@ function wireCauldrons(container, entryId, kind) {
             due_date: dates.elements.due_date.value || null,
           },
         });
-        toast('大釜の日付を保存しました');
+        toast('保存しました');
         await reload();
       } catch (err) {
         toast(err.message, true);
@@ -1441,7 +1442,7 @@ function wireCauldrons(container, entryId, kind) {
       } else {
         if (!confirm(`大釜「${drop.dataset.name}」を捨てますか？（素材は単独のプロセスとして残ります）`)) return;
         await api(`/cauldrons/${drop.dataset.drop}`, { method: 'DELETE' });
-        toast('大釜を捨てました');
+        toast('捨てました');
       }
       await reload();
     } catch (err) {
@@ -1505,7 +1506,7 @@ function wireTemperature(idea, entryId) {
         method: 'PATCH',
         body: { temperature: Number(range.value) },
       });
-      toast('熱を入れ直しました');
+      toast('保存しました');
       await renderEntry('idea', entryId);
     } catch (err) {
       toast(err.message, true);
@@ -1806,7 +1807,7 @@ async function renderEntry(kind, entryId) {
             due_date: document.getElementById('c-to').value || null,
           },
         });
-        toast('大釜を用意しました');
+        toast('用意しました');
         await renderEntry(kind, entryId);
       } catch (err) {
         toast(err.message, true);
@@ -1832,7 +1833,7 @@ async function renderEntry(kind, entryId) {
           due_date: document.getElementById('m-to').value || null,
         },
       });
-      toast('プロセスを追加しました');
+      toast('追加しました');
       await renderEntry(kind, entryId);
     } catch (err) {
       toast(err.message, true);
@@ -1878,7 +1879,8 @@ async function renderMissions() {
     </div>
     <div class="panel tight">
       <div class="stat-line">
-        <span>${items.length}件</span>
+        ${/* 件数は札の数そのものなので書かない。合計は見ても数えられないので残す。 */ ''}
+        <span class="spacer"></span>
         <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
       </div>
     </div>
@@ -2101,7 +2103,7 @@ async function renderSettings() {
         method: 'PUT',
         body: { monthly_money: Math.round(Number(rewardInput.value || 0)) },
       });
-      toast('既定値を保存しました');
+      toast('保存しました');
       await renderSettings();
     } catch (err) {
       toast(err.message, true);
@@ -2121,7 +2123,7 @@ async function renderSettings() {
             ),
           },
         });
-        toast('冷却の設定を保存しました');
+        toast('保存しました');
         await renderSettings();
       } catch (err) {
         toast(err.message, true);
@@ -2153,7 +2155,7 @@ async function renderSettings() {
             method: 'PUT',
             body: { amount: ui.fromInput(input.value) },
           });
-          toast('この期間の値を保存しました');
+          toast('保存しました');
           await renderSettings();
         } else if (reset) {
           await api(`/budgets/${kind}/${key}`, { method: 'DELETE' });
@@ -2236,7 +2238,7 @@ async function renderVault() {
           vault_initial: Math.round(Number(document.getElementById('vault-initial').value || 0)),
         },
       });
-      toast('初期残高を保存しました');
+      toast('保存しました');
       await renderVault();
     } catch (err) {
       toast(err.message, true);
@@ -2350,7 +2352,7 @@ function wireTimeGrid(root, initial, fixed = 0) {
   root.querySelector('#tg-save').addEventListener('click', async () => {
     try {
       await api('/settings/time-grid', { method: 'PUT', body: { grid: grid.join('') } });
-      toast('週のタイムを保存しました');
+      toast('保存しました');
       await renderSettings();
     } catch (err) {
       toast(err.message, true);
