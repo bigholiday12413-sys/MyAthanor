@@ -378,7 +378,7 @@ function missionCard(mission, { showSource = true } = {}) {
          data-mission="${mission.id}">
       <div class="card-top">
         ${/* 絵は題の頭に出しているので、札には状態だけを持たせる。
-             ログの札と見分けが付くことは、題の頭のフラスコと太い左縁が担う。 */ ''}
+             ログの札と見分けが付くことは、題の頭の絵と太い左縁が担う。 */ ''}
         <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
         ${
           due
@@ -389,15 +389,17 @@ function missionCard(mission, { showSource = true } = {}) {
         }
         ${mission.is_legacy ? `<span class="badge now">${icon('spark')}レガシー</span>` : ''}
         ${
-          // アイデアそのものの終わり。子のプロセスとは違う重さなので、金の宝石で目立たせる。
-          mission.is_conclusion
-            ? `<span class="badge now">${icon('stone-gold')}終わり</span>`
-            : ''
+          // 金の宝石は題の頭に出したので、札には語だけを持たせる。
+          mission.is_conclusion ? '<span class="badge now">終わり</span>' : ''
         }
         <span class="spacer"></span>
         <span>${esc(fmtDate(done ? mission.completed_at : mission.created_at))}</span>
       </div>
-      <div class="card-title">${icon(KIND_ICON.mission)}<span>${esc(mission.title)}</span>${
+      ${/* アイデアそのものの終わりは、アイデアがそのままプロセスになったもの。
+           子のプロセスとは出自が違うので、フラスコではなく金の宝石で出す。 */ ''}
+      <div class="card-title">${icon(
+        mission.is_conclusion ? 'stone-gold' : KIND_ICON.mission,
+      )}<span>${esc(mission.title)}</span>${
         // 種そのものと、種から生えたものに循環の印を添える。
         mission.repeat_days || mission.repeat_of ? icon('cycle', 'cycle-mark') : ''
       }</div>
