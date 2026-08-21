@@ -226,6 +226,8 @@ export function deleteLog(id) {
 
 // アイデアとログを時系列で混ぜて返す。
 export function listStream({ type = 'all', limit = 200, since = null } = {}) {
+  // 札には生えたぶんだけを出すので、先に生やしておく（listMissions と同じ契機）。
+  growRepeats();
   const parts = [];
   if (type === 'all' || type === 'idea') {
     parts.push(`
@@ -273,12 +275,17 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
 
      件数を数えていたときと同じく1回で引いてから配る。行ごとに引くと、
      プロセスを持たない札のほうが多いログの絞り込みで、空の配列を得るために
-     行の数だけ叩くことになる。循環の絞り込みは詳細と同じ（いちばん近い1回だけ）。 */
+     行の数だけ叩くことになる。
+
+     循環は**生えたぶんだけ**を出す（いちばん近い1回）。種も並べると、
+     一行しか出さない札の上では同じ題が2つ並んで見分けが付かない。
+     種そのものは詳細の一覧に居るので、周期を直す道は塞がらない。 */
   const activeBySource = new Map();
   for (const m of db
     .prepare(`
       ${MISSION_SELECT}
       WHERE m.status = 'active'
+        AND m.repeat_days IS NULL
         AND (
           m.repeat_of IS NULL
           OR m.id = (
