@@ -1120,7 +1120,7 @@ function streamCard(item) {
       ${
         // アイデア産のプロセスは、件数の札ではなく実の題をインデントで出す。
         // 1件ずつの中身は一行で軽く。詳しくはアイデアを開けば札で見える。
-        item.missions && item.missions.length
+        item.missions?.length
           ? `<div class="idea-missions">
                ${item.missions
                  .map(
@@ -1140,13 +1140,6 @@ function streamCard(item) {
           item.kind === 'log' && (item.time_spent || item.money_spent)
             ? `<span>${esc(fmtTime(item.time_spent))}</span>
                <span>${esc(fmtMoney(item.money_spent))}</span>`
-            : ''
-        }
-        ${
-          item.mission_count && !item.missions
-            ? `<span class="${item.active_mission_count ? 'hot' : ''}">プロセス ${item.mission_count}件${
-                item.active_mission_count ? `（進行中 ${item.active_mission_count}）` : ''
-              }</span>`
             : ''
         }
       </div>
