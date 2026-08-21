@@ -214,6 +214,18 @@ function setActiveTab(tab) {
   }
 }
 
+/* 詳細を開く前に居た一覧。詳細はどの一覧からも開けるので、
+   戻る先とどのタブに居ることにするかを、開いた側から引き継ぐ。
+   ＋ はホームにしか無いので、書き留めてから直すまでがホームの中で閉じる。
+   既定をホームにしてあるのは、詳細のURLを直接開いたときの行き先。 */
+let entryOrigin = { tab: 'home', href: '#/home' };
+
+// 札の並ぶ画面を出すたび、そこを詳細の帰り先として覚えておく。
+function markOrigin(tab, href) {
+  entryOrigin = { tab, href };
+  setActiveTab(tab);
+}
+
 // タブのドット絵は起動時に一度だけ流し込む。
 for (const el of tabsEl.querySelectorAll('.tab-mark')) {
   el.innerHTML = icon(el.dataset.icon);
@@ -977,7 +989,7 @@ function shelf(missions, weekEnd) {
 const TUBE_LABEL = { time: 'タイム', money: 'ウォレット' };
 
 async function renderUsed(kind) {
-  setActiveTab('home');
+  markOrigin('home', `#/used?kind=${kind}`);
   setTopbar({ title: `ユーズド・${TUBE_LABEL[kind]}`, back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
@@ -1016,7 +1028,7 @@ async function renderUsed(kind) {
 }
 
 async function renderHome() {
-  setActiveTab('home');
+  markOrigin('home', '#/home');
   // アプリの名前は毎回読むものではないので出さない。設定へ入る鍵だけ置く。
   setTopbar({
     action:
@@ -1100,7 +1112,7 @@ async function renderHome() {
    行ったこと（ログ）はプロセスと同じ画面へ移した。予定と実績は同じものの
    前後の姿なので、離して置くと行き来のたびにタブをまたぐことになる。 */
 async function renderStream() {
-  setActiveTab('stream');
+  markOrigin('stream', '#/stream');
   // タブが「アイデア」と名乗っているので、上では名乗らない。
   setTopbar();
 
@@ -1546,11 +1558,14 @@ function wireTemperature(idea, entryId) {
 }
 
 async function renderEntry(kind, entryId) {
-  setActiveTab('stream');
+  /* 詳細はどの一覧からも開けるので、開いた側のタブに居るままにする。
+     アイデアのタブに固定していたが、＋ はホームにしか無いので、
+     書き留めたものを直そうとするたびに別のタブへ移されていた。 */
+  setActiveTab(entryOrigin.tab);
   /* 名乗るのは下の見出し（section-title）に一本化する。アイデアでは題の枠が
      プロセスの後ろに来るので、そこに見出しが無いと宙に浮いて見える。
      上のバーは戻る矢印だけを持つ。 */
-  setTopbar({ back: '#/stream' });
+  setTopbar({ back: entryOrigin.href });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
@@ -1828,7 +1843,7 @@ async function renderEntry(kind, entryId) {
     try {
       await api(path, { method: 'DELETE' });
       toast('削除しました');
-      location.hash = '#/stream';
+      location.hash = entryOrigin.href;
     } catch (err) {
       toast(err.message, true);
     }
@@ -1923,7 +1938,7 @@ async function renderEntry(kind, entryId) {
 let logFilter = 'process';
 
 async function renderMissions() {
-  setActiveTab('missions');
+  markOrigin('missions', `#/missions?sub=${logFilter}`);
   // タブが「ログ」と名乗っているので、上では名乗らない。
   setTopbar();
 
@@ -2946,7 +2961,7 @@ function wireBoard() {
 let dungeonRange = null;
 
 async function renderDungeon() {
-  setActiveTab('dungeon');
+  markOrigin('dungeon', '#/dungeon');
   /* ふだんは名乗らない（タブが名乗っている）。過去の盤を見ている間だけ出す。
      これは名前ではなく「いまどの盤を見ているか」という状態なので、書く値がある。 */
   setTopbar(dungeonRange ? { title: 'エフェメリス' } : {});
