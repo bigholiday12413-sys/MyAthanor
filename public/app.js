@@ -58,11 +58,16 @@ function hourOptions(max = 24) {
   return opts;
 }
 
-// 刻み外れは選ばせず、値そのものを常に30分刻みに揃える（db側で丸め済み）。
+/* 刻み外れは選ばせず、値そのものを常に30分刻みに揃える（db側で丸め済み）。
+   ただし、いまの値が選択肢に無いとブラウザは黙って先頭（0）を選ぶ。
+   そのまま保存すると、開いただけの札が0になってしまう。
+   24時間を超える見積もりや、丸めを見送った行がこれに当たるので、
+   刻みは30分のまま、いまの値が入る所まで並びを伸ばして必ず選ばせる。 */
 function hourSelect(id, name, current, { max = 24, ariaLabel } = {}) {
+  const snapped = Math.max(0, Math.round(Number(current || 0) * 2) / 2);
   return `<select id="${id}" name="${name}" ${ariaLabel ? `aria-label="${esc(ariaLabel)}"` : ''}>
-    ${hourOptions(max)
-      .map((h) => `<option value="${h}" ${h === current ? 'selected' : ''}>${h}</option>`)
+    ${hourOptions(Math.max(max, snapped))
+      .map((h) => `<option value="${h}" ${h === snapped ? 'selected' : ''}>${h}</option>`)
       .join('')}
   </select>`;
 }
@@ -106,6 +111,17 @@ function timeOptions() {
     for (const m of [0, 30]) opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
   }
   return opts;
+}
+
+/* 刻みから外れた時刻（丸めを見送った行）を最寄りの30分へ寄せて選ばせる。
+   選択肢に無いとブラウザは空欄を選び、そのまま保存すると0時になる。
+   繰り上げで日が変わってしまわないよう、23:30 で止める。 */
+function snapTimeValue(value) {
+  const parts = /^(\d{1,2}):(\d{2})/.exec(value ?? '');
+  if (!parts) return '';
+  const total = Number(parts[1]) * 60 + Number(parts[2]);
+  const snapped = Math.min(Math.round(total / 30) * 30, 23 * 60 + 30);
+  return `${String(Math.floor(snapped / 60)).padStart(2, '0')}:${String(snapped % 60).padStart(2, '0')}`;
 }
 
 function fmtDate(iso) {
@@ -1609,7 +1625,8 @@ async function renderEntry(kind, entryId) {
         // （半分の幅では今度はそれぞれが詰まって欠ける）。
         (() => {
           const local = toLocalInput(at);
-          const [dateVal, timeVal] = local ? local.split('T') : ['', ''];
+          const [dateVal, rawTime] = local ? local.split('T') : ['', ''];
+          const timeVal = snapTimeValue(rawTime);
           return `
             <div class="field">
               <label for="at-date">${kind === 'idea' ? '作成' : '発生'}</label>
