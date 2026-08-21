@@ -559,7 +559,7 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
           ${
             /* 固定費。繰り返すぶんは先にここで引いてあるので、消費済みにも
                消費予定にも出てこない。引かれた覚えのない数字にならないよう、
-               全体のすぐ上に置いて、引き算の途中だと読めるようにする。 */
+               使える量のすぐ上に置いて、引き算の途中だと読めるようにする。 */
             data.fixed
               ? `<div class="readout-row">
                    <span class="k">固定費</span>
@@ -568,7 +568,7 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
               : ''
           }
           <div class="readout-row">
-            <span class="k">全体</span>
+            <span class="k">使える量</span>
             <span class="v ${data.budget < 0 ? 'neg' : ''}">${esc(format(data.budget))}</span>
           </div>
         </div>
@@ -1951,7 +1951,7 @@ function budgetSection(kind, rows) {
             <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}${
               // 固定費を引く前と後で数が違うので、後のほうも出す。
               // 名前は管の読み取りに合わせる。同じ数を別の名前で呼ばない。
-              row.fixed ? ` · 全体 ${esc(ui.format(row.amount))}` : ''
+              row.fixed ? ` · 使える量 ${esc(ui.format(row.amount))}` : ''
             }</div>
             <div class="field">
               ${ui.field(`budget-${kind}-${esc(row.key)}`, row.label, ui.toInput(row.gross))}
@@ -2013,7 +2013,7 @@ async function renderSettings() {
                <span class="v neg">−${esc(fmtTime(fixedTime))}</span>
              </div>
              <div class="stat-line">
-               <span>週のタイム</span>
+               <span>使える量</span>
                <span class="v" id="time-net"></span>
              </div>`
           : ''
@@ -2042,7 +2042,7 @@ async function renderSettings() {
               : ''
           }
           <div class="stat-line">
-            <span>週のウォレット</span>
+            <span>使える量</span>
             <span class="v" id="weekly-share"></span>
           </div>
           <div class="btn-row"><button type="button" class="primary" id="reward-save">保存</button></div>
@@ -2213,7 +2213,7 @@ async function renderVault() {
         <div class="vault-row">
           <div>
             <div class="vault-month">${esc(week.label)}</div>
-            <div class="vault-detail">全体 ${esc(fmtMoney(week.budget))} − 消費 ${esc(
+            <div class="vault-detail">使える量 ${esc(fmtMoney(week.budget))} − 消費 ${esc(
               fmtMoney(week.consumed),
             )}</div>
           </div>
