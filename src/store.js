@@ -230,7 +230,7 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
-             0 AS time_spent, 0 AS money_spent, 0 AS from_mission, 0 AS from_repeat,
+             0 AS time_spent, 0 AS money_spent, 0 AS from_repeat,
              i.temperature, i.temperature_at, NULL AS goods, 0 AS is_conclusion
       FROM idea i
     `);
@@ -247,7 +247,6 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent,
-             CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission,
              CASE WHEN l.repeat_of IS NULL THEN 0 ELSE 1 END AS from_repeat,
              NULL AS temperature, NULL AS temperature_at, l.goods, l.is_conclusion
       FROM log l ${where}
@@ -286,7 +285,6 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
       const c = byKey.get(`${row.kind}:${row.id}`);
       return {
         ...row,
-        from_mission: Boolean(row.from_mission),
         from_repeat: Boolean(row.from_repeat),
         is_conclusion: Boolean(row.is_conclusion),
         current_temperature:
@@ -1383,14 +1381,12 @@ export function getUsed(kind, now = new Date()) {
 
   const rows = db
     .prepare(`
-      SELECT l.id, l.title, l.goods, l.time_spent AS value,
-             CASE WHEN l.source_type IS NULL THEN 0 ELSE 1 END AS from_mission
+      SELECT l.id, l.title, l.goods, l.time_spent AS value
       FROM log l ${NOT_FROM_REPEAT}
         AND l.occurred_at >= ? AND l.occurred_at < ? AND l.time_spent > 0
       ORDER BY l.time_spent DESC, l.id DESC
     `)
-    .all(period.start, period.end)
-    .map((row) => ({ ...row, from_mission: Boolean(row.from_mission) }));
+    .all(period.start, period.end);
   return { kind, period, total: rows.reduce((sum, row) => sum + row.value, 0), rows };
 }
 
