@@ -163,6 +163,13 @@ export const ADDED_COLUMNS = [
      完了すると金色の宝石としてログに残る。 */
   ['mission', 'is_conclusion', 'INTEGER NOT NULL DEFAULT 0'],
   ['log', 'is_conclusion', 'INTEGER NOT NULL DEFAULT 0'],
+  /* 入ってきた額。出ていく額（money_spent）と同じ列に入れると、
+     消費済みを数えている場所すべてが収入を出費として拾ってしまう。
+     列を分けておけば、今までの合計は何も直さなくても正しいままになる。 */
+  ['log', 'money_gained', 'INTEGER NOT NULL DEFAULT 0'],
+  /* 装備を失った日時。NULL なら手元にある。
+     糧は食べれば消え、祭事は見聞が残るだけなので、失えるのは装備だけ。 */
+  ['log', 'lost_at', 'TEXT'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。

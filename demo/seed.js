@@ -191,11 +191,27 @@ export function seed(db, transaction) {
     }
     bought('剪定鋏', 6, 4200, 'gear');
     bought('鉄瓶', 13, 5600, 'gear');
-    bought('作業用の前掛け', 24, 3600, 'gear');
+    const apron = bought('作業用の前掛け', 24, 3600, 'gear');
+    /* 失った装備。払った額はそのままにして、持ち物から外れた印だけを立てる。
+       兜の中身が抜けて出るので、棚の並びで「もう無い」と読める。 */
+    run(`UPDATE log SET lost_at = ? WHERE id = ?`, iso(3), apron);
     // 祭事＝その場限りのもの。物は残らないが、消えたわけでもない。
     bought('陶器市', 1, 5800, 'feast');
     bought('薪能', 11, 4500, 'feast');
     bought('友人の祝い', 21, 8000, 'feast');
+
+    /* 収入＝入ってきたぶん。報酬と違って来た週にだけ効くので、
+       その週の使える量が増えているのが管で見える。 */
+    const gained = (title, days, money) =>
+      run(
+        `INSERT INTO log (title, occurred_at, time_spent, money_spent, money_gained, goods)
+         VALUES (?, ?, 0, 0, ?, 'income')`,
+        title,
+        iso(days),
+        money,
+      );
+    gained('原稿料', 2, 32000);
+    gained('古い道具を譲る', 17, 8500);
 
     /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。
        固定費として可処分から先に引かれるので、タイムだけのものと

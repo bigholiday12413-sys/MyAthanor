@@ -58,7 +58,8 @@ api.post('/entries', handle((req, res) => {
   const { kind, title, money_spent } = req.body ?? {};
   if (kind === 'idea') return res.status(201).json(store.createIdea({ title }));
   if (kind === 'log') return res.status(201).json(store.createLog({ title }));
-  // 糧・装備・祭事はログの器に入れ、買ったものの別と金額だけ添える。
+  /* 糧・装備・祭事・収入はログの器に入れ、別と額だけ添える。
+     入ってくるか出ていくかは別が決めるので、額はひとつ受け取れば足りる。 */
   if (store.isGoods(kind)) {
     return res.status(201).json(store.createLog({ title, money_spent, goods: kind }));
   }
@@ -79,6 +80,11 @@ api.post('/logs', handle((req, res) => res.status(201).json(store.createLog(req.
 api.get('/logs/:id', handle((req, res) => res.json(store.getLog(id(req)))));
 api.patch('/logs/:id', handle((req, res) => res.json(store.updateLog(id(req), req.body ?? {}))));
 api.delete('/logs/:id', handle((req, res) => res.json(store.deleteLog(id(req)))));
+/* 装備を失った／戻った。払った額は動かさないので、消費済みの直しではなく
+   持ち物から外れたという印だけを付け外しする。 */
+api.put('/logs/:id/lost', handle((req, res) => {
+  res.json(store.setLost(id(req), Boolean((req.body ?? {}).lost)));
+}));
 
 /* ミッション */
 api.get('/missions', handle((req, res) => {

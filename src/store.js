@@ -143,9 +143,13 @@ export function deleteIdea(id) {
 
 /* ---------- log ---------- */
 
-/* 買ったものの別。糧は食べれば消え、装備は残り、祭事はその場限り。
+/* ログの別。糧は食べれば消え、装備は残り、祭事はその場限り。
+   収入だけは向きが逆で、出ていくのではなく入ってくる。
    物の出入りを伴わないただの出来事は NULL のまま。 */
-export const GOODS = ['food', 'gear', 'feast'];
+export const GOODS = ['food', 'gear', 'feast', 'income'];
+
+// 出ていったぶんの別。ユーズドの内訳や盤では、入ってくる収入は仲間に入らない。
+export const SPENDING_GOODS = GOODS.filter((value) => value !== 'income');
 
 export const isGoods = (value) => GOODS.includes(value);
 
@@ -155,19 +159,37 @@ function goodsOf(value) {
   return value;
 }
 
+/* 受け取った額。別によってどちらの名前で来るか変わるので、両方を見る。
+   ＋から入れるときは、別が何であれ money_spent の名前で来るため。 */
+const amountOf = (goods, spent, gained) =>
+  (goods === 'income' ? gained ?? spent : spent ?? gained);
+
+/* 額の行き先は別が決める。収入なら入ってくる側、それ以外は出ていく側。
+   どちらの列にも額が入った行を作らせない。両方に入ると、
+   同じ1件が使える量を増やしながら消費済みも増やすことになる。 */
+function moneyOf(goods, amount) {
+  return goods === 'income'
+    ? { spent: 0, gained: int(amount) }
+    : { spent: int(amount), gained: 0 };
+}
+
 export function createLog({
-  title, occurred_at, time_spent, money_spent, goods, source_type, source_id,
+  title, occurred_at, time_spent, money_spent, money_gained, goods, source_type, source_id,
 }) {
+  const face = goodsOf(goods);
+  const money = moneyOf(face, amountOf(face, money_spent, money_gained));
   const stmt = db.prepare(`
-    INSERT INTO log (title, occurred_at, time_spent, money_spent, goods, source_type, source_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO log
+      (title, occurred_at, time_spent, money_spent, money_gained, goods, source_type, source_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const { lastInsertRowid } = stmt.run(
     requireTitle(title),
     occurred_at || nowIso(),
     int(time_spent),
-    int(money_spent),
-    goodsOf(goods),
+    money.spent,
+    money.gained,
+    face,
     source_type ?? null,
     source_id ?? null,
   );
@@ -186,22 +208,52 @@ export function getLog(id) {
   };
 }
 
-export function updateLog(id, { title, occurred_at, time_spent, money_spent, goods }) {
+export function updateLog(id, {
+  title, occurred_at, time_spent, money_spent, money_gained, goods,
+}) {
   // 出どころは書き換えない。どこから来たかは、生まれたときに決まっている。
   const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
   if (!row) throw notFound('log');
 
+  /* 別を付け替えると額の行き先も変わる。収入とそれ以外を行き来しても
+     額そのものは持ち越したいので、いま額が入っているほうの列から拾う。 */
+  const face = goods === undefined ? row.goods : goodsOf(goods);
+  const held = row.goods === 'income' ? row.money_gained : row.money_spent;
+  const money = moneyOf(face, amountOf(face, money_spent, money_gained) ?? held);
+
+  /* 失えるのは装備だけ。別を装備から移したら、失った印も一緒に外す。
+     糧や祭事に「失った」が残っていても読みようがない。 */
+  const lostAt = face === 'gear' ? row.lost_at : null;
+
   db.prepare(`
-    UPDATE log SET title = ?, occurred_at = ?, time_spent = ?, money_spent = ?, goods = ?
+    UPDATE log SET title = ?, occurred_at = ?, time_spent = ?,
+      money_spent = ?, money_gained = ?, goods = ?, lost_at = ?
     WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
     occurred_at === undefined ? row.occurred_at : requireMoment(occurred_at, 'occurred_at'),
     time_spent === undefined ? row.time_spent : int(time_spent),
-    money_spent === undefined ? row.money_spent : int(money_spent),
-    goods === undefined ? row.goods : goodsOf(goods),
+    money.spent,
+    money.gained,
+    face,
+    lostAt,
     id,
   );
+  return getLog(id);
+}
+
+/* 装備を失った／戻ったの印。買ったときに払った額はそのままにする。
+   失っても払い戻されはしないので、消費済みは動かさない。
+   これは持ち物の一覧から外れたという記録だけの印。 */
+export function setLost(id, lost) {
+  const row = db.prepare(`SELECT * FROM log WHERE id = ?`).get(id);
+  if (!row) throw notFound('log');
+  if (row.goods !== 'gear') {
+    const err = new Error('only gear can be lost');
+    err.status = 409;
+    throw err;
+  }
+  db.prepare(`UPDATE log SET lost_at = ? WHERE id = ?`).run(lost ? nowIso() : null, id);
   return getLog(id);
 }
 
@@ -232,8 +284,9 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   if (type === 'all' || type === 'idea') {
     parts.push(`
       SELECT 'idea' AS kind, i.id, i.title, i.created_at AS at,
-             0 AS time_spent, 0 AS money_spent, 0 AS from_repeat,
-             i.temperature, i.temperature_at, NULL AS goods, 0 AS is_conclusion
+             0 AS time_spent, 0 AS money_spent, 0 AS money_gained, 0 AS from_repeat,
+             i.temperature, i.temperature_at, NULL AS goods, 0 AS is_conclusion,
+             NULL AS lost_at
       FROM idea i
     `);
   }
@@ -248,9 +301,10 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
         : '';
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
-             l.time_spent, l.money_spent,
+             l.time_spent, l.money_spent, l.money_gained,
              CASE WHEN l.repeat_of IS NULL THEN 0 ELSE 1 END AS from_repeat,
-             NULL AS temperature, NULL AS temperature_at, l.goods, l.is_conclusion
+             NULL AS temperature, NULL AS temperature_at, l.goods, l.is_conclusion,
+             l.lost_at
       FROM log l ${where}
     `);
   }
@@ -881,8 +935,21 @@ export function resolveBudget(kind, periodKey, fixed = fixedPerWeek()[kind]) {
     .prepare(`SELECT amount FROM budget WHERE kind = ? AND period_key = ?`)
     .get(kind, periodKey);
   const stored = getSettings()[DEFAULT_COLUMN[kind]];
-  const gross = row ? row.amount : kind === 'money' ? weeklyShare(stored) : stored;
-  return { amount: gross - fixed, gross, fixed, source: row ? 'override' : 'default' };
+  const base = row ? row.amount : kind === 'money' ? weeklyShare(stored) : stored;
+  /* 臨時の収入は、来た週の入ってくる量に足す。報酬（毎月決まって来るぶん）と
+     違って次の週には繰り越さないので、既定値のほうは動かさない。
+     消費済みから引くのではなく入ってくる側へ足すのは、
+     引くと「その週いくら使ったか」が実際より少なく見えるため。 */
+  const income = kind === 'money' ? incomeIn(periods.money.fromKey(periodKey)) : 0;
+  const gross = base + income;
+  return {
+    amount: gross - fixed,
+    gross,
+    base,
+    income,
+    fixed,
+    source: row ? 'override' : 'default',
+  };
 }
 
 /* 循環から生えたぶんは固定費として先に引いてあるので、ここでは数えない。
@@ -894,6 +961,18 @@ function consumedIn(kind, period) {
   return db
     .prepare(`
       SELECT COALESCE(SUM(l.${SPENT_COLUMN[kind]}), 0) AS total
+      FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
+    `)
+    .get(period.start, period.end).total;
+}
+
+/* その期間に入ってきたぶん。循環から生えたぶんを外すのは出ていく側と同じで、
+   決まって入ってくるものは報酬として先に数えてあるため。 */
+function incomeIn(period) {
+  if (!period) return 0;
+  return db
+    .prepare(`
+      SELECT COALESCE(SUM(l.money_gained), 0) AS total
       FROM log l ${NOT_FROM_REPEAT} AND l.occurred_at >= ? AND l.occurred_at < ?
     `)
     .get(period.start, period.end).total;
@@ -927,6 +1006,11 @@ export function listBudgets(kind, { past = 5, future = 1 } = {}) {
         ...period,
         amount: budget.amount,
         gross: budget.gross,
+        /* base は入力欄に戻す値。gross は臨時の収入を足した後なので、
+           そのまま欄に出すと、保存したとたん収入が個別設定に焼き付いて
+           二度足しになる。 */
+        base: budget.base,
+        income: budget.income,
         fixed: budget.fixed,
         source: budget.source,
         consumed: consumedIn(kind, period),
@@ -1204,7 +1288,7 @@ function listLogsBySource(source_type, source_id) {
     .prepare(`
       SELECT * FROM log
        WHERE source_type = ? AND source_id = ?
-         AND repeat_of IS NULL AND COALESCE(goods, '') <> 'food'
+         AND repeat_of IS NULL AND COALESCE(goods, '') NOT IN ('food', 'income')
        ORDER BY occurred_at, id
     `)
     .all(source_type, source_id);
@@ -1315,9 +1399,13 @@ export function getDungeon({ since = null, until = null } = {}) {
   const roads = [
     ...db.prepare(`SELECT * FROM idea`).all().map((row) => dungeonRoom('idea', row, 0)),
     /* 糧は盤に出さない。食べれば消えるものなので、買った回数だけ節が増えると
-       盤が読めなくなる。装備は物が残り、祭事は見聞が残るので、どちらも節にする。 */
+       盤が読めなくなる。装備は物が残り、祭事は見聞が残るので、どちらも節にする。
+       収入も出さない。物語の節ではなく、リソースの出入りだけの話なので。 */
     ...db
-      .prepare(`SELECT * FROM log WHERE source_type IS NULL AND COALESCE(goods, '') <> 'food'`)
+      .prepare(
+        `SELECT * FROM log WHERE source_type IS NULL
+           AND COALESCE(goods, '') NOT IN ('food', 'income')`,
+      )
       .all()
       .map((row) => dungeonRoom('log', row, 0)),
   ]
@@ -1386,7 +1474,7 @@ export function getUsed(kind, now = new Date()) {
         GROUP BY COALESCE(l.goods, 'other')
       `)
       .all(period.start, period.end);
-    const rows = [...GOODS, 'other'].map((key) => {
+    const rows = [...SPENDING_GOODS, 'other'].map((key) => {
       const row = found.find((item) => item.key === key);
       return { key, value: row?.value ?? 0, count: row?.count ?? 0 };
     });
@@ -1492,6 +1580,8 @@ export function getSummary(now = new Date()) {
       ...build(moneyBudget.amount, spent(moneyWeek).money, plannedMoney.money, moneyWeek),
       budget_source: moneyBudget.source,
       gross: moneyBudget.gross,
+      // 今週入ってきたぶん。使える量が増えている理由として管の脇に出す。
+      income: moneyBudget.income,
       fixed: moneyBudget.fixed,
       due_mission_count: plannedMoney.count,
     },
