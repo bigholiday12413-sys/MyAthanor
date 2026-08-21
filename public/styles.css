@@ -241,6 +241,15 @@ body::after {
   box-shadow: inset 0 -1px 0 var(--edge);
 }
 
+/* 名乗るものも操作も無い画面では畳む。display: flex は hidden に勝つので明示する。 */
+.topbar[hidden] {
+  display: none;
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
 .topbar h1 {
   flex: 1;
   margin: 0;

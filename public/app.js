@@ -178,14 +178,26 @@ const toCelsius = (kelvin) => kelvin - AMBIENT_K;
 
 /* ---------- 共通パーツ ---------- */
 
-function setTopbar({ title, sub = '', back = null, action = '' }) {
-  topbarEl.innerHTML = `
+/* 上のバーは「戻る」「いまの状態」「操作」があるときだけ出す。
+   画面の名前は出さない。下のタブが名乗っているものを上でも名乗ると、
+   同じ語が1画面に2つ並ぶ。何も無いときは畳んで、そのぶんを本文に返す。 */
+function setTopbar({ title = '', sub = '', back = null, action = '' } = {}) {
+  const empty = !title && !back && !action;
+  topbarEl.hidden = empty;
+  topbarEl.innerHTML = empty
+    ? ''
+    : `
     ${
       back
         ? `<a class="icon-btn" href="${esc(back)}" aria-label="戻る">${icon('chevron')}</a>`
         : ''
     }
-    <h1>${esc(title)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</h1>
+    ${
+      // 名乗らない画面でも、右に置く操作は端へ寄せたい。
+      title
+        ? `<h1>${esc(title)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</h1>`
+        : '<span class="spacer"></span>'
+    }
     ${action}
   `;
 }
@@ -363,10 +375,9 @@ function missionCard(mission, { showSource = true } = {}) {
     <div class="card status-${esc(mission.status)} ${mission.is_legacy ? 'is-legacy' : ''}"
          data-mission="${mission.id}">
       <div class="card-top">
-        ${/* 何であるかを先に言う。状態しか出していないと、ログの札と見分けが付かない。 */ ''}
-        <span class="badge ${esc(mission.status)}">${icon(KIND_ICON.mission)}${esc(
-          STATUS_LABEL[mission.status],
-        )}</span>
+        ${/* 絵は題の頭に出しているので、札には状態だけを持たせる。
+             ログの札と見分けが付くことは、題の頭のフラスコと太い左縁が担う。 */ ''}
+        <span class="badge ${esc(mission.status)}">${esc(STATUS_LABEL[mission.status])}</span>
         ${
           due
             ? `<span class="badge due-${due.key}">${esc(due.label)}</span>`
@@ -987,8 +998,8 @@ async function renderUsed(kind) {
 
 async function renderHome() {
   setActiveTab('home');
+  // アプリの名前は毎回読むものではないので出さない。設定へ入る鍵だけ置く。
   setTopbar({
-    title: 'MyAthanor',
     action:
       `<a class="icon-btn" href="#/settings" aria-label="設定">${icon('key')}</a>`,
   });
@@ -1071,7 +1082,8 @@ async function renderHome() {
    前後の姿なので、離して置くと行き来のたびにタブをまたぐことになる。 */
 async function renderStream() {
   setActiveTab('stream');
-  setTopbar({ title: 'アイデア' });
+  // タブが「アイデア」と名乗っているので、上では名乗らない。
+  setTopbar();
 
   const items = await api('/stream?type=idea');
 
@@ -1089,16 +1101,16 @@ function streamCard(item) {
   // アイデアそのものの終わりは、子のプロセスの完了とは重さが違うので、
   // 別を付けていないログの中でもさらに金の宝石で目立たせる。
   const iconName = item.is_conclusion ? 'stone-gold' : KIND_ICON[face];
-  const label = item.is_conclusion ? '終わり' : KIND_LABEL[face];
   return `
     <a class="card kind-${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''}"
        href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
-        <span class="badge ${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''}">${icon(
-          iconName,
-        )}${esc(label)}</span>
+        ${
+          /* 種別の札は出さない。左の縁の色と題の頭の絵で、すでに二度言っている。
+             札を残すのは「終わり」だけ。稀で、金の宝石だけでは弱いので語を添える。 */
+          item.is_conclusion ? '<span class="badge is-conclusion">終わり</span>' : ''
+        }
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
-        ${item.from_mission ? '<span>プロセス由来</span>' : ''}
         ${item.from_repeat ? icon('cycle', 'cycle-mark') : ''}
         <span class="spacer"></span>
         <span>${esc(fmtDate(item.at))}</span>
@@ -1503,7 +1515,10 @@ function wireTemperature(idea, entryId) {
 
 async function renderEntry(kind, entryId) {
   setActiveTab('stream');
-  setTopbar({ title: KIND_LABEL[kind], back: '#/stream' });
+  /* 名乗るのは下の見出し（section-title）に一本化する。アイデアでは題の枠が
+     プロセスの後ろに来るので、そこに見出しが無いと宙に浮いて見える。
+     上のバーは戻る矢印だけを持つ。 */
+  setTopbar({ back: '#/stream' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
@@ -1838,7 +1853,8 @@ let logFilter = 'process';
 
 async function renderMissions() {
   setActiveTab('missions');
-  setTopbar({ title: 'ログ' });
+  // タブが「ログ」と名乗っているので、上では名乗らない。
+  setTopbar();
 
   const items = await api(`/stream?type=${logFilter}`);
 
@@ -2827,7 +2843,9 @@ let dungeonRange = null;
 
 async function renderDungeon() {
   setActiveTab('dungeon');
-  setTopbar({ title: dungeonRange ? 'エフェメリス' : 'アストロラーベ' });
+  /* ふだんは名乗らない（タブが名乗っている）。過去の盤を見ている間だけ出す。
+     これは名前ではなく「いまどの盤を見ているか」という状態なので、書く値がある。 */
+  setTopbar(dungeonRange ? { title: 'エフェメリス' } : {});
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const query = dungeonRange
