@@ -138,7 +138,7 @@ function fmtDate(iso) {
 const STATUS_LABEL = { active: '予定', abandoned: '断念', done: '完了' };
 const KIND_LABEL = {
   idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事',
-  income: '収入', process: 'プロセス',
+  income: '収入', process: 'プロセス', cycle: '循環',
 };
 
 /* 糧・装備・祭事・収入はログの器に入っている。見た目の別だけここで引き直す。
@@ -1955,7 +1955,15 @@ async function renderMissions() {
     { time: 0, money: 0, gained: 0 },
   );
 
-  const sub = [...GOODS.map((g) => [g, KIND_LABEL[g]]), ['process', KIND_LABEL.process]];
+  /* 絞り込み。前の5つは別（何を買ったか）で、循環だけは出どころで絞る。
+     循環から来たものはいまのところ必ずプロセスの顔なので、プロセスの中から
+     「勝手に来たぶん」を抜き出す形になる。並びの末尾に置いて、別の仲間では
+     ないことを位置でも言う。 */
+  const sub = [
+    ...GOODS.map((g) => [g, KIND_LABEL[g]]),
+    ['process', KIND_LABEL.process],
+    ['cycle', KIND_LABEL.cycle],
+  ];
 
   viewEl.innerHTML = `
     <div class="filter-bar">
@@ -1963,7 +1971,11 @@ async function renderMissions() {
         ${sub
           .map(
             ([key, label]) => `<button class="filter" data-sub="${key}"
-               aria-pressed="${logFilter === key}">${icon(KIND_ICON[key])}${label}</button>`,
+               aria-pressed="${logFilter === key}">${
+              // 循環は別ではないので種別の絵を持たない。循環の印をそのまま使う
+              // （札に添えるときの cycle-mark は余白つきなので、ここでは素で置く）。
+              key === 'cycle' ? icon('cycle') : icon(KIND_ICON[key])
+            }${label}</button>`,
           )
           .join('')}
       </div>
@@ -3089,7 +3101,7 @@ async function route() {
       // ユーズドから、見たい絞り込みを指定して来られるようにする。
       const query = new URLSearchParams(hash.split('?')[1] ?? '');
       const sub = query.get('sub');
-      if (sub && (sub === 'process' || GOODS.includes(sub))) logFilter = sub;
+      if (sub && (sub === 'process' || sub === 'cycle' || GOODS.includes(sub))) logFilter = sub;
       return await renderMissions();
     }
     if (hash === '/dungeon') return await renderDungeon();
