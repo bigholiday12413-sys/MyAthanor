@@ -292,13 +292,18 @@ export function listStream({ type = 'all', limit = 200, since = null } = {}) {
   }
   /* 糧・装備・祭事もログの器に入っているので、別で絞り込むだけでよい。
      'log' はログ全部。'process' は別を付けていないぶん
-     （プロセスの完了で生まれたログと、素のまま書き留めたログ）。 */
-  if (type === 'all' || type === 'log' || type === 'process' || isGoods(type)) {
+     （プロセスの完了で生まれたログと、素のまま書き留めたログ）。
+     'cycle' だけは別ではなく出どころで絞る。循環から来たものは、
+     済ませても残量が動かないぶんなので、まとめて見たいことがある。 */
+  if (type === 'all' || type === 'log' || type === 'process' || type === 'cycle'
+      || isGoods(type)) {
     const where = isGoods(type)
       ? `WHERE l.goods = '${type}'`
       : type === 'process'
         ? `WHERE l.goods IS NULL`
-        : '';
+        : type === 'cycle'
+          ? `WHERE l.repeat_of IS NOT NULL`
+          : '';
     parts.push(`
       SELECT 'log' AS kind, l.id, l.title, l.occurred_at AS at,
              l.time_spent, l.money_spent, l.money_gained,

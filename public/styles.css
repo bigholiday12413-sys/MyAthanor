@@ -872,6 +872,8 @@ body::after {
 
 .filters {
   display: flex;
+  /* 狭い画面では折り返す。潰して字を欠けさせるより、行が増えたほうがまだ読める。 */
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -896,10 +898,9 @@ body::after {
 }
 
 .filter {
-  flex: 1;
-  /* 別が増えて5つ並ぶので、字を折らせない。絵と字が横に並んだまま入るよう、
-     幅の取り合いでは字の側を縮ませずに、札の左右の余白から先に詰める。 */
-  min-width: 0;
+  /* 幅は字の長さで決める。6つを等幅にすると、いちばん長い「プロセス」に
+     合わせた幅が6つぶん要って画面に入らず、字が欠ける。 */
+  flex: 0 1 auto;
   white-space: nowrap;
   min-height: 44px;
   /* 印を添える札があるので、字と横に並べる。
@@ -908,7 +909,7 @@ body::after {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 8px 2px;
+  padding: 8px 9px;
   font-family: var(--serif);
   font-size: 12px;
   font-weight: 700;
