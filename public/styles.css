@@ -2005,35 +2005,6 @@ a.room-title {
   font-size: 13px;
 }
 
-/* プロセスの見積の向き。額の欄のすぐ下に置いて、この額の話だと分かるようにする。 */
-.gain-check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.gain-check input {
-  width: 18px;
-  height: 18px;
-  min-height: 0;
-  margin: 0;
-  flex: none;
-}
-
-.gain-check span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.gain-check .px {
-  width: 14px;
-  height: 14px;
-}
 
 .seg-toggle.seg-4 button {
   justify-content: flex-start;
