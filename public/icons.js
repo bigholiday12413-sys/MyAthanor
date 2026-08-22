@@ -502,6 +502,14 @@ const HELM = {
   },
 };
 
+/* 失った装備＝中身の抜けた兜。輪郭はそのままに、鋼の面だけ落とす。
+   満ちたフラスコと空のフラスコで予定と済みを分けているのと同じ作りで、
+   ここでは「持っている」と「失った」を中身の有無で分ける。 */
+const HELM_LOST = {
+  rows: HELM.rows,
+  palette: { ...HELM.palette, l: '#dfe3e4', m: '#dfe3e4', s: '#c8cfd1' },
+};
+
 /* 祭事＝その場限りのもの。幟（のぼり）。竿に長い旗を掛けて、裾を切り込む。
    糧（食い物）も装備（兜）も物の形をしているので、三つ目は物でないと分かる形にする。
    幟は立てて畳むもので、終われば何も残らない。 */
@@ -530,6 +538,37 @@ const BANNER = {
     b: '#c9b78a', // 生成りの布
     g: '#4e8b3a', // 染めの帯
     r: '#a8802a', // 紋
+  },
+};
+
+/* 収入＝入ってきたぶん。口を絞った巾着に金貨を1枚。
+   胴を真っ直ぐ落として底を平らに切るのは、糧（丸い焼き物）と並んだときに
+   輪郭だけで見分けが付くようにするため。丸く描くと16の枡では同じ塊に見える。
+   金庫（積んだ金貨）とも別の絵にする。金庫は貯まっているもの、
+   こちらは来たものなので、同じ絵だと同じ画面で二度言うことになる。 */
+const POUCH = {
+  rows: [
+    '................',
+    '................',
+    '......oooo......',
+    '.....occcco.....',
+    '....occcccco....',
+    '...occcccccco...',
+    '..occcccccccco..',
+    '.occccggggcccco.',
+    '.occcggooggccco.',
+    '.occcggooggccco.',
+    '.occccggggcccco.',
+    '.occcccccccccco.',
+    '.occcccccccccco.',
+    '.occcccccccccco.',
+    '.oooooooooooooo.',
+    '................',
+  ],
+  palette: {
+    o: '#4a3a1c', // 革ひもと縁
+    c: CREAM,     // 生成りの布
+    g: GOLD,      // 金貨
   },
 };
 
@@ -814,6 +853,8 @@ const SOURCES = {
   coins: COINS,
   provision: PROVISION,
   helm: HELM,
+  'helm-lost': HELM_LOST,
+  pouch: POUCH,
   grimoire: GRIMOIRE,
   sigil: SIGIL,
   flame: FLAME,
@@ -872,6 +913,7 @@ export const KIND_ICON = {
   food: 'provision',
   gear: 'helm',
   feast: 'banner',
+  income: 'pouch',
   log: 'footsteps',
   mission: 'flask',
   process: 'flask-empty',

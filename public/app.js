@@ -137,12 +137,18 @@ function fmtDate(iso) {
 // まだ手を付けていないものまで動いているように読めてしまう。
 const STATUS_LABEL = { active: '予定', abandoned: '断念', done: '完了' };
 const KIND_LABEL = {
-  idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事', process: 'プロセス',
+  idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事',
+  income: '収入', process: 'プロセス',
 };
 
-/* 糧・装備・祭事はログの器に入っている。見た目の別だけここで引き直す。 */
-const GOODS = ['food', 'gear', 'feast'];
+/* 糧・装備・祭事・収入はログの器に入っている。見た目の別だけここで引き直す。
+   収入だけは向きが逆で、出ていくのではなく入ってくる。 */
+const GOODS = ['food', 'gear', 'feast', 'income'];
 const isGoods = (kind) => GOODS.includes(kind);
+// 額が入ってくる側の別。額の見せ方も、資源の数え方もここで分かれる。
+const isIncome = (kind) => kind === 'income';
+// 失えるのは装備だけ。糧は食べれば消え、祭事は見聞が残るだけで物にならない。
+const canBeLost = (item) => item.goods === 'gear';
 // 別を付けていないログ（プロセスの完了で生まれたものと、素のまま書き留めたもの）は
 // 「プロセス」の顔で出す。中身が空になったフラスコ＝もう済んだ予定として見せる。
 const faceOf = (item) => item.goods ?? (item.kind === 'log' ? 'process' : item.kind);
@@ -206,6 +212,18 @@ function setActiveTab(tab) {
   for (const el of tabsEl.querySelectorAll('.tab')) {
     el.classList.toggle('is-active', el.dataset.tab === tab);
   }
+}
+
+/* 詳細を開く前に居た一覧。詳細はどの一覧からも開けるので、
+   戻る先とどのタブに居ることにするかを、開いた側から引き継ぐ。
+   ＋ はホームにしか無いので、書き留めてから直すまでがホームの中で閉じる。
+   既定をホームにしてあるのは、詳細のURLを直接開いたときの行き先。 */
+let entryOrigin = { tab: 'home', href: '#/home' };
+
+// 札の並ぶ画面を出すたび、そこを詳細の帰り先として覚えておく。
+function markOrigin(tab, href) {
+  entryOrigin = { tab, href };
+  setActiveTab(tab);
 }
 
 // タブのドット絵は起動時に一度だけ流し込む。
@@ -559,6 +577,16 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
             <span class="k"><i class="swatch free"></i>残量</span>
             <span class="v ${data.over ? 'neg' : ''}">${esc(format(free))}</span>
           </div>
+          ${
+            /* 臨時の収入。使える量が報酬より増えているのは、この週に入ってきた
+               ぶんが足されているから。固定費と向きが逆なので、対にして並べる。 */
+            data.income
+              ? `<div class="readout-row">
+                   <span class="k">収入</span>
+                   <span class="v gain">＋${esc(format(data.income))}</span>
+                 </div>`
+              : ''
+          }
           ${
             /* 固定費。繰り返すぶんは先にここで引いてあるので、消費済みにも
                消費予定にも出てこない。引かれた覚えのない数字にならないよう、
@@ -961,7 +989,7 @@ function shelf(missions, weekEnd) {
 const TUBE_LABEL = { time: 'タイム', money: 'ウォレット' };
 
 async function renderUsed(kind) {
-  setActiveTab('home');
+  markOrigin('home', `#/used?kind=${kind}`);
   setTopbar({ title: `ユーズド・${TUBE_LABEL[kind]}`, back: '#/home' });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
@@ -1000,7 +1028,7 @@ async function renderUsed(kind) {
 }
 
 async function renderHome() {
-  setActiveTab('home');
+  markOrigin('home', '#/home');
   // アプリの名前は毎回読むものではないので出さない。設定へ入る鍵だけ置く。
   setTopbar({
     action:
@@ -1084,7 +1112,7 @@ async function renderHome() {
    行ったこと（ログ）はプロセスと同じ画面へ移した。予定と実績は同じものの
    前後の姿なので、離して置くと行き来のたびにタブをまたぐことになる。 */
 async function renderStream() {
-  setActiveTab('stream');
+  markOrigin('stream', '#/stream');
   // タブが「アイデア」と名乗っているので、上では名乗らない。
   setTopbar();
 
@@ -1101,17 +1129,30 @@ async function renderStream() {
 
 function streamCard(item) {
   const face = faceOf(item);
-  // アイデアそのものの終わりは、子のプロセスの完了とは重さが違うので、
-  // 別を付けていないログの中でもさらに金の宝石で目立たせる。
-  const iconName = item.is_conclusion ? 'stone-gold' : KIND_ICON[face];
+  const lost = Boolean(item.lost_at);
+  /* アイデアそのものの終わりは、子のプロセスの完了とは重さが違うので、
+     別を付けていないログの中でもさらに金の宝石で目立たせる。
+     失った装備は中身の抜けた兜。フラスコの満ち・空と同じ読み方にする。 */
+  const iconName = item.is_conclusion
+    ? 'stone-gold'
+    : lost
+      ? 'helm-lost'
+      : KIND_ICON[face];
   return `
-    <a class="card kind-${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''}"
+    <a class="card kind-${esc(face)} ${item.is_conclusion ? 'is-conclusion' : ''} ${
+      lost ? 'is-lost' : ''
+    }"
        href="#/${esc(item.kind)}/${item.id}">
       <div class="card-top">
         ${
           /* 種別の札は出さない。左の縁の色と題の頭の絵で、すでに二度言っている。
              札を残すのは「終わり」だけ。稀で、金の宝石だけでは弱いので語を添える。 */
           item.is_conclusion ? '<span class="badge is-conclusion">終わり</span>' : ''
+        }
+        ${
+          /* 失った装備。絵だけでは「兜を買った」との違いが弱いので語を添える。
+             いつ失ったかは書かない。札の日付は買った日で、混ざると読み違える。 */
+          item.lost_at ? '<span class="badge lost">失った</span>' : ''
         }
         ${SHOW.temperature && item.kind === 'idea' ? tempChip(item.current_temperature) : ''}
         ${item.from_repeat ? icon('cycle', 'cycle-mark') : ''}
@@ -1139,10 +1180,14 @@ function streamCard(item) {
       }
       <div class="card-meta">
         ${
-          item.kind === 'log' && (item.time_spent || item.money_spent)
-            ? `<span>${esc(fmtTime(item.time_spent))}</span>
-               <span>${esc(fmtMoney(item.money_spent))}</span>`
-            : ''
+          /* 収入は入ってきたぶんなので、出ていった額と同じ顔で並べない。
+             符号を付けて向きを言い、色も分ける。 */
+          item.money_gained
+            ? `<span class="gain">＋${esc(fmtMoney(item.money_gained))}</span>`
+            : item.kind === 'log' && (item.time_spent || item.money_spent)
+              ? `<span>${esc(fmtTime(item.time_spent))}</span>
+                 <span>${esc(fmtMoney(item.money_spent))}</span>`
+              : ''
         }
       </div>
     </a>
@@ -1165,7 +1210,7 @@ function openCapture() {
     <form class="modal" id="capture">
       <h2>書き留める</h2>
       <div class="field">
-        <div class="seg-toggle seg-5" id="kind-toggle">
+        <div class="seg-toggle seg-6" id="kind-toggle">
           ${['idea', 'log', ...GOODS]
             .map((kind) => {
               // 素のログは、プロセスを経ずに直接書き留めた済んだこと。
@@ -1194,10 +1239,13 @@ function openCapture() {
   const input = backdrop.querySelector('#capture-title');
   const money = backdrop.querySelector('#capture-money');
 
-  // 糧・装備・祭事は買ったものなので、金額を並べて受ける。
+  /* 糧・装備・祭事は買ったもの、収入は入ってきたぶん。どちらも額を並べて受ける。
+     入ってくるか出ていくかは別が決めるので、欄はひとつでよい。
+     読み上げのために、どちらの額かは名前で言い分ける。 */
   function dressFor(kind) {
     money.hidden = !isGoods(kind);
     if (money.hidden) money.value = '';
+    money.setAttribute('aria-label', isIncome(kind) ? '入ってきた円' : '払った円');
   }
   dressFor(captureKind);
   input.focus();
@@ -1510,11 +1558,14 @@ function wireTemperature(idea, entryId) {
 }
 
 async function renderEntry(kind, entryId) {
-  setActiveTab('stream');
+  /* 詳細はどの一覧からも開けるので、開いた側のタブに居るままにする。
+     アイデアのタブに固定していたが、＋ はホームにしか無いので、
+     書き留めたものを直そうとするたびに別のタブへ移されていた。 */
+  setActiveTab(entryOrigin.tab);
   /* 名乗るのは下の見出し（section-title）に一本化する。アイデアでは題の枠が
      プロセスの後ろに来るので、そこに見出しが無いと宙に浮いて見える。
      上のバーは戻る矢印だけを持つ。 */
-  setTopbar({ back: '#/stream' });
+  setTopbar({ back: entryOrigin.href });
   viewEl.innerHTML = '<div class="empty">読み込み中…</div>';
 
   const path = kind === 'idea' ? `/ideas/${entryId}` : `/logs/${entryId}`;
@@ -1605,7 +1656,7 @@ async function renderEntry(kind, entryId) {
       ${
         kind === 'log'
           ? `<div class="field">
-               <div class="seg-toggle seg-4" id="goods-toggle">
+               <div class="seg-toggle seg-5" id="goods-toggle">
                  ${['process', ...GOODS]
                    .map(
                      (face) => `<button type="button" data-goods="${
@@ -1623,11 +1674,30 @@ async function renderEntry(kind, entryId) {
                  ${hourSelect('time-spent', 'time-spent', minutesToHours(entry.time_spent))}
                </div>
                <div class="field">
-                 <label for="money-spent">消費ウォレット（円）</label>
+                 ${/* 別を収入に替えると、同じ欄が入ってくる額を受け取る側になる。
+                      名前は切り替えたその場で書き換える（保存を待つと、
+                      何を入れている欄なのか分からない時間ができる）。 */ ''}
+                 <label for="money-spent" id="money-label">${
+                   isIncome(entry.goods) ? '入ってきたウォレット（円）' : '消費ウォレット（円）'
+                 }</label>
                  <input id="money-spent" type="number" step="1" min="0"
-                        value="${entry.money_spent}" />
+                        value="${isIncome(entry.goods) ? entry.money_gained : entry.money_spent}" />
                </div>
-             </div>`
+             </div>
+             ${
+               /* 失えるのは装備だけ。払った額は動かさないので、消すのとは別の道にする
+                  （買った記録まで消すと、何にいくら使ったかが記録から抜ける）。 */
+               canBeLost(entry)
+                 ? `<div class="stat-line">
+                      <span>${
+                        entry.lost_at ? `失った（${esc(fmtDate(entry.lost_at))}）` : '手元にある'
+                      }</span>
+                      <button type="button" class="act" id="log-lost">${
+                        entry.lost_at ? '戻った' : '失った'
+                      }</button>
+                    </div>`
+                 : ''
+             }`
           : ''
       }
       ${
@@ -1732,6 +1802,10 @@ async function renderEntry(kind, entryId) {
       for (const b of goodsToggle.querySelectorAll('button')) {
         b.setAttribute('aria-pressed', String(b === button));
       }
+      // 収入に替えた時点で、額の欄は入ってくる側を受け取る欄になる。
+      const label = document.getElementById('money-label');
+      const gain = isIncome(button.dataset.goods);
+      if (label) label.textContent = gain ? '入ってきたウォレット（円）' : '消費ウォレット（円）';
     });
   }
 
@@ -1747,9 +1821,12 @@ async function renderEntry(kind, entryId) {
     if (kind === 'idea') body.body = document.getElementById('body').value;
     if (kind === 'log') {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
-      body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
       body.goods = document.querySelector('#goods-toggle [aria-pressed="true"]').dataset.goods
         || null;
+      // 額の行き先は別が決める。収入なら入ってくる側へ、それ以外は出ていく側へ。
+      const amount = Math.round(Number(document.getElementById('money-spent').value || 0));
+      if (isIncome(body.goods)) body.money_gained = amount;
+      else body.money_spent = amount;
     }
     try {
       await api(path, { method: 'PATCH', body });
@@ -1766,7 +1843,20 @@ async function renderEntry(kind, entryId) {
     try {
       await api(path, { method: 'DELETE' });
       toast('削除しました');
-      location.hash = '#/stream';
+      location.hash = entryOrigin.href;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  /* 失った／戻った。押したその場で確かめられるよう、画面を引き直す。
+     払った額は動かさないので、試験管も金庫も変わらない。 */
+  document.getElementById('log-lost')?.addEventListener('click', async () => {
+    const lost = !entry.lost_at;
+    try {
+      await api(`/logs/${entryId}/lost`, { method: 'PUT', body: { lost } });
+      toast(lost ? '失ったことにしました' : '手元に戻しました');
+      await renderEntry(kind, entryId);
     } catch (err) {
       toast(err.message, true);
     }
@@ -1848,15 +1938,21 @@ async function renderEntry(kind, entryId) {
 let logFilter = 'process';
 
 async function renderMissions() {
-  setActiveTab('missions');
+  markOrigin('missions', `#/missions?sub=${logFilter}`);
   // タブが「ログ」と名乗っているので、上では名乗らない。
   setTopbar();
 
   const items = await api(`/stream?type=${logFilter}`);
 
+  /* 合計。収入は入ってきたぶんなので、出ていった額とは別に数える。
+     ひとつの数に混ぜると、絞り込みを変えるたびに何の合計か分からなくなる。 */
   const totals = items.reduce(
-    (acc, item) => ({ time: acc.time + item.time_spent, money: acc.money + item.money_spent }),
-    { time: 0, money: 0 },
+    (acc, item) => ({
+      time: acc.time + item.time_spent,
+      money: acc.money + item.money_spent,
+      gained: acc.gained + (item.money_gained ?? 0),
+    }),
+    { time: 0, money: 0, gained: 0 },
   );
 
   const sub = [...GOODS.map((g) => [g, KIND_LABEL[g]]), ['process', KIND_LABEL.process]];
@@ -1876,7 +1972,11 @@ async function renderMissions() {
       <div class="stat-line">
         ${/* 件数は札の数そのものなので書かない。合計は見ても数えられないので残す。 */ ''}
         <span class="spacer"></span>
-        <span class="v">${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}</span>
+        <span class="v">${
+          totals.gained
+            ? `<span class="gain">＋${esc(fmtMoney(totals.gained))}</span>`
+            : `${esc(fmtTime(totals.time))} · ${esc(fmtMoney(totals.money))}`
+        }</span>
       </div>
     </div>
     <div class="list" id="mission-list">
@@ -1946,12 +2046,17 @@ function budgetSection(kind, rows) {
           </summary>
           <div class="settings-item-body">
             <div class="budget-consumed">消費 ${esc(ui.format(row.consumed))}${
+              // 臨時の収入もその週の入ってくる量なので、増えた理由として出す。
+              row.income ? ` · 収入 ＋${esc(ui.format(row.income))}` : ''
+            }${
               // 固定費を引く前と後で数が違うので、後のほうも出す。
               // 名前は管の読み取りに合わせる。同じ数を別の名前で呼ばない。
-              row.fixed ? ` · 使える量 ${esc(ui.format(row.amount))}` : ''
+              row.fixed || row.income ? ` · 使える量 ${esc(ui.format(row.amount))}` : ''
             }</div>
             <div class="field">
-              ${ui.field(`budget-${kind}-${esc(row.key)}`, row.label, ui.toInput(row.gross))}
+              ${/* 欄に戻すのは base。臨時の収入を足した後の数を出すと、
+                    保存したとたん収入が個別設定に焼き付いて二度足しになる。 */ ''}
+              ${ui.field(`budget-${kind}-${esc(row.key)}`, row.label, ui.toInput(row.base))}
             </div>
             <div class="btn-row">
               <button type="button" class="primary" data-save>保存</button>
@@ -2010,6 +2115,16 @@ async function renderSettings() {
             <button type="button" class="ghost" id="tg-clear">全部消す</button>
           </div>
           ${timeGridMarkup(grid)}
+          ${
+            /* 塗りが無くても数値で設定した値が残っていれば、そちらを注記に出す。
+               塗って保存するまで置き換わらない。 */
+            !settings.time_grid && settings.weekly_time
+              ? `<div class="stat-line" style="opacity: 0.7; font-size: 0.875em">
+                   <span>週のタイム（現在）</span>
+                   <span class="v">${esc(fmtTime(settings.weekly_time))}</span>
+                 </div>`
+              : ''
+          }
           ${
             /* 塗りが無いときは出さない。この行は塗った枚数から引いた数なので、
                数字で持っている週のタイムとは食い違う。 */
@@ -2846,7 +2961,7 @@ function wireBoard() {
 let dungeonRange = null;
 
 async function renderDungeon() {
-  setActiveTab('dungeon');
+  markOrigin('dungeon', '#/dungeon');
   /* ふだんは名乗らない（タブが名乗っている）。過去の盤を見ている間だけ出す。
      これは名前ではなく「いまどの盤を見ているか」という状態なので、書く値がある。 */
   setTopbar(dungeonRange ? { title: 'エフェメリス' } : {});

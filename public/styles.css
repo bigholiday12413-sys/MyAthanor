@@ -614,6 +614,13 @@ body::after {
   color: var(--danger);
 }
 
+/* 入ってきた額。出ていく額と字面が同じなので、符号のほかに色でも向きを言う。
+   差し引きの正の側と同じ葉にして、増えるほうだと一目で読めるようにする。 */
+.gain,
+.v.gain {
+  color: var(--green-dark);
+}
+
 .projection {
   display: flex;
   flex-wrap: wrap;
@@ -857,6 +864,10 @@ body::after {
   color: var(--danger);
 }
 
+.card-meta .gain {
+  color: var(--green-dark);
+}
+
 /* ---------- フィルタ ---------- */
 
 .filters {
@@ -886,14 +897,18 @@ body::after {
 
 .filter {
   flex: 1;
+  /* 別が増えて5つ並ぶので、字を折らせない。絵と字が横に並んだまま入るよう、
+     幅の取り合いでは字の側を縮ませずに、札の左右の余白から先に詰める。 */
+  min-width: 0;
+  white-space: nowrap;
   min-height: 44px;
   /* 印を添える札があるので、字と横に並べる。
      text-align では、塊で描かれる絵が独りだけ次の行へ落ちる。 */
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 8px 4px;
+  gap: 4px;
+  padding: 8px 2px;
   font-family: var(--serif);
   font-size: 12px;
   font-weight: 700;
@@ -1964,7 +1979,8 @@ a.room-title {
 
 /* 3つより多いときは縦積みの2列にする。横1列だと札が潰れて読めない。 */
 .seg-toggle.seg-4,
-.seg-toggle.seg-5 {
+.seg-toggle.seg-5,
+.seg-toggle.seg-6 {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
@@ -1975,7 +1991,8 @@ a.room-title {
 }
 
 .seg-toggle.seg-4 button,
-.seg-toggle.seg-5 button {
+.seg-toggle.seg-5 button,
+.seg-toggle.seg-6 button {
   justify-content: flex-start;
   padding-left: 12px;
 }
@@ -2515,6 +2532,28 @@ a.room-title {
 .badge.feast {
   color: var(--gold-dark);
   border-color: var(--gold);
+}
+
+/* 収入は実りそのもの。祭事と同じ金の一族だが、いちばん濃い段を当てる。
+   緑は（プロセスの側で使っているので）記録の縁には回せず、
+   同じ明るさの金を2つ並べると離れて見たときに取り違えるため。 */
+.card.kind-income {
+  border-left-color: var(--gold-deep);
+}
+
+/* 失った装備。記録としては残るので消さず、縁の鋼を抜いて薄くする。
+   兜の絵のほうも中身が抜けるので、札ぜんたいで「もう無い」と読める。 */
+.card.is-lost {
+  border-left-color: #b9c1c5;
+}
+
+.card.is-lost .card-title span {
+  color: var(--dim);
+}
+
+.badge.lost {
+  color: var(--steel);
+  border-color: #c4ccd0;
 }
 
 .topbar .icon-btn + .icon-btn {
