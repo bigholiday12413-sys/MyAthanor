@@ -1979,21 +1979,57 @@ a.room-title {
 }
 
 /* 3つより多いときは縦積みの2列にする。横1列だと札が潰れて読めない。 */
-.seg-toggle.seg-4,
-.seg-toggle.seg-5,
-.seg-toggle.seg-6 {
+.seg-toggle.seg-4 {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
 
-/* 奇数の最後は1行を占める。片側だけ半端に残るより据わりがよい。 */
-.seg-toggle.seg-5 button:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
+/* 二段目の選び（アイテムの中の 糧／装備）。一段目より小さくして、
+   どちらが器でどちらが中身かを大きさでも言う。 */
+.sub-toggle {
+  margin-top: 6px;
 }
 
-.seg-toggle.seg-4 button,
-.seg-toggle.seg-5 button,
-.seg-toggle.seg-6 button {
+.sub-toggle[hidden] {
+  display: none;
+}
+
+.sub-toggle button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+/* プロセスの見積の向き。額の欄のすぐ下に置いて、この額の話だと分かるようにする。 */
+.gain-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.gain-check input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  flex: none;
+}
+
+.gain-check span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gain-check .px {
+  width: 14px;
+  height: 14px;
+}
+
+.seg-toggle.seg-4 button {
   justify-content: flex-start;
   padding-left: 12px;
 }

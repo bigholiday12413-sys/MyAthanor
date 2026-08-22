@@ -170,6 +170,10 @@ export const ADDED_COLUMNS = [
   /* 装備を失った日時。NULL なら手元にある。
      糧は食べれば消え、祭事は見聞が残るだけなので、失えるのは装備だけ。 */
   ['log', 'lost_at', 'TEXT'],
+  /* 見積ウォレットの向き。1 なら出ていくのではなく入ってくる。
+     収入は「買ったものの別」ではなくプロセスの結果なので、額の向きは
+     プロセスが持ち、完了したときログの入ってくる側へ移る。 */
+  ['mission', 'money_is_gain', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。
@@ -220,6 +224,13 @@ function applyRewrites(db) {
     DELETE FROM mission WHERE status = 'done'
       AND id IN (SELECT source_mission_id FROM log WHERE source_mission_id IS NOT NULL)
   `);
+
+  /* 収入を「別」として持つのをやめた。入ってくる額はプロセスの結果で、
+     糧・装備・祭事のような買ったものの別とは並ばない。
+     印だけ外して、入ってきた額（money_gained）はそのまま残す。
+     こうすると別を付けていないログ＝プロセスの顔に戻り、
+     額は＋付きで出たまま、集計も何も変わらない。 */
+  db.exec(`UPDATE log SET goods = NULL WHERE goods = 'income'`);
 
   /* 30分刻みへ揃えるのは記録の見た目を整えるだけの直しで、
      これができないからといって起動を止める理由が無い。

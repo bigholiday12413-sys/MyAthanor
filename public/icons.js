@@ -572,6 +572,35 @@ const POUCH = {
   },
 };
 
+/* アイテム＝糧と装備のくくり。買って手に入れた物なので、ひもを掛けた包みにする。
+   宝箱（レガシー）は蓋が丸く錠が付いていて、こちらは平らな面にひもの十字。
+   離れて見ても取り違えないよう、面の色も紙寄りにして木箱と分ける。 */
+const PARCEL = {
+  rows: [
+    '................',
+    '................',
+    '................',
+    '..oooooooooooo..',
+    '..occccppcccco..',
+    '..occccppcccco..',
+    '..occccppcccco..',
+    '..oppppppppppo..',
+    '..occccppcccco..',
+    '..occccppcccco..',
+    '..occccppcccco..',
+    '..oooooooooooo..',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  palette: {
+    o: WOOD_DARK, // 包みの縁
+    c: CREAM,     // 包み紙
+    p: WOOD,      // 掛けたひも
+  },
+};
+
 // 週の紙。7枚並べて曜日を数える。右下が折れていて、左の縁が少し欠けている。
 // 面は白より温かくしておく。白いカードの上に白い紙を置くと枠しか見えず、
 // 「点線の四角」になってしまう。欠けも1か所だけ。増やすと点線に戻る。
@@ -855,6 +884,7 @@ const SOURCES = {
   helm: HELM,
   'helm-lost': HELM_LOST,
   pouch: POUCH,
+  parcel: PARCEL,
   grimoire: GRIMOIRE,
   sigil: SIGIL,
   flame: FLAME,
@@ -913,7 +943,8 @@ export const KIND_ICON = {
   food: 'provision',
   gear: 'helm',
   feast: 'banner',
-  income: 'pouch',
+  // アイテム＝糧と装備のくくり。書き留めるときの一段目にだけ出る。
+  item: 'parcel',
   log: 'footsteps',
   mission: 'flask',
   process: 'flask-empty',

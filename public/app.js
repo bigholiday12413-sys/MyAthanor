@@ -138,15 +138,17 @@ function fmtDate(iso) {
 const STATUS_LABEL = { active: '予定', abandoned: '断念', done: '完了' };
 const KIND_LABEL = {
   idea: 'アイデア', log: 'ログ', food: '糧', gear: '装備', feast: '祭事',
-  income: '収入', process: 'プロセス', cycle: '循環',
+  process: 'プロセス', cycle: '循環', item: 'アイテム',
 };
 
-/* 糧・装備・祭事・収入はログの器に入っている。見た目の別だけここで引き直す。
-   収入だけは向きが逆で、出ていくのではなく入ってくる。 */
-const GOODS = ['food', 'gear', 'feast', 'income'];
+/* 糧・装備・祭事はログの器に入っている。見た目の別だけここで引き直す。 */
+const GOODS = ['food', 'gear', 'feast'];
 const isGoods = (kind) => GOODS.includes(kind);
-// 額が入ってくる側の別。額の見せ方も、資源の数え方もここで分かれる。
-const isIncome = (kind) => kind === 'income';
+/* 糧と装備は、どちらも「物を買った」ぶんで、後に物が残るかどうかだけが違う。
+   書き留めるときはまず アイテム としてひとくくりにし、中でどちらかを選ぶ。
+   ＋ の一段目に別を全部並べると、思いつきを1件入れるだけで選択肢を6つ読む。 */
+const ITEM_GOODS = ['food', 'gear'];
+const isItem = (kind) => ITEM_GOODS.includes(kind);
 // 失えるのは装備だけ。糧は食べれば消え、祭事は見聞が残るだけで物にならない。
 const canBeLost = (item) => item.goods === 'gear';
 // 別を付けていないログ（プロセスの完了で生まれたものと、素のまま書き留めたもの）は
@@ -325,9 +327,15 @@ function missionEdit(mission) {
             ${hourSelect(`mt-${id}`, 'estimated_time', minutesToHours(mission.estimated_time))}
           </div>
           <div class="field">
+            ${/* 収入はプロセスの結果。額そのものは同じなので欄はひとつにして、
+                 出ていくのか入ってくるのかだけを選ばせる。 */ ''}
             <label for="mm-${id}">ウォレット（円）</label>
             <input id="mm-${id}" type="number" step="1" min="0" name="estimated_money"
                    value="${mission.estimated_money}" />
+            <label class="gain-check">
+              <input type="checkbox" name="money_is_gain" ${mission.money_is_gain ? 'checked' : ''} />
+              <span>${icon('pouch')}入ってくる</span>
+            </label>
           </div>
         </div>
         ${
@@ -363,19 +371,26 @@ function missionEdit(mission) {
 
 /* 種が毎週いくら持っていくか。見積もりは1回ぶんなので 7 ÷ 周期を掛ける。
    この額が可処分から先に引かれるので、種の札にだけ出す。
-   周期と見積もりから暗算はできるが、頭の中でやらせる理由がない。 */
+   周期と見積もりから暗算はできるが、頭の中でやらせる理由がない。
+
+   ウォレットが入ってくる向きの種は、引かれるのではなく足されるぶん。
+   同じ顔で出すと符号を読み違えるので、そちらだけ＋にして色も変える。 */
 function weekShare(mission) {
   if (!mission.repeat_days) return '';
   const share = (value) => Math.round((value * 7) / mission.repeat_days);
-  // 0 のほうは書かない。タイムだけの種に「−¥0」が付くと、引かれた気がしてしまう。
-  const parts = [
-    [share(mission.estimated_time), fmtTime],
-    [share(mission.estimated_money), fmtMoney],
-  ]
-    .filter(([value]) => value)
-    .map(([value, format]) => `−${esc(format(value))}`);
-  if (!parts.length) return '';
-  return `<div class="card-meta"><span class="neg">週 ${parts.join(' · ')}</span></div>`;
+  const gain = Boolean(mission.money_is_gain);
+  // タイムはやれば必ず要るので、向きにかかわらず出ていくぶん。
+  const timeShare = share(mission.estimated_time);
+  const moneyShare = share(mission.estimated_money);
+  const parts = [];
+  // 0 のほうは書かない。タイムだけの種に「¥0」が付くと、引かれた気がしてしまう。
+  if (timeShare) parts.push(esc(fmtTime(timeShare)));
+  if (moneyShare && !gain) parts.push(esc(fmtMoney(moneyShare)));
+  const out = parts.length ? `<span>週 ${parts.join(' · ')}</span>` : '';
+  const inc = moneyShare && gain
+    ? `<span class="gain">週 ＋${esc(fmtMoney(moneyShare))}</span>`
+    : '';
+  return out || inc ? `<div class="card-meta">${out}${inc}</div>` : '';
 }
 
 function missionCard(mission, { showSource = true } = {}) {
@@ -425,7 +440,13 @@ function missionCard(mission, { showSource = true } = {}) {
         mission.estimated_time || mission.estimated_money
           ? `<div class="card-meta">
                <span>${done ? '実消費' : '見積'} ${esc(fmtTime(mission.estimated_time))}</span>
-               <span>${esc(fmtMoney(mission.estimated_money))}</span>
+               ${
+                 /* 入ってくる向きの見積は、出ていく額と同じ顔で並べない。
+                    済ませると使える量が増えるぶんなので、符号と色で向きを言う。 */
+                 mission.money_is_gain
+                   ? `<span class="gain">＋${esc(fmtMoney(mission.estimated_money))}</span>`
+                   : `<span>${esc(fmtMoney(mission.estimated_money))}</span>`
+               }
                ${mission.repeat_days ? `<span>${mission.repeat_days}日ごと</span>` : ''}
              </div>
              ${weekShare(mission)}`
@@ -468,8 +489,9 @@ function wireMissionActions(container, onChanged) {
     const form = event.target.closest('form[data-edit]');
     if (!form) return;
     event.preventDefault();
-    const { title, estimated_time, estimated_money, repeat_days, start_date, due_date } =
-      form.elements;
+    const {
+      title, estimated_time, estimated_money, money_is_gain, repeat_days, start_date, due_date,
+    } = form.elements;
     try {
       await api(`/missions/${form.dataset.edit}`, {
         method: 'PATCH',
@@ -477,6 +499,7 @@ function wireMissionActions(container, onChanged) {
           title: title.value,
           estimated_time: hoursToMinutes(estimated_time.value),
           estimated_money: Math.round(Number(estimated_money.value || 0)),
+          money_is_gain: money_is_gain.checked,
           // 種は周期を、そうでないものは日付を持つ。無いほうは触らない。
           ...(repeat_days
             ? { repeat_days: Math.round(Number(repeat_days.value || 0)) }
@@ -590,11 +613,14 @@ function tubeCard({ name, data, format, plannedLabel = '消費予定', href = nu
           ${
             /* 固定費。繰り返すぶんは先にここで引いてあるので、消費済みにも
                消費予定にも出てこない。引かれた覚えのない数字にならないよう、
-               使える量のすぐ上に置いて、引き算の途中だと読めるようにする。 */
+               使える量のすぐ上に置いて、引き算の途中だと読めるようにする。
+               赤も符号も付けない。赤字ではなく、毎週きまって出ていくぶんで、
+               性質は消費済みと同じ。赤はこのアプリでは使いすぎの合図なので、
+               当たり前に出ていくものに使うと、いつも何か起きているように見える。 */
             data.fixed
               ? `<div class="readout-row">
                    <span class="k">固定費</span>
-                   <span class="v neg">−${esc(format(data.fixed))}</span>
+                   <span class="v">${esc(format(data.fixed))}</span>
                  </div>`
               : ''
           }
@@ -1198,8 +1224,12 @@ function streamCard(item) {
    ここでは題だけを受け取り、入れても閉じずに次を待つ。
    詳細は後からストリームで開いて足せばよい。 */
 
-// 続けて書くときは種別が変わらないことがほとんどなので、前に選んだものを覚えておく。
+/* 続けて書くときは種別が変わらないことがほとんどなので、前に選んだものを覚えておく。
+   一段目は アイデア／プロセス／アイテム／祭事 の4つ。糧と装備は「アイテム」に
+   くくり、選んだときだけ中でどちらかを出す。ここに別を全部並べると、
+   思いつきを1件入れるだけで選択肢を読む手間のほうが大きくなる。 */
 let captureKind = 'idea';
+let captureItem = 'food';
 
 function openCapture() {
   if (document.querySelector('.modal-backdrop')) return;
@@ -1210,17 +1240,22 @@ function openCapture() {
     <form class="modal" id="capture">
       <h2>書き留める</h2>
       <div class="field">
-        <div class="seg-toggle seg-6" id="kind-toggle">
-          ${['idea', 'log', ...GOODS]
-            .map((kind) => {
+        <div class="seg-toggle seg-4" id="kind-toggle">
+          ${[['idea', 'idea'], ['log', 'process'], ['item', 'item'], ['feast', 'feast']]
+            .map(([kind, face]) =>
               // 素のログは、プロセスを経ずに直接書き留めた済んだこと。
               // 他の画面ではプロセスの顔（空フラスコ）で出しているので、ここも合わせる。
-              const face = kind === 'log' ? 'process' : kind;
-              return `<button type="button" data-kind="${kind}"
+              `<button type="button" data-kind="${kind}"
                 aria-pressed="${captureKind === kind}">${icon(KIND_ICON[face])}${
                 KIND_LABEL[face]
-              }</button>`;
-            })
+              }</button>`)
+            .join('')}
+        </div>
+        ${/* アイテムを選んだときだけ、中で 糧／装備 を選ぶ。
+             後に物が残るかどうかだけの違いなので、二段目でよい。 */ ''}
+        <div class="seg-toggle sub-toggle" id="item-toggle" hidden>
+          ${ITEM_GOODS.map((g) => `<button type="button" data-item="${g}"
+             aria-pressed="${captureItem === g}">${icon(KIND_ICON[g])}${KIND_LABEL[g]}</button>`)
             .join('')}
         </div>
       </div>
@@ -1238,14 +1273,15 @@ function openCapture() {
 
   const input = backdrop.querySelector('#capture-title');
   const money = backdrop.querySelector('#capture-money');
+  const itemToggle = backdrop.querySelector('#item-toggle');
 
-  /* 糧・装備・祭事は買ったもの、収入は入ってきたぶん。どちらも額を並べて受ける。
-     入ってくるか出ていくかは別が決めるので、欄はひとつでよい。
-     読み上げのために、どちらの額かは名前で言い分ける。 */
+  /* 額を持たないのはアイデアだけ。思いつきにはまだ値段が付いていない。
+     プロセス・アイテム・祭事は、その場で額まで入れてしまえる。 */
   function dressFor(kind) {
-    money.hidden = !isGoods(kind);
+    money.hidden = kind === 'idea';
     if (money.hidden) money.value = '';
-    money.setAttribute('aria-label', isIncome(kind) ? '入ってきた円' : '払った円');
+    money.setAttribute('aria-label', '払った円');
+    itemToggle.hidden = kind !== 'item';
   }
   dressFor(captureKind);
   input.focus();
@@ -1276,6 +1312,16 @@ function openCapture() {
     input.focus();
   });
 
+  itemToggle.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-item]');
+    if (!button) return;
+    captureItem = button.dataset.item;
+    for (const b of itemToggle.querySelectorAll('button')) {
+      b.setAttribute('aria-pressed', String(b.dataset.item === captureItem));
+    }
+    input.focus();
+  });
+
   // 変換の確定で送ってしまうと、打ちかけの文字が入る。変換中は受け取らない。
   let composing = false;
   input.addEventListener('compositionstart', () => {
@@ -1293,13 +1339,14 @@ function openCapture() {
     if (composing) return;
     const title = input.value.trim();
     if (!title) return input.focus();
-    const kind = captureKind;
+    // アイテムは器の名前なので、送るのは中で選んだ 糧／装備 のほう。
+    const kind = captureKind === 'item' ? captureItem : captureKind;
     const submit = backdrop.querySelector('button[type="submit"]');
     submit.disabled = true;
     try {
       await api('/entries', {
         method: 'POST',
-        body: { kind, title, money_spent: isGoods(kind) ? toYen(money.value) : 0 },
+        body: { kind, title, money_spent: kind === 'idea' ? 0 : toYen(money.value) },
       });
       put = true;
       toast(`${KIND_LABEL[kind === 'log' ? 'process' : kind]}を入れました`);
@@ -1597,8 +1644,13 @@ async function renderEntry(kind, entryId) {
             </select>
           </div>
           <div class="field">
+            ${/* 収入はプロセスの結果。立てるときから向きを選べるようにする。 */ ''}
             <label for="m-money">ウォレット（円）</label>
             <input id="m-money" type="number" step="1" min="0" value="0" />
+            <label class="gain-check">
+              <input type="checkbox" id="m-gain" />
+              <span>${icon('pouch')}入ってくる</span>
+            </label>
           </div>
         </div>
         <div class="row">
@@ -1656,7 +1708,7 @@ async function renderEntry(kind, entryId) {
       ${
         kind === 'log'
           ? `<div class="field">
-               <div class="seg-toggle seg-5" id="goods-toggle">
+               <div class="seg-toggle seg-4" id="goods-toggle">
                  ${['process', ...GOODS]
                    .map(
                      (face) => `<button type="button" data-goods="${
@@ -1674,14 +1726,13 @@ async function renderEntry(kind, entryId) {
                  ${hourSelect('time-spent', 'time-spent', minutesToHours(entry.time_spent))}
                </div>
                <div class="field">
-                 ${/* 別を収入に替えると、同じ欄が入ってくる額を受け取る側になる。
-                      名前は切り替えたその場で書き換える（保存を待つと、
-                      何を入れている欄なのか分からない時間ができる）。 */ ''}
-                 <label for="money-spent" id="money-label">${
-                   isIncome(entry.goods) ? '入ってきたウォレット（円）' : '消費ウォレット（円）'
+                 ${/* 額の向きはプロセスの側で決まっている（収入はプロセスの結果）。
+                      ここでは向きを変えず、いま額が入っているほうの欄として出す。 */ ''}
+                 <label for="money-spent">${
+                   entry.money_gained ? '入ってきたウォレット（円）' : '消費ウォレット（円）'
                  }</label>
                  <input id="money-spent" type="number" step="1" min="0"
-                        value="${isIncome(entry.goods) ? entry.money_gained : entry.money_spent}" />
+                        value="${entry.money_gained || entry.money_spent}" />
                </div>
              </div>
              ${
@@ -1802,10 +1853,6 @@ async function renderEntry(kind, entryId) {
       for (const b of goodsToggle.querySelectorAll('button')) {
         b.setAttribute('aria-pressed', String(b === button));
       }
-      // 収入に替えた時点で、額の欄は入ってくる側を受け取る欄になる。
-      const label = document.getElementById('money-label');
-      const gain = isIncome(button.dataset.goods);
-      if (label) label.textContent = gain ? '入ってきたウォレット（円）' : '消費ウォレット（円）';
     });
   }
 
@@ -1823,9 +1870,10 @@ async function renderEntry(kind, entryId) {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.goods = document.querySelector('#goods-toggle [aria-pressed="true"]').dataset.goods
         || null;
-      // 額の行き先は別が決める。収入なら入ってくる側へ、それ以外は出ていく側へ。
+      /* 額は、いま入っているほうの列へ書き戻す。向きはプロセスの結果として
+         決まっているので、題や日時を直しただけで出ていく側へ移らないようにする。 */
       const amount = Math.round(Number(document.getElementById('money-spent').value || 0));
-      if (isIncome(body.goods)) body.money_gained = amount;
+      if (entry.money_gained) body.money_gained = amount;
       else body.money_spent = amount;
     }
     try {
@@ -1913,6 +1961,7 @@ async function renderEntry(kind, entryId) {
           source_id: entry.id,
           estimated_time: hoursToMinutes(document.getElementById('m-time').value),
           estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
+          money_is_gain: document.getElementById('m-gain').checked,
           repeat_days: Number(document.getElementById('m-repeat')?.value || 0),
           start_date: document.getElementById('m-from').value || null,
           due_date: document.getElementById('m-to').value || null,
@@ -2143,7 +2192,7 @@ async function renderSettings() {
             fixedTime && settings.time_grid
               ? `<div class="stat-line">
                    <span>固定費</span>
-                   <span class="v neg">−${esc(fmtTime(fixedTime))}</span>
+                   <span class="v">${esc(fmtTime(fixedTime))}</span>
                  </div>
                  <div class="stat-line">
                    <span>使える量</span>
@@ -2168,7 +2217,7 @@ async function renderSettings() {
             fixedMoney
               ? `<div class="stat-line">
                    <span>固定費</span>
-                   <span class="v neg">−${esc(fmtMoney(fixedMoney))}</span>
+                   <span class="v">${esc(fmtMoney(fixedMoney))}</span>
                  </div>`
               : ''
           }

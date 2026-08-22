@@ -200,17 +200,17 @@ export function seed(db, transaction) {
     bought('薪能', 11, 4500, 'feast');
     bought('友人の祝い', 21, 8000, 'feast');
 
-    /* 収入＝入ってきたぶん。報酬と違って来た週にだけ効くので、
-       その週の使える量が増えているのが管で見える。 */
+    /* 収入＝やり遂げたプロセスの結果。別は付かないのでプロセスの顔のまま、
+       額だけが入ってくる側に入る。来た週の使える量が増えるのが管で見える。 */
     const gained = (title, days, money) =>
       run(
-        `INSERT INTO log (title, occurred_at, time_spent, money_spent, money_gained, goods)
-         VALUES (?, ?, 0, 0, ?, 'income')`,
+        `INSERT INTO log (title, occurred_at, time_spent, money_spent, money_gained)
+         VALUES (?, ?, 0, 0, ?)`,
         title,
         iso(days),
         money,
       );
-    gained('原稿料', 2, 32000);
+    gained('原稿を納める', 2, 32000);
     gained('古い道具を譲る', 17, 8500);
 
     /* 繰り返すプロセス。種だけ置いておくと、開いたときに先の回が生えてくる。
