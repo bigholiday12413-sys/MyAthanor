@@ -58,9 +58,9 @@ api.get('/stream', handle((req, res) => {
 api.post('/entries', handle((req, res) => {
   const { kind, title, money_spent } = req.body ?? {};
   if (kind === 'idea') return res.status(201).json(store.createIdea({ title }));
-  if (kind === 'log') return res.status(201).json(store.createLog({ title }));
-  /* 糧・装備・祭事・収入はログの器に入れ、別と額だけ添える。
-     入ってくるか出ていくかは別が決めるので、額はひとつ受け取れば足りる。 */
+  // 別を付けないログも額を持てる。＋で額を入れられるのはアイデア以外すべて。
+  if (kind === 'log') return res.status(201).json(store.createLog({ title, money_spent }));
+  // 糧・装備・祭事はログの器に入れ、別と額だけ添える。
   if (store.isGoods(kind)) {
     return res.status(201).json(store.createLog({ title, money_spent, goods: kind }));
   }
