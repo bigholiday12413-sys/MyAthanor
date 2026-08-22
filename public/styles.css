@@ -1994,7 +1994,13 @@ a.room-title {
   display: none;
 }
 
-.sub-toggle button {
+/* 一段目と同じ左寄せにする。中央寄せのままだと、上の4つと字の頭が揃わず、
+   二段目だけ別の並びに見える。
+   `.seg-toggle button`（中央寄せ）と重みが同じだと後に書いたほうが勝つので、
+   一段目の `.seg-toggle.seg-4 button` と同じ重みで書く。 */
+.seg-toggle.sub-toggle button {
+  justify-content: flex-start;
+  padding-left: 12px;
   min-height: 40px;
   font-size: 13px;
 }
