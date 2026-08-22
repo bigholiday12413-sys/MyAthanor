@@ -171,9 +171,14 @@ export const ADDED_COLUMNS = [
      糧は食べれば消え、祭事は見聞が残るだけなので、失えるのは装備だけ。 */
   ['log', 'lost_at', 'TEXT'],
   /* 見積ウォレットの向き。1 なら出ていくのではなく入ってくる。
-     収入は「買ったものの別」ではなくプロセスの結果なので、額の向きは
-     プロセスが持ち、完了したときログの入ってくる側へ移る。 */
+     いまは使っていない（出ていく額と入ってくる額を別々に持つようにしたため）。
+     列は消さない決まりなので、移し替えの目印として残してある。 */
   ['mission', 'money_is_gain', 'INTEGER NOT NULL DEFAULT 0'],
+  /* 入ってくる見積。出ていく見積（estimated_money）と別に持つ。
+     ひとつのプロセスが、払いも受け取りも持つことがある
+     （材料を買って作って売る、など）。向きの旗ひとつだと、
+     どちらか片方しか言えなかった。 */
+  ['mission', 'estimated_gain', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // 列を足す。pragma_table_info が使えない環境のために、重複エラーは握りつぶす。
@@ -223,6 +228,15 @@ function applyRewrites(db) {
   db.exec(`
     DELETE FROM mission WHERE status = 'done'
       AND id IN (SELECT source_mission_id FROM log WHERE source_mission_id IS NOT NULL)
+  `);
+
+  /* 見積ウォレットの向きを旗で持つのをやめ、出ていく額と入ってくる額を
+     別々の列にした。旗が立っている行は、額を入ってくる側へ移してから旗を倒す。
+     旗を倒すので、次の起動からは条件に合う行が無くなる。 */
+  db.exec(`
+    UPDATE mission
+       SET estimated_gain = estimated_money, estimated_money = 0, money_is_gain = 0
+     WHERE money_is_gain = 1
   `);
 
   /* 収入を「別」として持つのをやめた。入ってくる額はプロセスの結果で、

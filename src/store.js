@@ -157,17 +157,15 @@ function goodsOf(value) {
   return value;
 }
 
-/* 額の向きはログ自身が持つ。出ていくぶんは money_spent、入ってくるぶんは
-   money_gained。向きを決めるのはプロセスの側で、完了したときにどちらの列へ
-   移すかが決まる。どちらの列にも額が入った行は作らせない。両方に入ると、
-   同じ1件が使える量を増やしながら消費済みも増やすことになる。
-
-   渡されたほうを採り、渡されなかったほうは 0 にする。
-   どちらも渡されなければ、いまの向きと額をそのまま保つ。 */
+/* 出ていくぶんは money_spent、入ってくるぶんは money_gained。
+   ひとつの記録が両方を持つことがある（材料を買って作って売る、など）ので、
+   片方を入れたらもう片方を 0 にする、という潰し方はしない。
+   渡された列だけを書き換え、渡されなかった列はそのまま残す。 */
 function moneyOf({ spent, gained }, current = { spent: 0, gained: 0 }) {
-  if (gained !== undefined) return { spent: 0, gained: int(gained) };
-  if (spent !== undefined) return { spent: int(spent), gained: 0 };
-  return current;
+  return {
+    spent: spent === undefined ? current.spent : int(spent),
+    gained: gained === undefined ? current.gained : int(gained),
+  };
 }
 
 export function createLog({
@@ -445,7 +443,7 @@ export function createMission({
   start_date,
   due_date,
   repeat_days,
-  money_is_gain,
+  estimated_gain,
 }) {
   // 大釜に入れる場合は、器と同じ元エントリに揃える。
   let sourceType = source_type;
@@ -472,7 +470,7 @@ export function createMission({
     .prepare(`
       INSERT INTO mission
         (title, source_type, source_id, status, estimated_time, estimated_money,
-         created_at, cauldron_id, start_date, due_date, repeat_days, money_is_gain)
+         created_at, cauldron_id, start_date, due_date, repeat_days, estimated_gain)
       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
@@ -486,7 +484,7 @@ export function createMission({
       startKey,
       dueKey,
       every,
-      money_is_gain ? 1 : 0,
+      int(estimated_gain),
     );
   refreshCauldron(cauldron_id);
   return getMission(Number(lastInsertRowid));
@@ -569,7 +567,7 @@ function growRepeats(now = new Date()) {
           db.prepare(`
             INSERT INTO mission
               (title, source_type, source_id, status, estimated_time, estimated_money,
-               created_at, due_date, repeat_of, money_is_gain)
+               created_at, due_date, repeat_of, estimated_gain)
             VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
           `).run(
             seed.title,
@@ -580,7 +578,7 @@ function growRepeats(now = new Date()) {
             nowIso(),
             key,
             seed.id,
-            seed.money_is_gain,
+            seed.estimated_gain,
           );
           made += 1;
         }
@@ -667,7 +665,7 @@ export function listMissionsBySource(source_type, source_id) {
 
 export function updateMission(
   id,
-  { title, estimated_time, estimated_money, start_date, due_date, repeat_days, money_is_gain },
+  { title, estimated_time, estimated_money, estimated_gain, start_date, due_date, repeat_days },
 ) {
   const row = db.prepare(`SELECT * FROM mission WHERE id = ?`).get(id);
   if (!row) throw notFound('mission');
@@ -681,7 +679,7 @@ export function updateMission(
   db.prepare(`
     UPDATE mission
        SET title = ?, estimated_time = ?, estimated_money = ?, start_date = ?, due_date = ?,
-           repeat_days = ?, money_is_gain = ?
+           repeat_days = ?, estimated_gain = ?
      WHERE id = ?
   `).run(
     title === undefined ? row.title : requireTitle(title),
@@ -690,7 +688,7 @@ export function updateMission(
     startKey,
     dueKey,
     every,
-    (money_is_gain === undefined ? row.money_is_gain : money_is_gain) ? 1 : 0,
+    estimated_gain === undefined ? row.estimated_gain : int(estimated_gain),
     id,
   );
   // 周期を止めたら、まだ手を付けていない先のぶんは引き上げる。
@@ -719,9 +717,9 @@ export function completeMission(id) {
     }
 
     const at = nowIso();
-    /* 収入はプロセスの結果。見積に「入ってくる」向きが付いていれば、
-       その額は消費済みではなく入ってきた側の列へ移す。 */
-    const gain = Boolean(mission.money_is_gain);
+    /* 収入はプロセスの結果。払いと受け取りは別の列で持っているので、
+       両方そのままログの同じ側へ移す。片方だけのプロセスは、
+       もう片方が 0 のまま移るだけ。 */
     const { lastInsertRowid } = db
       .prepare(`
         INSERT INTO log
@@ -733,8 +731,8 @@ export function completeMission(id) {
         mission.title,
         at,
         mission.estimated_time,
-        gain ? 0 : mission.estimated_money,
-        gain ? mission.estimated_money : 0,
+        mission.estimated_money,
+        mission.estimated_gain,
         mission.source_type,
         mission.source_id,
         mission.repeat_of,
@@ -796,17 +794,17 @@ export function isMissionStatus(status) {
 function fixedPerWeek() {
   return db
     .prepare(`
-      SELECT estimated_time, estimated_money, repeat_days, money_is_gain
+      SELECT estimated_time, estimated_money, estimated_gain, repeat_days
       FROM mission WHERE status = 'active' AND repeat_days IS NOT NULL
     `)
     .all()
     .reduce(
       (sum, seed) => {
-        const perWeek = Math.round((seed.estimated_money * 7) / seed.repeat_days);
+        const perWeek = (value) => Math.round((value * 7) / seed.repeat_days);
         return {
-          time: sum.time + Math.round((seed.estimated_time * 7) / seed.repeat_days),
-          money: sum.money + (seed.money_is_gain ? 0 : perWeek),
-          money_gain: sum.money_gain + (seed.money_is_gain ? perWeek : 0),
+          time: sum.time + perWeek(seed.estimated_time),
+          money: sum.money + perWeek(seed.estimated_money),
+          money_gain: sum.money_gain + perWeek(seed.estimated_gain),
           count: sum.count + 1,
         };
       },
@@ -985,13 +983,12 @@ export function resolveBudget(
    どの種から来たかはログ自身が持つ。持たないものが普通のログ。 */
 const NOT_FROM_REPEAT = `WHERE l.repeat_of IS NULL`;
 
-/* 消費予定のウォレット。入ってくる向きのプロセスは足さない。
-   出ていく話の中に混ぜると、稼ぐ予定を立てるほど使う予定が増えて見える。
-   タイムのほうは向きを見ない。入ってくる仕事でも、やる時間は要るため。
+/* 消費予定のウォレットは、出ていく見積だけ。入ってくる見積は別の列なので
+   そもそも混ざらない。稼ぐ予定を立てるほど使う予定が増えて見える、を避ける。
+   タイムのほうは向きを持たない。入ってくる仕事でも、やる時間は要るため。
    入ってくる見込みを使える量へ先に足しもしない。まだ入っていないぶんを
    足すと、来なかったときにそのまま使いすぎになる。 */
-const PLANNED_MONEY =
-  `COALESCE(SUM(CASE WHEN m.money_is_gain = 1 THEN 0 ELSE m.estimated_money END), 0)`;
+const PLANNED_MONEY = `COALESCE(SUM(m.estimated_money), 0)`;
 
 function consumedIn(kind, period) {
   return db

@@ -327,16 +327,18 @@ function missionEdit(mission) {
             ${hourSelect(`mt-${id}`, 'estimated_time', minutesToHours(mission.estimated_time))}
           </div>
           <div class="field">
-            ${/* 収入はプロセスの結果。額そのものは同じなので欄はひとつにして、
-                 出ていくのか入ってくるのかだけを選ばせる。 */ ''}
             <label for="mm-${id}">ウォレット（円）</label>
             <input id="mm-${id}" type="number" step="1" min="0" name="estimated_money"
                    value="${mission.estimated_money}" />
-            <label class="gain-check">
-              <input type="checkbox" name="money_is_gain" ${mission.money_is_gain ? 'checked' : ''} />
-              <span>${icon('pouch')}入ってくる</span>
-            </label>
           </div>
+        </div>
+        ${/* 払いと受け取りは別の欄。ひとつのプロセスが両方を持つことがある
+             （材料を買って作って売る、など）。向きの選び方ひとつだと、
+             どちらか片方しか言えなかった。 */ ''}
+        <div class="field">
+          <label for="mg-${id}">${icon('pouch')}収入（円）</label>
+          <input id="mg-${id}" type="number" step="1" min="0" name="estimated_gain"
+                 value="${mission.estimated_gain}" />
         </div>
         ${
           seed
@@ -373,24 +375,24 @@ function missionEdit(mission) {
    この額が可処分から先に引かれるので、種の札にだけ出す。
    周期と見積もりから暗算はできるが、頭の中でやらせる理由がない。
 
-   ウォレットが入ってくる向きの種は、引かれるのではなく足されるぶん。
-   同じ顔で出すと符号を読み違えるので、そちらだけ＋にして色も変える。 */
+   入ってくるぶんは引かれるのではなく足されるぶんなので、別の札にして
+   ＋と色で向きを言う。ひとつの種が両方を持つこともある。 */
 function weekShare(mission) {
   if (!mission.repeat_days) return '';
   const share = (value) => Math.round((value * 7) / mission.repeat_days);
-  const gain = Boolean(mission.money_is_gain);
-  // タイムはやれば必ず要るので、向きにかかわらず出ていくぶん。
   const timeShare = share(mission.estimated_time);
   const moneyShare = share(mission.estimated_money);
-  const parts = [];
+  const gainShare = share(mission.estimated_gain);
   // 0 のほうは書かない。タイムだけの種に「¥0」が付くと、引かれた気がしてしまう。
-  if (timeShare) parts.push(esc(fmtTime(timeShare)));
-  if (moneyShare && !gain) parts.push(esc(fmtMoney(moneyShare)));
-  const out = parts.length ? `<span>週 ${parts.join(' · ')}</span>` : '';
-  const inc = moneyShare && gain
-    ? `<span class="gain">週 ＋${esc(fmtMoney(moneyShare))}</span>`
-    : '';
-  return out || inc ? `<div class="card-meta">${out}${inc}</div>` : '';
+  const out = [
+    timeShare ? esc(fmtTime(timeShare)) : '',
+    moneyShare ? esc(fmtMoney(moneyShare)) : '',
+  ].filter(Boolean);
+  if (!out.length && !gainShare) return '';
+  // 「週」は先頭に一度だけ。出ていくぶんと入ってくるぶんで二度言わない。
+  const head = out.length ? `週 ${out.join(' · ')}` : '週';
+  const gain = gainShare ? `<span class="gain">＋${esc(fmtMoney(gainShare))}</span>` : '';
+  return `<div class="card-meta"><span>${head}</span>${gain}</div>`;
 }
 
 function missionCard(mission, { showSource = true } = {}) {
@@ -437,15 +439,16 @@ function missionCard(mission, { showSource = true } = {}) {
         mission.repeat_days || mission.repeat_of ? icon('cycle', 'cycle-mark') : ''
       }</div>
       ${
-        mission.estimated_time || mission.estimated_money
+        mission.estimated_time || mission.estimated_money || mission.estimated_gain
           ? `<div class="card-meta">
                <span>${done ? '実消費' : '見積'} ${esc(fmtTime(mission.estimated_time))}</span>
+               <span>${esc(fmtMoney(mission.estimated_money))}</span>
                ${
-                 /* 入ってくる向きの見積は、出ていく額と同じ顔で並べない。
+                 /* 入ってくるぶんは、出ていく額と同じ顔で並べない。
                     済ませると使える量が増えるぶんなので、符号と色で向きを言う。 */
-                 mission.money_is_gain
-                   ? `<span class="gain">＋${esc(fmtMoney(mission.estimated_money))}</span>`
-                   : `<span>${esc(fmtMoney(mission.estimated_money))}</span>`
+                 mission.estimated_gain
+                   ? `<span class="gain">＋${esc(fmtMoney(mission.estimated_gain))}</span>`
+                   : ''
                }
                ${mission.repeat_days ? `<span>${mission.repeat_days}日ごと</span>` : ''}
              </div>
@@ -490,7 +493,7 @@ function wireMissionActions(container, onChanged) {
     if (!form) return;
     event.preventDefault();
     const {
-      title, estimated_time, estimated_money, money_is_gain, repeat_days, start_date, due_date,
+      title, estimated_time, estimated_money, estimated_gain, repeat_days, start_date, due_date,
     } = form.elements;
     try {
       await api(`/missions/${form.dataset.edit}`, {
@@ -499,7 +502,7 @@ function wireMissionActions(container, onChanged) {
           title: title.value,
           estimated_time: hoursToMinutes(estimated_time.value),
           estimated_money: Math.round(Number(estimated_money.value || 0)),
-          money_is_gain: money_is_gain.checked,
+          estimated_gain: Math.round(Number(estimated_gain.value || 0)),
           // 種は周期を、そうでないものは日付を持つ。無いほうは触らない。
           ...(repeat_days
             ? { repeat_days: Math.round(Number(repeat_days.value || 0)) }
@@ -1206,14 +1209,20 @@ function streamCard(item) {
       }
       <div class="card-meta">
         ${
-          /* 収入は入ってきたぶんなので、出ていった額と同じ顔で並べない。
-             符号を付けて向きを言い、色も分ける。 */
-          item.money_gained
-            ? `<span class="gain">＋${esc(fmtMoney(item.money_gained))}</span>`
-            : item.kind === 'log' && (item.time_spent || item.money_spent)
-              ? `<span>${esc(fmtTime(item.time_spent))}</span>
-                 <span>${esc(fmtMoney(item.money_spent))}</span>`
-              : ''
+          /* 入ってきたぶんは、出ていった額と同じ顔で並べない。符号と色で向きを言う。
+             ひとつの記録が両方を持つこともある（払って、受け取った）。 */
+          item.kind === 'log' && (item.time_spent || item.money_spent || item.money_gained)
+            ? `${
+                item.time_spent || item.money_spent
+                  ? `<span>${esc(fmtTime(item.time_spent))}</span>
+                     <span>${esc(fmtMoney(item.money_spent))}</span>`
+                  : ''
+              }${
+                item.money_gained
+                  ? `<span class="gain">＋${esc(fmtMoney(item.money_gained))}</span>`
+                  : ''
+              }`
+            : ''
         }
       </div>
     </a>
@@ -1644,14 +1653,14 @@ async function renderEntry(kind, entryId) {
             </select>
           </div>
           <div class="field">
-            ${/* 収入はプロセスの結果。立てるときから向きを選べるようにする。 */ ''}
             <label for="m-money">ウォレット（円）</label>
             <input id="m-money" type="number" step="1" min="0" value="0" />
-            <label class="gain-check">
-              <input type="checkbox" id="m-gain" />
-              <span>${icon('pouch')}入ってくる</span>
-            </label>
           </div>
+        </div>
+        ${/* 立てるときから、払いと受け取りの両方を入れられる。 */ ''}
+        <div class="field">
+          <label for="m-gain">${icon('pouch')}収入（円）</label>
+          <input id="m-gain" type="number" step="1" min="0" value="0" />
         </div>
         <div class="row">
           <div class="field">
@@ -1726,15 +1735,23 @@ async function renderEntry(kind, entryId) {
                  ${hourSelect('time-spent', 'time-spent', minutesToHours(entry.time_spent))}
                </div>
                <div class="field">
-                 ${/* 額の向きはプロセスの側で決まっている（収入はプロセスの結果）。
-                      ここでは向きを変えず、いま額が入っているほうの欄として出す。 */ ''}
-                 <label for="money-spent">${
-                   entry.money_gained ? '入ってきたウォレット（円）' : '消費ウォレット（円）'
-                 }</label>
+                 <label for="money-spent">消費ウォレット（円）</label>
                  <input id="money-spent" type="number" step="1" min="0"
-                        value="${entry.money_gained || entry.money_spent}" />
+                        value="${entry.money_spent}" />
                </div>
              </div>
+             ${
+               /* 入ってきたぶんは、それを持つ記録にだけ欄を出す。収入はプロセスの
+                  結果なので、素のログに入れる欄を常設する理由がない。
+                  持っている記録では直せる（数え違いを後から正せる）。 */
+               entry.money_gained
+                 ? `<div class="field">
+                      <label for="money-gained">${icon('pouch')}入ってきたウォレット（円）</label>
+                      <input id="money-gained" type="number" step="1" min="0"
+                             value="${entry.money_gained}" />
+                    </div>`
+                 : ''
+             }
              ${
                /* 失えるのは装備だけ。払った額は動かさないので、消すのとは別の道にする
                   （買った記録まで消すと、何にいくら使ったかが記録から抜ける）。 */
@@ -1870,11 +1887,10 @@ async function renderEntry(kind, entryId) {
       body.time_spent = hoursToMinutes(document.getElementById('time-spent').value);
       body.goods = document.querySelector('#goods-toggle [aria-pressed="true"]').dataset.goods
         || null;
-      /* 額は、いま入っているほうの列へ書き戻す。向きはプロセスの結果として
-         決まっているので、題や日時を直しただけで出ていく側へ移らないようにする。 */
-      const amount = Math.round(Number(document.getElementById('money-spent').value || 0));
-      if (entry.money_gained) body.money_gained = amount;
-      else body.money_spent = amount;
+      body.money_spent = Math.round(Number(document.getElementById('money-spent').value || 0));
+      // 入ってきたぶんの欄は、持っている記録にだけ出ている。
+      const gained = document.getElementById('money-gained');
+      if (gained) body.money_gained = Math.round(Number(gained.value || 0));
     }
     try {
       await api(path, { method: 'PATCH', body });
@@ -1961,7 +1977,7 @@ async function renderEntry(kind, entryId) {
           source_id: entry.id,
           estimated_time: hoursToMinutes(document.getElementById('m-time').value),
           estimated_money: Math.round(Number(document.getElementById('m-money').value || 0)),
-          money_is_gain: document.getElementById('m-gain').checked,
+          estimated_gain: Math.round(Number(document.getElementById('m-gain').value || 0)),
           repeat_days: Number(document.getElementById('m-repeat')?.value || 0),
           start_date: document.getElementById('m-from').value || null,
           due_date: document.getElementById('m-to').value || null,
